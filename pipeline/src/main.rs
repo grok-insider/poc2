@@ -55,6 +55,19 @@ enum Command {
         /// Bundle path. `.gz` auto-detected.
         bundle: PathBuf,
     },
+    /// Re-fetch the Craft of Exile snapshot and report which mods could
+    /// not be joined to engine ModIds (input for new entries in
+    /// `pipeline/data/coe_aliases.toml`).
+    DiagnoseCoe {
+        /// Bundle path to load engine mods from. `.gz` auto-detected.
+        bundle: PathBuf,
+        /// Limit how many unmatched names to print. `0` = print all.
+        #[arg(long, default_value = "50")]
+        limit: usize,
+        /// Optional local CoE JSON file (skips the network fetch).
+        #[arg(long)]
+        coe_file: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -108,6 +121,71 @@ async fn main() -> Result<()> {
                 println!("  • {} = {}", s.name, s.revision);
             }
         }
+        Command::DiagnoseCoe {
+            bundle,
+            limit,
+            coe_file,
+        } => {
+            run_diagnose_coe(&bundle, limit, coe_file.as_deref()).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn run_diagnose_coe(
+    bundle_path: &std::path::Path,
+    limit: usize,
+    coe_file: Option<&std::path::Path>,
+) -> Result<()> {
+    use poc2_pipeline::normalize::coe_to_bundle::unmatched_coe_mods;
+    use poc2_pipeline::sources::coe;
+    let bundle = poc2_data::io::read_bundle(bundle_path)?;
+
+    let snapshot = if let Some(path) = coe_file {
+        let raw = std::fs::read_to_string(path)?;
+        let json_part = raw.trim().strip_prefix("poecd=").unwrap_or(raw.trim());
+        let data: coe::CoeData = serde_json::from_str(json_part)?;
+        coe::CoeSnapshot {
+            data,
+            revisions: poc2_data::SourceRevisions::default(),
+        }
+    } else {
+        let client = poc2_pipeline::http::make_client();
+        coe::fetch(&client).await?
+    };
+
+    let unmatched = unmatched_coe_mods(&snapshot, &bundle);
+    let total_coe = snapshot.data.tiers.len();
+    let matched = total_coe.saturating_sub(unmatched.len());
+    let rate = if total_coe == 0 {
+        0.0
+    } else {
+        matched as f64 / total_coe as f64 * 100.0
+    };
+
+    println!(
+        "coe→engine join: {matched}/{total_coe} ({rate:.1}%)  unmatched: {}",
+        unmatched.len()
+    );
+    println!(
+        "target: ≥ 80%; gap: {} mods",
+        80usize.saturating_sub(rate as usize) * total_coe / 100
+    );
+
+    let mut by_freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for name in &unmatched {
+        *by_freq.entry(name.clone()).or_insert(0) += 1;
+    }
+    let mut sorted: Vec<(String, usize)> = by_freq.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let printed = if limit == 0 {
+        sorted.len()
+    } else {
+        limit.min(sorted.len())
+    };
+    println!("\ntop {printed} unmatched CoE mod names (add aliases for high-freq entries):");
+    for (name, count) in sorted.iter().take(printed) {
+        println!("  {count:>4}× {name}");
     }
     Ok(())
 }

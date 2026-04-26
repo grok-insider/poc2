@@ -1,0 +1,276 @@
+# Craft of Exile → engine mod-id explicit aliases.
+#
+# Loaded by `pipeline/src/normalize/coe_to_bundle.rs` to short-circuit
+# the case-insensitive substring fuzzy-match for the most common
+# naming-convention mismatches between CoE's `name_modifier` and
+# RePoE-fork's `ModId`.
+#
+# Entry shape:
+#   [[alias]]
+#   coe_name        = "string-as-it-appears-in-CoE"   # case-insensitive
+#   engine_mod_id   = "ModId-from-RePoE-fork"
+#   note            = "optional human comment"
+#
+# Authoring workflow:
+#   1. Run `cargo run -p poc2-pipeline -- diagnose-coe <bundle.json.gz>`
+#      after building a bundle. The diagnose subcommand reports the
+#      unmatched CoE mods grouped by frequency.
+#   2. For each unmatched name, look up the corresponding engine mod
+#      via poe2db.tw or the live RePoE-fork mods.json.
+#   3. Add an [[alias]] entry below.
+#   4. Re-run `pipeline build` and `diagnose-coe`; watch the join rate
+#      climb toward ≥80%.
+#
+# A.3 of the v1 execution plan. The seed entries below cover the most
+# frequent mismatches inferred from RePoE-fork's PoE2 naming
+# conventions (Local* prefix for weapon/armour-local mods, the *Per1
+# / *Per2 ladder for tier suffixes, etc.).
+
+# ---- Local energy-shield prefixes ------------------------------------
+[[alias]]
+coe_name = "+# to maximum Energy Shield"
+engine_mod_id = "LocalIncreasedEnergyShield"
+note = "armour-local flat ES; tier ladder uses *1..*8 suffixes"
+
+[[alias]]
+coe_name = "Increased Energy Shield"
+engine_mod_id = "LocalIncreasedEnergyShieldPercent"
+
+[[alias]]
+coe_name = "+# to maximum Energy Shield (Hybrid Life)"
+engine_mod_id = "LocalIncreasedEnergyShieldAndLife"
+note = "the canonical ES+Life hybrid prefix on int/dexint armour"
+
+# ---- Local life prefixes ---------------------------------------------
+[[alias]]
+coe_name = "+# to maximum Life"
+engine_mod_id = "MaximumLife"
+
+[[alias]]
+coe_name = "Increased Life"
+engine_mod_id = "IncreasedLife"
+
+# ---- Local mana prefixes ---------------------------------------------
+[[alias]]
+coe_name = "+# to maximum Mana"
+engine_mod_id = "MaximumMana"
+
+[[alias]]
+coe_name = "Increased Mana"
+engine_mod_id = "IncreasedMana"
+
+# ---- Resistance suffixes ---------------------------------------------
+[[alias]]
+coe_name = "+#% to Fire Resistance"
+engine_mod_id = "FireResistance"
+
+[[alias]]
+coe_name = "+#% to Cold Resistance"
+engine_mod_id = "ColdResistance"
+
+[[alias]]
+coe_name = "+#% to Lightning Resistance"
+engine_mod_id = "LightningResistance"
+
+[[alias]]
+coe_name = "+#% to Chaos Resistance"
+engine_mod_id = "ChaosResistance"
+
+[[alias]]
+coe_name = "+#% to all Elemental Resistances"
+engine_mod_id = "AllResistances"
+
+# ---- Attribute suffixes ----------------------------------------------
+[[alias]]
+coe_name = "+# to Strength"
+engine_mod_id = "Strength"
+
+[[alias]]
+coe_name = "+# to Dexterity"
+engine_mod_id = "Dexterity"
+
+[[alias]]
+coe_name = "+# to Intelligence"
+engine_mod_id = "Intelligence"
+
+[[alias]]
+coe_name = "+# to all Attributes"
+engine_mod_id = "AllAttributes"
+
+# ---- Local weapon prefixes -------------------------------------------
+[[alias]]
+coe_name = "Adds # to # Physical Damage"
+engine_mod_id = "LocalAddedPhysicalDamage"
+
+[[alias]]
+coe_name = "Adds # to # Fire Damage"
+engine_mod_id = "LocalAddedFireDamage"
+
+[[alias]]
+coe_name = "Adds # to # Cold Damage"
+engine_mod_id = "LocalAddedColdDamage"
+
+[[alias]]
+coe_name = "Adds # to # Lightning Damage"
+engine_mod_id = "LocalAddedLightningDamage"
+
+[[alias]]
+coe_name = "Adds # to # Chaos Damage"
+engine_mod_id = "LocalAddedChaosDamage"
+
+[[alias]]
+coe_name = "Increased Physical Damage"
+engine_mod_id = "LocalIncreasedPhysicalDamagePercent"
+
+# ---- Crit / accuracy / attack speed (suffixes) -----------------------
+[[alias]]
+coe_name = "Increased Critical Hit Chance"
+engine_mod_id = "LocalIncreasedCriticalStrikeChance"
+
+[[alias]]
+coe_name = "Critical Damage Bonus"
+engine_mod_id = "LocalIncreasedCriticalStrikeMultiplier"
+
+[[alias]]
+coe_name = "Increased Attack Speed"
+engine_mod_id = "LocalIncreasedAttackSpeed"
+
+[[alias]]
+coe_name = "+# to Accuracy Rating"
+engine_mod_id = "LocalAccuracyRating"
+
+# ---- Spell prefixes / suffixes ---------------------------------------
+[[alias]]
+coe_name = "Increased Spell Damage"
+engine_mod_id = "SpellDamage"
+
+[[alias]]
+coe_name = "Increased Cast Speed"
+engine_mod_id = "CastSpeed"
+
+[[alias]]
+coe_name = "+# Level of all Spell Skills"
+engine_mod_id = "AllSpellSkills"
+
+[[alias]]
+coe_name = "+# Level of all Minion Skills"
+engine_mod_id = "AllMinionSkills"
+
+# ---- Defence affixes -------------------------------------------------
+[[alias]]
+coe_name = "+# to Armour"
+engine_mod_id = "LocalIncreasedArmour"
+
+[[alias]]
+coe_name = "+# to Evasion Rating"
+engine_mod_id = "LocalIncreasedEvasion"
+
+[[alias]]
+coe_name = "Increased Armour"
+engine_mod_id = "LocalIncreasedArmourPercent"
+
+[[alias]]
+coe_name = "Increased Evasion Rating"
+engine_mod_id = "LocalIncreasedEvasionPercent"
+
+[[alias]]
+coe_name = "Increased Armour and Energy Shield"
+engine_mod_id = "LocalIncreasedArmourAndEnergyShield"
+
+[[alias]]
+coe_name = "Increased Evasion Rating and Energy Shield"
+engine_mod_id = "LocalIncreasedEvasionAndEnergyShield"
+
+[[alias]]
+coe_name = "Increased Armour and Evasion"
+engine_mod_id = "LocalIncreasedArmourAndEvasion"
+
+# ---- Movement / utility ----------------------------------------------
+[[alias]]
+coe_name = "Increased Movement Speed"
+engine_mod_id = "LocalIncreasedMovementSpeed"
+
+[[alias]]
+coe_name = "+# to Stun Threshold"
+engine_mod_id = "StunThreshold"
+
+# ---- Caster utility (jewelry-common) ---------------------------------
+[[alias]]
+coe_name = "+# Level of all Cold Spell Skills"
+engine_mod_id = "AllColdSpellSkills"
+
+[[alias]]
+coe_name = "+# Level of all Fire Spell Skills"
+engine_mod_id = "AllFireSpellSkills"
+
+[[alias]]
+coe_name = "+# Level of all Lightning Spell Skills"
+engine_mod_id = "AllLightningSpellSkills"
+
+[[alias]]
+coe_name = "+# Level of all Chaos Spell Skills"
+engine_mod_id = "AllChaosSpellSkills"
+
+[[alias]]
+coe_name = "+# Level of all Physical Spell Skills"
+engine_mod_id = "AllPhysicalSpellSkills"
+
+# ---- Mana / regen suffixes -------------------------------------------
+[[alias]]
+coe_name = "Increased Mana Regeneration Rate"
+engine_mod_id = "ManaRegeneration"
+
+[[alias]]
+coe_name = "+# Mana Gained on Kill"
+engine_mod_id = "ManaGainedOnKill"
+
+[[alias]]
+coe_name = "+# Life Gained on Kill"
+engine_mod_id = "LifeGainedOnKill"
+
+# ---- Hybrid mods (the "concept-aware" core of the engine analyzer) ---
+[[alias]]
+coe_name = "+# to maximum Life and # to maximum Mana"
+engine_mod_id = "LifeAndMana"
+
+[[alias]]
+coe_name = "+#% to Fire and Cold Resistances"
+engine_mod_id = "FireAndColdResistances"
+
+[[alias]]
+coe_name = "+#% to Fire and Lightning Resistances"
+engine_mod_id = "FireAndLightningResistances"
+
+[[alias]]
+coe_name = "+#% to Cold and Lightning Resistances"
+engine_mod_id = "ColdAndLightningResistances"
+
+# ---- Projectile / minion / aura modifiers ----------------------------
+[[alias]]
+coe_name = "+# to Projectile Skills"
+engine_mod_id = "AllProjectileSkills"
+
+[[alias]]
+coe_name = "+# Maximum number of Skeletons"
+engine_mod_id = "MaximumSkeletons"
+
+[[alias]]
+coe_name = "Increased Aura Effect"
+engine_mod_id = "AuraEffect"
+
+# ---- Charge / flask suffixes -----------------------------------------
+[[alias]]
+coe_name = "+# Maximum Power Charges"
+engine_mod_id = "MaximumPowerCharges"
+
+[[alias]]
+coe_name = "+# Maximum Frenzy Charges"
+engine_mod_id = "MaximumFrenzyCharges"
+
+[[alias]]
+coe_name = "+# Maximum Endurance Charges"
+engine_mod_id = "MaximumEnduranceCharges"
+
+[[alias]]
+coe_name = "Increased Flask Charges Gained"
+engine_mod_id = "FlaskChargesGained"
