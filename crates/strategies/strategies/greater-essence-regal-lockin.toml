@@ -1,0 +1,72 @@
+# Greater Essence Regal Lock-In
+#
+# A 2-mod Magic base + Greater Essence -> 3-mod Rare with one
+# guaranteed mod, then Greater/Perfect Exalts to fill remaining slots.
+#
+# Source: /docs/33-strategy-library.md sec. 4 (PaintMasterPoE)
+
+id = "greater-essence-regal-lockin"
+name = "Greater Essence Regal Lock-In"
+patch_min = "0.4.0"
+expected_cost_div = [3, 15]
+expected_success_prob = [0.50, 0.70]
+confidence = "community"
+note = """
+Hold a 2-mod Magic with both mods desired. Apply Greater Essence to
+promote to Rare with the essence's guaranteed mod (T3 typical for
+Greater). Then 3 Greater/Perfect Exalts.
+"""
+
+[source]
+kind = "community"
+credit = "PaintMasterPoE (Mobalytics essence guide)"
+reference = "/docs/33-strategy-library.md sec. 4"
+
+preconditions = [
+    { rarity = "magic" },
+    { ilvl = { op = "gte", value = 75 } },
+    { corrupted = false },
+    { sanctified = false },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 1 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 1 } } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-greater-essence"
+action = { kind = "apply_currency", currency = "GreaterEssenceOfTheBody" }
+note = "Promote Magic -> Rare with the essence's guaranteed mod (Greater Essence of the Body for life). Substitute the essence type matching your build need."
+on_success = "S2-exalt-1"
+on_failure = "S2-exalt-1"
+
+[[steps]]
+id = "S2-exalt-1"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb" }
+note = "First Exalt — fills 4th slot."
+on_success = "S3-exalt-2"
+on_failure = "S3-exalt-2"
+
+[[steps]]
+id = "S3-exalt-2"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb" }
+note = "Second Exalt — fills 5th slot."
+on_success = "S4-exalt-3"
+on_failure = "S4-exalt-3"
+
+[[steps]]
+id = "S4-exalt-3"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb" }
+note = "Third Exalt — fills 6th slot. Item is now a 6-mod rare with one guaranteed essence mod."
+on_success = "S5-done"
+on_failure = "S5-done"
+
+[[steps]]
+id = "S5-done"
+action = { kind = "done" }

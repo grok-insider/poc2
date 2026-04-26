@@ -1,0 +1,75 @@
+# Annul-Augment Spam — Magic Base Refinement
+#
+# Get exactly 2 desired mods on a Magic base via Perfect Transmute +
+# Perfect Augment + Annul cycles. Best for low-weight chase mods like
+# +3 Spell Skills on amulets, T1 crit on weapons.
+#
+# Source: /docs/33-strategy-library.md sec. 3
+
+id = "annul-augment-spam"
+name = "Annul-Augment Spam (Magic Base Refinement)"
+patch_min = "0.4.0"
+expected_cost_div = [1, 5]
+expected_success_prob = [0.10, 0.30]
+confidence = "verified"
+note = """
+On a Normal Perfect-tier base, Perfect Transmute -> Perfect Augment ->
+inspect: if both good, you have a 2-mod magic seed for Regal/Fracture.
+If one is junk, Annul (50/50), then Augment again. Loop.
+"""
+
+[source]
+kind = "community"
+credit = "Belton (PoE2 0.4 validation), classic PoE move"
+reference = "/docs/33-strategy-library.md sec. 3"
+
+preconditions = [
+    { ilvl = { op = "gte", value = 75 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { sanctified = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+note = "Perfect Transmute -> Magic with 1 high-ilvl mod (req >=70)."
+on_success = "S2-perfect-augment"
+on_failure = "S2-perfect-augment"
+
+[[steps]]
+id = "S2-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+note = "Perfect Augment fills the second slot."
+target_check = { affix_count = { affix = "prefix", count = { op = "eq", value = 1 } } }
+on_success = "S3-evaluate"
+on_failure = "S3-evaluate"
+
+[[steps]]
+id = "S3-evaluate"
+action = { kind = "noop" }
+note = "Inspect: if both mods are desired, exit; if one junk, Annul."
+on_success = "S4-done"
+on_failure = "S5-annul"
+target_check = "always"
+
+[[steps]]
+id = "S5-annul"
+action = { kind = "apply_currency", currency = "OrbOfAnnulment" }
+note = "50/50 to remove the junk mod. If wrong, re-Augment."
+on_success = "S2-perfect-augment"
+on_failure = "S2-perfect-augment"
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = "2 desired mods on Magic — ready for Regal or Fracture seed."

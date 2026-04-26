@@ -1,0 +1,88 @@
+# Catalyst-Boosted Exaltation (Catalysing Exaltation)
+#
+# On rings/amulets: catalyst the item to 20% quality on the matching
+# tag, activate Omen of Catalysing Exaltation, then Perfect Exalt.
+# The exalt consumes catalyst quality to bias the slammed mod toward
+# matching tag.
+#
+# Source: /docs/33-strategy-library.md sec. 18
+
+id = "catalysing-exaltation"
+name = "Catalysing Exaltation (Catalyst-Boosted Slam)"
+patch_min = "0.4.0"
+expected_cost_div = [3, 10]
+expected_success_prob = [0.10, 0.40]
+confidence = "community"
+note = """
+Jewelry-only craft (Rings, Amulets). Apply 4 matching catalysts to
+hit 20% tagged quality, activate Omen of Catalysing Exaltation, then
+Perfect Exalt. The catalysed quality biases the new mod toward the
+catalyst's tag (life / attack / caster / etc).
+"""
+
+[source]
+kind = "community"
+credit = "Mobalytics omen-crafting; r/PathOfExile2 testing thread 1o109h1"
+reference = "/docs/33-strategy-library.md sec. 18"
+
+# Note: PoE2 doesn't have a 'jewellery' rarity restriction predicate,
+# so we gate on the item-class predicate. Strategy registry's
+# `for_class` filter handles further class targeting.
+item_classes = ["Ring", "Amulet"]
+preconditions = [
+    { rarity = "rare" },
+    { item_class_any = ["Ring", "Amulet"] },
+    { ilvl = { op = "gte", value = 75 } },
+    { corrupted = false },
+    { sanctified = false },
+    # Need at least one open mod slot for the Exalt to land.
+    { any = [
+        { affix_count = { affix = "prefix", count = { op = "lte", value = 2 } } },
+        { affix_count = { affix = "suffix", count = { op = "lte", value = 2 } } },
+    ] },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-catalyst-1"
+action = { kind = "apply_currency", currency = "FleshCatalyst" }
+note = "Apply Flesh Catalyst (life-tagged). Substitute by build need: Reaver=attack, Unstable=caster, Carapace=defences."
+on_success = "S2-catalyst-2"
+on_failure = "S2-catalyst-2"
+
+[[steps]]
+id = "S2-catalyst-2"
+action = { kind = "apply_currency", currency = "FleshCatalyst" }
+on_success = "S3-catalyst-3"
+on_failure = "S3-catalyst-3"
+
+[[steps]]
+id = "S3-catalyst-3"
+action = { kind = "apply_currency", currency = "FleshCatalyst" }
+on_success = "S4-catalyst-4"
+on_failure = "S4-catalyst-4"
+
+[[steps]]
+id = "S4-catalyst-4"
+action = { kind = "apply_currency", currency = "FleshCatalyst" }
+note = "After 4 applies, quality reaches 20% (cap). Tagged."
+on_success = "S5-catalysed-exalt"
+on_failure = "S5-catalysed-exalt"
+
+[[steps]]
+id = "S5-catalysed-exalt"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb", omens = ["OmenOfCatalysingExaltation"] }
+note = "Exalt consumes ALL catalyst quality. New mod biased toward the catalyst's tag."
+on_success = "S6-done"
+on_failure = "S6-done"
+
+[[steps]]
+id = "S6-done"
+action = { kind = "done" }

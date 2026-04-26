@@ -1,0 +1,77 @@
+# Fracture-Then-Chaos-Spam (sirgog / Belton 0.4 baseline)
+#
+# A 4-mod rare with one chase mod gets fractured (1/4 chance to lock
+# the chase mod), then we Chaos-spam the OPPOSITE side until two T1
+# mods land. Stop the moment we have fracture + 2 good opposite-side
+# mods (the "Golden Rule").
+#
+# Source: /docs/33-strategy-library.md sec. 2
+
+id = "fracture-then-chaos-spam"
+name = "Fracture-Then-Chaos-Spam"
+patch_min = "0.4.0"
+expected_cost_div = [20, 100]
+expected_success_prob = [0.15, 0.50]
+confidence = "verified"
+note = """
+Use on a Rare with EXACTLY 4 explicit mods including one chase mod
+(e.g. T1 phys%, +2 projectiles). 75% bricked by fracture; otherwise
+Chaos until 2 good opposite-side mods land.
+"""
+
+[source]
+kind = "community"
+credit = "sirgog (Mobalytics fracturing-orbs guide), Belton 0.4 video"
+reference = "/docs/33-strategy-library.md sec. 2"
+
+preconditions = [
+    { rarity = "rare" },
+    { ilvl = { op = "gte", value = 75 } },
+    { corrupted = false },
+    { sanctified = false },
+    { has_fractured = false },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 1 } } },
+    { affix_count = { affix = "suffix", count = { op = "gte", value = 1 } } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-divine-first"
+action = { kind = "apply_currency", currency = "DivineOrb" }
+note = "Divine first to maximize values BEFORE fracture locks them."
+on_success = "S2-fracture"
+on_failure = "S2-fracture"
+
+[[steps]]
+id = "S2-fracture"
+action = { kind = "apply_currency", currency = "FracturingOrb" }
+target_check = { has_fractured = true }
+note = "75% chance to fracture the WRONG mod. If unlucky, abandon."
+on_success = "S3-chaos-spam"
+on_failure = "S2b-bricked"
+recovery = [
+    { message = "Hinekora's Lock can preview the fracture before commit.", added_cost_div = 5 },
+]
+
+[[steps]]
+id = "S2b-bricked"
+action = { kind = "abandon", reason = "Fracturing Orb landed on the wrong mod (75% baseline)." }
+
+[[steps]]
+id = "S3-chaos-spam"
+action = { kind = "apply_currency", currency = "PerfectChaosOrb" }
+note = "Chaos cycle. Stop once 2 good opposite-side mods land."
+target_check = { affix_count = { affix = "suffix", count = { op = "gte", value = 2 } } }
+on_success = "S4-done"
+on_failure = "S3-chaos-spam"
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }

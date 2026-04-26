@@ -44,6 +44,26 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
         "whittling-cleanup",
         include_str!("../../../../crates/strategies/strategies/whittling-cleanup.toml"),
     ),
+    (
+        "fracture-then-chaos-spam",
+        include_str!("../../../../crates/strategies/strategies/fracture-then-chaos-spam.toml"),
+    ),
+    (
+        "annul-augment-spam",
+        include_str!("../../../../crates/strategies/strategies/annul-augment-spam.toml"),
+    ),
+    (
+        "greater-essence-regal-lockin",
+        include_str!("../../../../crates/strategies/strategies/greater-essence-regal-lockin.toml"),
+    ),
+    (
+        "sinistral-erasure-cleanup",
+        include_str!("../../../../crates/strategies/strategies/sinistral-erasure-cleanup.toml"),
+    ),
+    (
+        "catalysing-exaltation",
+        include_str!("../../../../crates/strategies/strategies/catalysing-exaltation.toml"),
+    ),
 ];
 
 /// Shared, read-only application state. Built once at startup; cloned

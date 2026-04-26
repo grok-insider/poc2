@@ -704,6 +704,534 @@ pub fn seed_rules() -> Vec<Rule> {
 
     // ---- Sanctification finisher ----------------------------------------
 
+    // ---- Hinekora's Lock decision rules ---------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R150-hinekora-lock-before-vaal-on-mirror-tier"),
+        category: Category::HinekoraLock,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::Sanctified(false),
+            ItemPredicate::HasHinekoraLock(false),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyHinekorasLock,
+            note: "6-mod rare ready for high-stakes finisher (Vaal/Sanctify). Lock first to preview the outcome.".into(),
+            priority: 220,
+        }],
+        explanation: "Lock-before-finisher converts the riskiest single-click step into a known outcome.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 3.1".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R151-hinekora-cannot-be-applied-to-corrupted"),
+        category: Category::HinekoraLock,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Corrupted(true),
+            ItemPredicate::HasHinekoraLock(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "Hinekora's Lock cannot be applied to corrupted items.".into(),
+            priority: 30,
+        }],
+        explanation: "Lock requires unmodifiable=false; corrupted is immune.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 3.3".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R152-hinekora-bench-recombinator-no-preview"),
+        category: Category::HinekoraLock,
+        when: ItemPredicate::HasHinekoraLock(true),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "Lock CANNOT preview crafting bench, recombinator, beastcrafting, or Corruption Altar. Apply Lock only when the next currency is a regular orb.".into(),
+            priority: 40,
+        }],
+        explanation: "Reminder of the Lock's coverage limits.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 3.5".into(),
+        confidence: Confidence::Verified,
+    });
+
+    // ---- Exalt-vs-Desecrate refinement (sec 4.x) ------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R160-perfect-exalt-with-homogenising-on-isolated-rare"),
+        category: Category::ExaltVsDesecrate,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::Sanctified(false),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Lte,
+                    value: 2,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("PerfectExaltedOrb"),
+                omens: vec![poc2_engine::ids::OmenId::from("OmenOfSinistralExaltation")],
+            },
+            note: "Suffixes complete (3/3) but prefix slot open. Sinistral Exaltation forces the slam to land prefix; Perfect Exalt guarantees min-mod-level 50.".into(),
+            priority: 215,
+        }],
+        explanation: "Open-prefix-only is the canonical isolated Exalt setup.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 4.3".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R161-dextral-exalt-on-prefix-locked-rare"),
+        category: Category::ExaltVsDesecrate,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::Sanctified(false),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Lte,
+                    value: 2,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("PerfectExaltedOrb"),
+                omens: vec![poc2_engine::ids::OmenId::from("OmenOfDextralExaltation")],
+            },
+            note: "Prefixes complete; suffix slot open. Dextral Exaltation + Perfect Exalt is deterministic for slot.".into(),
+            priority: 215,
+        }],
+        explanation: "Mirror of the Sinistral case.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 4.3".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R162-bone-on-isolated-armor-prefix"),
+        category: Category::ExaltVsDesecrate,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::ItemClass(poc2_engine::ids::ItemClassId::from("BodyArmour")),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Lte,
+                    value: 2,
+                },
+            },
+            ItemPredicate::HasHiddenDesecrated(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("AncientRib"),
+                omens: vec![poc2_engine::ids::OmenId::from("OmenOfSinistralNecromancy")],
+            },
+            note: "Body armour + open prefix slot: Ancient Rib + Sinistral Necromancy guarantees a high-tier desecrated prefix.".into(),
+            priority: 200,
+        }],
+        explanation: "Bone path competes with Exalt; prefer it when the desecrated mod pool is desirable.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 4.4".into(),
+        confidence: Confidence::Community,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R163-abyssal-echoes-before-reveal"),
+        category: Category::ExaltVsDesecrate,
+        when: ItemPredicate::HasHiddenDesecrated(true),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("OmenOfAbyssalEchoes"),
+                omens: vec![],
+            },
+            note: "Activate Omen of Abyssal Echoes BEFORE Reveal — gives 6 options total instead of 3.".into(),
+            priority: 235,
+        }],
+        explanation: "Cheap insurance against bad reveal options.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 4.9".into(),
+        confidence: Confidence::Verified,
+    });
+
+    // ---- Whittle / Annul nuance (sec 5.x) ------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R170-perfect-chaos-with-whittling-for-guaranteed-t1"),
+        category: Category::WhittleVsAnnul,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::HasFractured(true),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 2,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 2,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("PerfectChaosOrb"),
+                omens: vec![poc2_engine::ids::OmenId::from("OmenOfWhittling")],
+            },
+            note: "Perfect Chaos + Whittling: removes the lowest-mod-level mod and adds a guaranteed min-mod-level 50 (T1) replacement.".into(),
+            priority: 195,
+        }],
+        explanation: "Combines Whittling's targeting precision with Perfect Chaos's tier guarantee.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 5.6".into(),
+        confidence: Confidence::Community,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R171-whittle-warning-essence-mods-low-mlvl"),
+        category: Category::WhittleVsAnnul,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "Warning: Essence-applied mods often have LOW mod-level despite being powerful. Whittling may unintentionally hit them.".into(),
+            priority: 30,
+        }],
+        explanation: "VULKK rulebook safety note; pair with stat-pin in UI before commit.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 5.7".into(),
+        confidence: Confidence::Community,
+    });
+
+    // ---- Stop-vs-Continue (sec 6.x) -------------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R180-sell-unrevealed-4mod-jewel"),
+        category: Category::Pricing,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::ItemClass(poc2_engine::ids::ItemClassId::from("Jewel")),
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::HasHiddenDesecrated(true),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 2,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "4-mod unrevealed jewels are in high demand. Consider listing without revealing — buyer prefers the gamble.".into(),
+            priority: 65,
+        }],
+        explanation: "Per /docs/34 sec 6.5 — unrevealed jewel exit captures premium.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 6.5".into(),
+        confidence: Confidence::Community,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R181-hero-mod-on-mid-rest-sell-as-base"),
+        category: Category::Pricing,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::HasFractured(true),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Lte,
+                    value: 2,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Lte,
+                    value: 2,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "Single fractured hero mod on a mostly-empty item: sell as a recombinator-ready craft base.".into(),
+            priority: 60,
+        }],
+        explanation: "Single-hero-mod fractured items are recombinator fodder with their own market.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 6.6".into(),
+        confidence: Confidence::Community,
+    });
+
+    // ---- Pricing exit (sec 7.x) -----------------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R190-sell-magic-with-2-tier1-mods"),
+        category: Category::Pricing,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Magic),
+            ItemPredicate::Ilvl(ValuePredicate {
+                op: CmpOp::Gte,
+                value: 80,
+            }),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 1,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 1,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "ilvl 80+ Magic with 2 mods: many crafters pay a premium for clean Regal-ready bases. Consider listing.".into(),
+            priority: 65,
+        }],
+        explanation: "0.4 specifically: post-Homogenising loss makes 2-mod magics MORE valuable.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 7.1".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R191-fractured-base-premium-listing"),
+        category: Category::Pricing,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::HasFractured(true),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::Sanctified(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "Fractured bases command premiums. Either continue if your recipe is ready, or sell now to lock in profit.".into(),
+            priority: 55,
+        }],
+        explanation: "Fracture is permanent value; further crafting risks bricking the now-valuable item.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 7.2".into(),
+        confidence: Confidence::Community,
+    });
+
+    // ---- Item base selection (sec 9.x) — guidance only -----------------
+
+    out.push(Rule {
+        id: RuleId::from("R200-ilvl-82-required-for-t1-mlvl-80-mods"),
+        category: Category::BaseSelection,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Ilvl(ValuePredicate {
+                op: CmpOp::Lt,
+                value: 82,
+            }),
+            ItemPredicate::Ilvl(ValuePredicate {
+                op: CmpOp::Gte,
+                value: 75,
+            }),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "ilvl < 82: T1 versions of mlvl-80+ mods (T1 phys%, T1 +3 spell skills, T1 max life on chest) are GATED. Replace with ilvl 82 base if you need them.".into(),
+            priority: 75,
+        }],
+        explanation: "ilvl 82 unlocks the highest-tier mods — base selection matters.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 9.1".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R201-low-ilvl-leveling-floor"),
+        category: Category::BaseSelection,
+        when: ItemPredicate::Ilvl(ValuePredicate {
+            op: CmpOp::Lt,
+            value: 75,
+        }),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "ilvl < 75: leveling-tier base. For endgame crafts, replace with ilvl 75+ to open mid/high-tier mods.".into(),
+            priority: 80,
+        }],
+        explanation: "VULKK base-pick floor for endgame.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 9.3".into(),
+        confidence: Confidence::Verified,
+    });
+
+    // ---- Vaal corruption decisions (sec 10.x) --------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R210-vaal-rare-warning-irreplaceable"),
+        category: Category::Vaal,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "VULKK warning: 'Don't Corrupt something you cannot replace or have a replacement for.' Have a backup or use Hinekora's Lock first.".into(),
+            priority: 40,
+        }],
+        explanation: "6-mod completed rare is the highest-stakes Vaal target.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 10.1".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R211-vaal-armour-or-martial-for-extra-socket"),
+        category: Category::Vaal,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::ItemClassAny(vec![
+                poc2_engine::ids::ItemClassId::from("BodyArmour"),
+                poc2_engine::ids::ItemClassId::from("Helmet"),
+                poc2_engine::ids::ItemClassId::from("Gloves"),
+                poc2_engine::ids::ItemClassId::from("Boots"),
+                poc2_engine::ids::ItemClassId::from("Shield"),
+                poc2_engine::ids::ItemClassId::from("Focus"),
+                poc2_engine::ids::ItemClassId::from("OneHandSword"),
+                poc2_engine::ids::ItemClassId::from("OneHandMace"),
+                poc2_engine::ids::ItemClassId::from("TwoHandSword"),
+                poc2_engine::ids::ItemClassId::from("TwoHandMace"),
+                poc2_engine::ids::ItemClassId::from("Bow"),
+                poc2_engine::ids::ItemClassId::from("Crossbow"),
+            ]),
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("VaalOrb"),
+                omens: vec![],
+            },
+            note: "Armour / martial weapon: Vaal has 1-in-4 chance to add an extra socket past the limit. Higher EV than caster items.".into(),
+            priority: 65,
+        }],
+        explanation: "Per /docs/34 sec 10.3 — extra-socket Vaal outcome is exclusive to armour + martial weapons.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 10.3".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R212-vaal-caster-jewelry-warning"),
+        category: Category::Vaal,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::ItemClassAny(vec![
+                poc2_engine::ids::ItemClassId::from("Wand"),
+                poc2_engine::ids::ItemClassId::from("Staff"),
+                poc2_engine::ids::ItemClassId::from("Sceptre"),
+                poc2_engine::ids::ItemClassId::from("Ring"),
+                poc2_engine::ids::ItemClassId::from("Amulet"),
+                poc2_engine::ids::ItemClassId::from("Belt"),
+            ]),
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "Caster weapon / jewelry / belt: NO extra-socket Vaal outcome. Lower EV — only Vaal cheap replaceable items.".into(),
+            priority: 35,
+        }],
+        explanation: "Per /docs/34 sec 10.4 — these classes can't get sockets from Vaal.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 10.4".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R213-vaal-prep-quality-and-sockets-first"),
+        category: Category::Vaal,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::Sanctified(false),
+            ItemPredicate::Mirrored(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "Pre-Vaal checklist: apply quality, runes, all desired exalts FIRST. Vaal locks the item permanently.".into(),
+            priority: 50,
+        }],
+        explanation: "Sequencing matters — Vaal is one-way.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 10.11".into(),
+        confidence: Confidence::Verified,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R214-twice-corrupt-50pct-destroy-warning"),
+        category: Category::Vaal,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(true),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::Guidance,
+            note: "Twice-corruption (Architect's Orb / Vaal Cultivation) has a 50% destroy chance. Buy a pre-twice-corrupted version of items you can't lose.".into(),
+            priority: 35,
+        }],
+        explanation: "Per /docs/34 sec 10.9 — destroy outcome is total.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 10.9".into(),
+        confidence: Confidence::Verified,
+    });
+
     out.push(Rule {
         id: RuleId::from("R141-architects-orb-on-corrupted-rare"),
         category: Category::Vaal,
@@ -772,7 +1300,7 @@ mod tests {
     #[test]
     fn seed_rules_load() {
         let rules = seed_rules();
-        assert!(rules.len() >= 25, "got {} rules", rules.len());
+        assert!(rules.len() >= 40, "got {} rules", rules.len());
     }
 
     #[test]

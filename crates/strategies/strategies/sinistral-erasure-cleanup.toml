@@ -1,0 +1,64 @@
+# Sinistral Erasure (Side-Targeted Chaos Cleanup)
+#
+# Locked-in good suffix side + junk on prefix side. Sinistral Erasure
+# forces Chaos to remove only prefixes; loop until clean.
+#
+# Source: /docs/33-strategy-library.md sec. 8
+
+id = "sinistral-erasure-cleanup"
+name = "Sinistral Erasure (Prefix-Side Cleanup)"
+patch_min = "0.4.0"
+expected_cost_div = [2, 10]
+expected_success_prob = [0.30, 0.60]
+confidence = "community"
+note = """
+Use when one entire side (suffixes) is good and the other (prefixes)
+has 2-3 garbage. Pair with a fractured anchor for guaranteed safety.
+Pair with Whittling for lowest-mod-level removal.
+"""
+
+[source]
+kind = "community"
+credit = "Mobalytics omen-crafting; Belton/Mosey/Tarke profit crafts"
+reference = "/docs/33-strategy-library.md sec. 8"
+
+preconditions = [
+    { rarity = "rare" },
+    { ilvl = { op = "gte", value = 75 } },
+    { corrupted = false },
+    { sanctified = false },
+    # Locked-in suffixes (3 desired); junk on prefixes
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 2 } } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-sinistral-erase"
+action = { kind = "apply_currency", currency = "PerfectChaosOrb", omens = ["OmenOfSinistralErasure"] }
+note = "Sinistral Erasure forces Chaos to remove only prefix mods, adding a new random one (could be either side)."
+on_success = "S2-evaluate"
+on_failure = "S3-failed"
+
+[[steps]]
+id = "S2-evaluate"
+action = { kind = "noop" }
+note = "Inspect: keep cycling Sinistral Erasure until prefixes are clean."
+on_success = "S4-done"
+on_failure = "S1-sinistral-erase"
+target_check = "always"
+
+[[steps]]
+id = "S3-failed"
+action = { kind = "abandon", reason = "Sinistral Erasure run exceeded budget without converging on clean prefixes." }
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
