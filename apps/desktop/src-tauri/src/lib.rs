@@ -26,11 +26,23 @@ use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tracing_subscriber::EnvFilter;
 
-/// Inlined canonical strategy fixture. Bundled into the binary so the
-/// app is self-contained at M6; user-provided strategies will load from
-/// `$XDG_CONFIG_HOME/poc2/strategies/` in M6 polish.
-const CANONICAL_STRATEGY_TOML: &str =
-    include_str!("../../../../crates/strategies/strategies/3xt1-es-body-armour.toml");
+/// Inlined seed strategies. Bundled into the binary so the app is
+/// self-contained out of the box; user-provided strategies are loaded
+/// from `$XDG_CONFIG_HOME/poc2/strategies/` in addition (M6 polish).
+const SEED_STRATEGIES: &[(&str, &str)] = &[
+    (
+        "3xt1-es-body-armour",
+        include_str!("../../../../crates/strategies/strategies/3xt1-es-body-armour.toml"),
+    ),
+    (
+        "apprentice-blueprint",
+        include_str!("../../../../crates/strategies/strategies/apprentice-blueprint.toml"),
+    ),
+    (
+        "whittling-cleanup",
+        include_str!("../../../../crates/strategies/strategies/whittling-cleanup.toml"),
+    ),
+];
 
 /// Shared, read-only application state. Built once at startup; cloned
 /// (Arc-wise) into each command invocation.
@@ -72,13 +84,19 @@ impl AdvisorState {
         };
 
         let rules = RuleSet::from_rules(poc2_rules::seed_rules());
-        let strategies = match poc2_strategies::load_strategy_str(CANONICAL_STRATEGY_TOML) {
-            Ok(s) => StrategyRegistry::from_strategies(vec![s]),
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to load canonical strategy; using empty registry");
-                StrategyRegistry::default()
+        let mut loaded_strategies = Vec::new();
+        for (name, toml) in SEED_STRATEGIES {
+            match poc2_strategies::load_strategy_str(toml) {
+                Ok(s) => loaded_strategies.push(s),
+                Err(e) => tracing::warn!(name, error = %e, "seed strategy failed to load"),
             }
-        };
+        }
+        // User-provided strategies in $XDG_CONFIG_HOME/poc2/strategies/.
+        load_user_strategies(&mut loaded_strategies);
+        let strategy_count = loaded_strategies.len();
+        let strategies = StrategyRegistry::from_strategies(loaded_strategies);
+        tracing::info!(strategy_count, "loaded strategies");
+
         let resolver = DefaultCurrencyResolver::new();
         let valuator = Valuator::default();
         Self {
@@ -159,6 +177,40 @@ fn newest_bundle_in_dir(dir: &Path) -> Option<(Bundle, PathBuf)> {
         }
     }
     None
+}
+
+/// Load every `*.toml` strategy in `$XDG_CONFIG_HOME/poc2/strategies/`
+/// into the registry. Failures are warned-and-skipped; the rest of the
+/// strategies still load.
+fn load_user_strategies(out: &mut Vec<poc2_strategies::Strategy>) {
+    let dirs: Vec<PathBuf> = if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
+        vec![Path::new(&xdg_config).join("poc2/strategies")]
+    } else if let Some(home) = std::env::var_os("HOME") {
+        vec![Path::new(&home).join(".config/poc2/strategies")]
+    } else {
+        vec![]
+    };
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_toml = path.extension().and_then(|e| e.to_str()) == Some("toml");
+            if !is_toml {
+                continue;
+            }
+            match poc2_strategies::load_strategy_toml(&path) {
+                Ok(s) => {
+                    tracing::info!(path = %path.display(), id = %s.id.0, "loaded user strategy");
+                    out.push(s);
+                }
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "user strategy failed to load")
+                }
+            }
+        }
+    }
 }
 
 fn try_load_bundle(path: &Path) -> Option<(Bundle, PathBuf)> {
