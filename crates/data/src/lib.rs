@@ -3,15 +3,24 @@
 //! Bundle loader and schema types for the patch-versioned data feed.
 //!
 //! Bundles are produced by the `pipeline` crate (separate process / repo) and
-//! consumed here. A bundle is a single JSON or TOML document containing every
-//! piece of data the engine + advisor need: mods, base items, currencies,
-//! omens, essences, bones, catalysts, weights, stat translations, and the
-//! synergy graph.
+//! consumed by the engine. A bundle is a single JSON or compressed JSON
+//! document containing every piece of data the engine + advisor need: mods,
+//! base items, currencies, omens, essences, bones, catalysts, weights,
+//! stat translations, the concept map, and the synergy graph.
 //!
-//! Every entity carries `patch_min` / `patch_max`. Loaders filter by the
-//! currently configured `PatchVersion`.
+//! Every entity carries a `PatchRange`. Loaders filter by the configured
+//! patch version; the engine sees only entities valid in that patch.
 //!
-//! Stub for M1; real implementation in M2 (Data Pipeline).
+//! ## Module layout
+//!
+//! - [`bundle`] — the top-level [`Bundle`] container and its sub-sections
+//! - [`sources`] — metadata identifying which upstream revisions produced the bundle
+//! - [`weights`] — numerical mod weights with confidence flags
+//! - [`concepts`] — stat-id → semantic-concept mapping for hybrid analysis
+//! - [`synergy`] — synergy graph: which (currency, omen) pairs are legal + their effects
+//! - [`error`] — [`DataError`] for bundle load / validation failures
+//! - [`io`] — read / write helpers (JSON and gzipped JSON)
+//! - [`validation`] — bundle invariants checker (schema versions, patch coverage, etc.)
 
 #![forbid(unsafe_code)]
 #![warn(clippy::pedantic)]
@@ -22,9 +31,21 @@
 #![allow(clippy::doc_markdown)]
 
 pub mod bundle;
+pub mod concepts;
+pub mod error;
+pub mod io;
 pub mod schema;
+pub mod sources;
+pub mod synergy;
+pub mod validation;
+pub mod weights;
 
-pub use bundle::Bundle;
+pub use bundle::{Bundle, BundleHeader, BundleSection};
+pub use concepts::{ConceptDefinition, ConceptMap, ConceptMapEntry};
+pub use error::{DataError, DataResult};
+pub use sources::{SourceRevision, SourceRevisions};
+pub use synergy::{SynergyEdge, SynergyOverride};
+pub use weights::{Confidence, WeightObservation};
 
 /// Bundle schema version this loader understands.
 ///

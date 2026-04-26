@@ -2900,12 +2900,15 @@ name = "poc2-data"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "flate2",
  "indexmap 2.14.0",
  "insta",
  "poc2-engine",
  "semver",
  "serde",
  "serde_json",
+ "smallvec",
+ "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.2",
  "tracing",
