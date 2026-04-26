@@ -1,22 +1,21 @@
 //! # poc2-rules
 //!
-//! Forward-chained production rule engine.
+//! Forward-chained heuristic rule engine.
 //!
-//! ~120 heuristic rules from `/docs/34-heuristics-rulebook.md`, each of the form:
+//! A [`Rule`] pairs an [`ItemPredicate`](poc2_strategies::ItemPredicate)
+//! `when` clause with a list of [`Suggestion`]s describing the actions a
+//! human expert would propose in that state. The advisor consumes
+//! suggestions alongside strategy candidates to produce its top-N
+//! recommendations.
 //!
-//! ```text
-//! when:        ItemPredicate (state matcher)
-//! then:        Vec<Suggestion> (recommended actions)
-//! explanation: human-readable rationale
-//! source:      citation (streamer / guide / VOD)
-//! confidence:  Verified | Community | Experimental
-//! ```
+//! Rules are deliberately simple: they fire when their `when` matches
+//! and never recurse. Multi-step plans live in strategies; rules
+//! capture single-step heuristics ("if you just got a 4-mod with one
+//! T1, fracture next").
 //!
-//! The engine emits all rules whose `when` matches the current state. The
-//! advisor then ranks the union of (rule-emitted suggestions + strategy-emitted
-//! candidates) by EV, cost, and risk preference.
-//!
-//! Stub for M1; real implementation in M3.
+//! M3.d ships with ~15 hand-coded seed rules covering the most useful
+//! cases from /docs/34-heuristics-rulebook.md. The full ~120-rule
+//! catalogue lands as data-driven TOML rules in v1.1+.
 
 #![forbid(unsafe_code)]
 #![warn(clippy::pedantic)]
@@ -29,3 +28,9 @@
 pub mod engine;
 pub mod loader;
 pub mod rule;
+pub mod seed;
+
+pub use engine::{evaluate, EngineResult};
+pub use loader::{load_rule_str, RuleError};
+pub use rule::{Rule, RuleId, RuleSet, Suggestion, SuggestionAction};
+pub use seed::seed_rules;
