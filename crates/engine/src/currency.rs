@@ -17,8 +17,10 @@
 //! - `recombinator` — Recombinator (M2.5)
 
 pub mod basic;
+pub mod bone;
 pub mod fracturing;
 
+pub use bone::{reveal_at_well_of_souls, sample_reveal_options, Bone, RevealOptions};
 pub use fracturing::FracturingOrb;
 
 use rand::RngCore;
