@@ -45,6 +45,7 @@ pub mod item_class;
 pub mod mods;
 pub mod omen;
 pub mod patch;
+pub mod registry;
 pub mod tag;
 
 pub use base::{BaseType, InventorySize, ReleaseState};
@@ -62,7 +63,10 @@ pub use mods::{
     Concept, ModDefinition, ModDomain, ModFlags, ModGroup, ModKind, ModStat, SpawnWeight,
 };
 pub use patch::{PatchRange, PatchVersion};
+pub use registry::{ModIndex, ModRegistry};
 pub use tag::{Tag, TagCategory};
+
+pub use currency::{ApplyContext, ApplyOutcome, Currency};
 
 /// Schema version of the engine's serialized types.
 ///
