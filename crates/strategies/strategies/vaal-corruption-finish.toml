@@ -1,0 +1,100 @@
+# Vaal Corruption Finish
+#
+# Source: sirgog Mobalytics Vaal-corrupting guide. Standard PoE2
+# item-finishing technique.
+# See /docs/33-strategy-library.md sec. 12.
+#
+# Vaal Orb outcome distribution (per Mobalytics):
+#   25% no change            (or 0% with Omen of Corruption)
+#   25% chaos-orb shuffle    (often ruins the item)
+#   25% special enchant      (helmet +1% max res, weapon +1 to skills, ...)
+#   25% extra rune socket    (armour/martial weapons) OR ±10% caster qual
+#
+# Hinekora's Lock CANNOT preview Altar of Corruption, but CAN preview a
+# raw Vaal Orb slam — pre-Lock for high-stakes finishes.
+
+id = "vaal-corruption-finish"
+name = "Vaal Corruption Finish (with optional Omen + Lock preview)"
+patch_min = "0.4.0"
+expected_cost_div = [1, 6]
+expected_success_prob = [0.40, 0.60]
+confidence = "verified"
+note = """
+Pre-Vaal checklist: apply ALL desired quality, runes, and Greater /
+Perfect Exalts FIRST. Vaal locks the item permanently — anything not
+applied beforehand stays unapplied forever.
+
+EV math (per sirgog): only use Omen of Corruption when item value ≥
+3× omen cost. Below that, raw Vaal + accepting the no-change re-roll
+is statistically equivalent.
+"""
+
+[source]
+kind = "community"
+credit = "sirgog (Mobalytics Vaal-corrupting guide)"
+reference = "https://mobalytics.gg/poe-2/guides/vaal-corrupting"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { mirrored = false },
+    # Don't Vaal a partially-crafted item — full mod count required.
+    { mod_count = { op = "gte", value = 5 } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-pre-lock"
+action = { kind = "apply_currency", currency = "HinekorasLock" }
+note = """
+Optional but strongly recommended for mirror-tier items: pre-Lock so
+the Vaal preview is deterministic. Skip if the item value < 3× Lock
+cost, or jump straight to S3 if you want the raw Vaal slam.
+"""
+on_success = "S2-activate-corruption-omen"
+on_failure = "S2-activate-corruption-omen"
+
+[[steps]]
+id = "S2-activate-corruption-omen"
+action = { kind = "activate_omen", omen = "OmenOfCorruption" }
+note = """
+Omen of Corruption removes the 25% no-change outcome — every Vaal
+either changes the item or shuffles it. Skip when item value < 3×
+omen cost (the EV is dominated by re-roll cost otherwise).
+"""
+on_success = "S3-vaal"
+on_failure = "S3-vaal"
+
+[[steps]]
+id = "S3-vaal"
+action = { kind = "apply_currency", currency = "VaalOrb" }
+target_check = { corrupted = true }
+note = "Commit. Item is now permanently corrupted."
+on_success = "S4-done"
+on_failure = "S3b-recover"
+recovery = [
+    { message = "Bricked-shuffle outcome: no recovery — item is permanently corrupted with bad mods. Sell or scrap.", added_cost_div = 0 },
+    { message = "If you have Architect's Orb, attempt double-corruption (#13) for an upgrade.", added_cost_div = 15 },
+]
+
+[[steps]]
+id = "S3b-recover"
+action = { kind = "abandon", reason = "Vaal Orb application failed (item already corrupted/mirrored)." }
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = "Vaal finish complete. Item is corrupted and locked from regular crafting; only Architect's Orb / double-corruption paths remain."

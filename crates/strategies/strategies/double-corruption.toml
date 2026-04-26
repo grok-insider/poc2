@@ -1,0 +1,98 @@
+# Double Corruption (Twice-Corrupt) — NEW IN 0.4
+#
+# Source: Patch 0.4 league mechanic Fate of the Vaal; AOEAH double-
+# corrupt guide.
+# See /docs/33-strategy-library.md sec. 13.
+#
+# 50% destroy chance. Use only on:
+#   1. Items you own a backup copy of, OR
+#   2. Items where the current state is no longer worth your time.
+#
+# Portable orbs introduced in 0.4:
+#   - Architect's Orb         — equipment / jewels
+#   - Crystallised Corruption — gems
+#   - Vaal Cultivation Orb    — uniques (Vaal-themed: replaces 1–2 mods
+#                               from a unique-specific pool;
+#                               non-Vaal: REPLACES the unique entirely)
+
+id = "double-corruption"
+name = "Double Corruption (Twice-Corrupt) — 0.4 Fate of the Vaal"
+patch_min = "0.4.0"
+expected_cost_div = [5, 50]
+expected_success_prob = [0.30, 0.40]
+confidence = "community"
+note = """
+Always have a backup or accept the loss. The 50% destroy is total —
+no recovery. For mirror-tier items, EV is usually negative.
+
+Vaal Cultivation Orb on non-Vaal-themed uniques: replaces the entire
+unique with a random corrupted unique of the same item class. Extremely
+volatile — only use on uniques you don't mind losing.
+"""
+
+[source]
+kind = "community"
+credit = "AOEAH double-corrupt guide; 0.4 Fate of the Vaal patch notes"
+reference = "https://www.aoeah.com/news/4309--how-to-double-twice-corrupt-in-poe-2-04"
+
+# ---- Preconditions ----
+preconditions = [
+    # Item must already be corrupted to be a double-corrupt target.
+    { corrupted = true },
+    { sanctified = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { sanctified = true },
+    { mirrored = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-confirm-backup"
+action = { kind = "noop" }
+note = """
+Decision gate: confirm a backup exists OR you accept the 50% destroy
+chance. Do NOT proceed on irreplaceable items without a replacement
+plan.
+"""
+on_success = "S2-architects-orb"
+on_failure = "S2-architects-orb"
+
+[[steps]]
+id = "S2-architects-orb"
+action = { kind = "apply_currency", currency = "ArchitectsOrb" }
+note = """
+Apply Architect's Orb (equipment / jewels). For gems use
+CrystallisedCorruption; for uniques use VaalCultivationOrb. Replace
+the currency id accordingly before running this step.
+"""
+on_success = "S3-evaluate"
+on_failure = "S2b-destroyed"
+recovery = [
+    { message = "If destroyed: no recovery. Buy a fresh corrupted base and retry.", added_cost_div = 0 },
+    { message = "If survived but outcome is mid: list as twice-corrupt floor; let the next buyer roll the dice.", added_cost_div = 0 },
+]
+
+[[steps]]
+id = "S2b-destroyed"
+action = { kind = "abandon", reason = "Twice-corrupt destroyed the item (50% base chance)." }
+
+[[steps]]
+id = "S3-evaluate"
+action = { kind = "noop" }
+note = "Evaluate the post-corruption state. Listing a survived twice-corrupt fetches premium prices."
+on_success = "S4-done"
+on_failure = "S4-done"
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = "Twice-corrupt complete. The item is now in its final state; no further crafting possible."

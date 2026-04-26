@@ -94,6 +94,14 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
         "abyss-lord-omens",
         include_str!("../../../../crates/strategies/strategies/abyss-lord-omens.toml"),
     ),
+    (
+        "vaal-corruption-finish",
+        include_str!("../../../../crates/strategies/strategies/vaal-corruption-finish.toml"),
+    ),
+    (
+        "double-corruption",
+        include_str!("../../../../crates/strategies/strategies/double-corruption.toml"),
+    ),
 ];
 
 /// Shared, read-only application state. Built once at startup; cloned
