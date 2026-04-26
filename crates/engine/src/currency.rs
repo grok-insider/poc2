@@ -41,20 +41,28 @@ pub type ApplyOutcome = ();
 
 /// Context passed to every `Currency::apply` invocation.
 ///
-/// Holds the registry, RNG, current patch, and (M2.6+) the active omens.
+/// Holds the registry, RNG, current patch, and the active omen set.
+/// Currencies consume omens from the set as part of their apply paths
+/// (see [`crate::omen::OmenSet`] for the consumption helpers).
 pub struct ApplyContext<'a> {
     pub registry: &'a ModRegistry,
     pub rng: &'a mut dyn RngCore,
     pub patch: PatchVersion,
-    // pub omens: &'a OmenSet,    // M2.6
+    pub omens: &'a mut crate::omen::OmenSet,
 }
 
 impl<'a> ApplyContext<'a> {
-    pub fn new(registry: &'a ModRegistry, rng: &'a mut dyn RngCore, patch: PatchVersion) -> Self {
+    pub fn new(
+        registry: &'a ModRegistry,
+        rng: &'a mut dyn RngCore,
+        patch: PatchVersion,
+        omens: &'a mut crate::omen::OmenSet,
+    ) -> Self {
         Self {
             registry,
             rng,
             patch,
+            omens,
         }
     }
 }

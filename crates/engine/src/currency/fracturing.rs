@@ -154,20 +154,25 @@ mod tests {
         }
     }
 
-    fn ctx<'a>(reg: &'a ModRegistry, rng: &'a mut Xoshiro256PlusPlus) -> ApplyContext<'a> {
-        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0)
+    fn ctx<'a>(
+        reg: &'a ModRegistry,
+        rng: &'a mut Xoshiro256PlusPlus,
+        omens: &'a mut crate::omen::OmenSet,
+    ) -> ApplyContext<'a> {
+        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     #[test]
     fn fracturing_requires_at_least_4_mods() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
         item.prefixes.push(pf("ES1", false));
         item.prefixes.push(pf("ES2", false));
         item.prefixes.push(pf("ES3", false));
         // 3 mods, no hidden — should refuse.
-        let r = FracturingOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = FracturingOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(
             r,
             Err(EngineError::InsufficientMods {
@@ -183,6 +188,7 @@ mod tests {
         // satisfies the 4-mod requirement.
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
         item.prefixes.push(pf("ES1", false));
         item.prefixes.push(pf("ES2", false));
@@ -194,7 +200,7 @@ mod tests {
             abyss_lord: None,
         });
         FracturingOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         // Exactly one prefix should now be fractured.
         let fractured_count = item.prefixes.iter().filter(|m| m.is_fractured).count();
@@ -213,6 +219,7 @@ mod tests {
         let reg = ModRegistry::from_mods(vec![]);
         for seed in 0u64..1000 {
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+            let mut omens = crate::omen::OmenSet::new();
             let mut item = fixture_item();
             item.prefixes.push(pf("ES1", false));
             item.prefixes.push(pf("ES2", false));
@@ -224,7 +231,7 @@ mod tests {
                 abyss_lord: None,
             });
             FracturingOrb::new()
-                .apply(&mut item, &mut ctx(&reg, &mut rng))
+                .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
                 .unwrap();
             // ES3_LOCK still fractured; one of ES1/ES2 newly fractured.
             assert!(item.prefixes[2].is_fractured);
@@ -241,6 +248,7 @@ mod tests {
         let mut counts = [0usize; 3];
         for seed in 0u64..6000 {
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+            let mut omens = crate::omen::OmenSet::new();
             let mut item = fixture_item();
             item.prefixes.push(pf("ES1", false));
             item.prefixes.push(pf("ES2", false));
@@ -252,7 +260,7 @@ mod tests {
                 abyss_lord: None,
             });
             FracturingOrb::new()
-                .apply(&mut item, &mut ctx(&reg, &mut rng))
+                .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
                 .unwrap();
             for (i, p) in item.prefixes.iter().enumerate() {
                 if p.is_fractured {
@@ -282,6 +290,7 @@ mod tests {
         // is empty. Returns FractureHiddenMod.
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xff);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
         item.prefixes.push(pf("A", true));
         item.prefixes.push(pf("B", true));
@@ -292,7 +301,7 @@ mod tests {
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: Some(AbyssLord::Kurgal),
         });
-        let r = FracturingOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = FracturingOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::FractureHiddenMod)));
     }
 
@@ -300,9 +309,10 @@ mod tests {
     fn fracturing_rejects_corrupted_or_mirrored() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(7);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
         item.corrupted = true;
-        let r = FracturingOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = FracturingOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 }

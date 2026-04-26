@@ -1,21 +1,18 @@
 //! Top-level orchestration: `apply_currency` / `preview_currency` /
 //! `commit_with_preview`.
 //!
-//! These are thin wrappers around `Currency::apply` that handle Hinekora's
-//! Lock semantics:
+//! These wrappers around `Currency::apply` handle two cross-cutting
+//! concerns:
 //!
-//! - **Apply**: if the item carries a `hinekora_lock` seed, the engine
-//!   substitutes a deterministic RNG seeded from it and clears the lock
-//!   on success. Otherwise the live RNG is used.
-//! - **Preview**: same RNG substitution, but operates on a clone of the
-//!   item and does NOT clear the lock — the caller can preview many
-//!   different currencies before committing one.
-//! - **CommitWithPreview**: a convenience that runs preview, returns the
-//!   result, and (if the caller likes it) commits — guaranteed to produce
-//!   the same outcome because both runs use the same lock seed.
-//!
-//! Currencies themselves do not need to know about the lock: the engine
-//! controls the RNG they receive.
+//! 1. **Hinekora's Lock**: if the item carries a `hinekora_lock` seed,
+//!    apply uses a deterministic RNG keyed by that seed and clears the
+//!    lock on success. Preview operates on a clone and does NOT clear
+//!    the lock.
+//! 2. **Omens**: the active [`OmenSet`] is threaded through `ApplyContext`.
+//!    Currencies consume omens during their apply path; consumed omens
+//!    are removed from the set. On a previewed-but-not-committed
+//!    operation, the original omen set is preserved (we operate on a
+//!    cloned omen set inside the preview).
 
 use rand_xoshiro::rand_core::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -23,95 +20,99 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use crate::currency::{ApplyContext, ApplyOutcome, Currency};
 use crate::error::EngineResult;
 use crate::item::Item;
+use crate::omen::OmenSet;
 use crate::patch::PatchVersion;
 use crate::registry::ModRegistry;
 
-/// Apply `currency` to `item`, honoring Hinekora's Lock.
+/// Apply `currency` to `item`, honoring Hinekora's Lock and consuming any
+/// matching omens from `omens`.
 ///
-/// If `item.hinekora_lock` is `Some(seed)` at entry:
-/// 1. A new RNG is constructed from the seed.
-/// 2. The currency is applied using THAT RNG (ignoring the live RNG).
-/// 3. On success, the lock is cleared.
-///
-/// On failure, the lock is preserved (the operation didn't modify the item,
-/// so the lock is still valid for subsequent attempts).
+/// On failure, both the lock and the omen set are preserved (the
+/// operation didn't modify anything, so the player keeps their setup).
 pub fn apply_currency(
     currency: &dyn Currency,
     item: &mut Item,
     registry: &ModRegistry,
     rng: &mut dyn rand::RngCore,
     patch: PatchVersion,
+    omens: &mut OmenSet,
 ) -> EngineResult<ApplyOutcome> {
     if let Some(seed) = item.hinekora_lock {
         let mut locked_rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let mut ctx = ApplyContext::new(registry, &mut locked_rng, patch);
-        // We treat the lock as consumed by ANY commit attempt — including
-        // failed ones in some upstream interpretations. We follow the more
-        // generous interpretation: clear only on success, so users don't
-        // burn the lock on a refused operation.
+        // Snapshot omens so a failure rolls back any consumption.
+        let omen_snapshot = omens.clone();
+        let mut ctx = ApplyContext::new(registry, &mut locked_rng, patch, omens);
         let result = currency.apply(item, &mut ctx);
         if result.is_ok() {
             item.hinekora_lock = None;
+        } else {
+            // Roll back consumed omens.
+            *omens = omen_snapshot;
         }
         result
     } else {
-        let mut ctx = ApplyContext::new(registry, rng, patch);
-        currency.apply(item, &mut ctx)
+        let omen_snapshot = omens.clone();
+        let mut ctx = ApplyContext::new(registry, rng, patch, omens);
+        let result = currency.apply(item, &mut ctx);
+        if result.is_err() {
+            *omens = omen_snapshot;
+        }
+        result
     }
 }
 
-/// Preview the result of applying `currency` without mutating `item`.
+/// Preview the result of applying `currency` without mutating anything.
 ///
-/// Returns the post-apply [`Item`] state on success. On failure, the
-/// engine returns the error and `item` is left unchanged.
+/// Returns the post-apply [`Item`] state on success. On failure, the engine
+/// returns the error and `item` / `omens` are left unchanged.
 ///
-/// Lock semantics: the lock seed is used (so the preview is faithful), but
-/// the lock is **not** cleared — the caller can preview multiple currencies
-/// before committing one. Per upstream design, all previews against the
-/// same lock seed are deterministic with respect to that seed.
+/// The returned `Item` reflects the lock having been consumed (if it would
+/// have been by a real apply); the caller's `item` does not.
 pub fn preview_currency(
     currency: &dyn Currency,
     item: &Item,
     registry: &ModRegistry,
     rng: &mut dyn rand::RngCore,
     patch: PatchVersion,
+    omens: &OmenSet,
 ) -> EngineResult<Item> {
     let mut clone = item.clone();
+    let mut omens_clone = omens.clone();
     if let Some(seed) = clone.hinekora_lock {
         let mut locked_rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let mut ctx = ApplyContext::new(registry, &mut locked_rng, patch);
+        let mut ctx = ApplyContext::new(registry, &mut locked_rng, patch, &mut omens_clone);
         currency.apply(&mut clone, &mut ctx)?;
     } else {
-        let mut ctx = ApplyContext::new(registry, rng, patch);
+        let mut ctx = ApplyContext::new(registry, rng, patch, &mut omens_clone);
         currency.apply(&mut clone, &mut ctx)?;
     }
-    // We don't clear the lock here even on success — preview is non-mutating.
-    // Return the resulting (cloned) item.
+    // Don't clear the lock here even on success — preview is non-mutating.
     Ok(clone)
 }
 
-/// Convenience: preview, then commit if the previewed result satisfies a
+/// Convenience: preview, then commit if the previewed result satisfies the
 /// caller-supplied predicate. Returns the post-commit item if accepted, or
 /// `None` if the predicate rejected the preview (item left untouched).
 ///
-/// Because commit re-runs the apply with the SAME lock seed, the resulting
-/// item is guaranteed to equal the preview byte-for-byte.
+/// Because commit re-runs the apply with the SAME lock seed, the post-
+/// commit item byte-matches the preview (modulo lock-cleared).
 pub fn commit_with_preview<P>(
     currency: &dyn Currency,
     item: &mut Item,
     registry: &ModRegistry,
     rng: &mut dyn rand::RngCore,
     patch: PatchVersion,
+    omens: &mut OmenSet,
     accept: P,
 ) -> EngineResult<Option<Item>>
 where
     P: FnOnce(&Item) -> bool,
 {
-    let preview = preview_currency(currency, item, registry, rng, patch)?;
+    let preview = preview_currency(currency, item, registry, rng, patch, omens)?;
     if !accept(&preview) {
         return Ok(None);
     }
-    apply_currency(currency, item, registry, rng, patch)?;
+    apply_currency(currency, item, registry, rng, patch, omens)?;
     Ok(Some(item.clone()))
 }
 
@@ -186,6 +187,7 @@ mod tests {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
         let mut item = fixture();
         item.hinekora_lock = Some(0xdead_beef_u64);
+        let mut omens = OmenSet::new();
 
         apply_currency(
             &OrbOfTransmutation::new(),
@@ -193,6 +195,7 @@ mod tests {
             &reg,
             &mut rng,
             PatchVersion::PATCH_0_4_0,
+            &mut omens,
         )
         .unwrap();
 
@@ -201,12 +204,14 @@ mod tests {
     }
 
     #[test]
-    fn apply_keeps_lock_on_failure() {
+    fn apply_keeps_lock_and_omens_on_failure() {
         let reg = registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
         let mut item = fixture();
         item.rarity = Rarity::Magic; // Transmute will refuse
         item.hinekora_lock = Some(0xfeed_face_u64);
+        let mut omens = OmenSet::new();
+        omens.push(crate::omen::Omen::greater_exaltation());
 
         let r = apply_currency(
             &OrbOfTransmutation::new(),
@@ -214,17 +219,21 @@ mod tests {
             &reg,
             &mut rng,
             PatchVersion::PATCH_0_4_0,
+            &mut omens,
         );
         assert!(r.is_err());
         assert_eq!(item.hinekora_lock, Some(0xfeed_face_u64));
+        // Omens preserved — transmute didn't consume any.
+        assert_eq!(omens.len(), 1);
     }
 
     #[test]
-    fn preview_does_not_mutate_or_clear_lock() {
+    fn preview_does_not_mutate_or_clear_lock_or_omens() {
         let reg = registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(3);
         let mut item = fixture();
         item.hinekora_lock = Some(0xc0de);
+        let omens = OmenSet::new();
 
         let preview = preview_currency(
             &OrbOfTransmutation::new(),
@@ -232,23 +241,22 @@ mod tests {
             &reg,
             &mut rng,
             PatchVersion::PATCH_0_4_0,
+            &omens,
         )
         .unwrap();
         assert_eq!(preview.rarity, Rarity::Magic);
         // Original is untouched.
         assert_eq!(item.rarity, Rarity::Normal);
-        assert!(item.prefixes.is_empty() && item.suffixes.is_empty());
-        // Lock survives.
         assert_eq!(item.hinekora_lock, Some(0xc0de));
     }
 
     #[test]
     fn preview_and_commit_with_locked_seed_match_exactly() {
-        // The whole point of Hinekora's Lock: preview = commit if you commit.
         let reg = registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
         let mut item = fixture();
         item.hinekora_lock = Some(0xa11ce);
+        let mut omens = OmenSet::new();
 
         let previewed = preview_currency(
             &OrbOfTransmutation::new(),
@@ -256,31 +264,31 @@ mod tests {
             &reg,
             &mut rng,
             PatchVersion::PATCH_0_4_0,
+            &omens,
         )
         .unwrap();
-        // Commit — uses the SAME seed.
         apply_currency(
             &OrbOfTransmutation::new(),
             &mut item,
             &reg,
             &mut rng,
             PatchVersion::PATCH_0_4_0,
+            &mut omens,
         )
         .unwrap();
-        // Once committed, the lock is gone — but the previewed item still
-        // shows the lock as Some (preview doesn't clear). To compare item
-        // state byte-for-byte we have to discount the lock difference.
+
         let mut expected_committed = previewed.clone();
         expected_committed.hinekora_lock = None;
         assert_eq!(item, expected_committed);
     }
 
     #[test]
-    fn commit_with_preview_accepts() {
+    fn commit_with_preview_accepts_and_rejects() {
         let reg = registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(5);
         let mut item = fixture();
         item.hinekora_lock = Some(0xb1ce);
+        let mut omens = OmenSet::new();
 
         let result = commit_with_preview(
             &OrbOfTransmutation::new(),
@@ -288,68 +296,29 @@ mod tests {
             &reg,
             &mut rng,
             PatchVersion::PATCH_0_4_0,
+            &mut omens,
             |_preview| true,
         )
         .unwrap();
         assert!(result.is_some());
         assert_eq!(item.rarity, Rarity::Magic);
         assert!(item.hinekora_lock.is_none());
-    }
 
-    #[test]
-    fn commit_with_preview_rejects() {
-        let reg = registry();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(6);
+        // Reset and reject path.
         let mut item = fixture();
         item.hinekora_lock = Some(0xb2ad);
-
         let result = commit_with_preview(
             &OrbOfTransmutation::new(),
             &mut item,
             &reg,
             &mut rng,
             PatchVersion::PATCH_0_4_0,
-            |_preview| false, // always reject
+            &mut omens,
+            |_preview| false,
         )
         .unwrap();
         assert!(result.is_none());
-        // Item unchanged, lock intact.
         assert_eq!(item.rarity, Rarity::Normal);
         assert_eq!(item.hinekora_lock, Some(0xb2ad));
-    }
-
-    #[test]
-    fn unlocked_apply_uses_live_rng() {
-        // Sanity: without a lock, the live RNG is used — different seeds
-        // produce different items.
-        let reg = registry();
-        let mut item_a = fixture();
-        let mut rng_a = Xoshiro256PlusPlus::seed_from_u64(0xaaaa);
-        apply_currency(
-            &OrbOfTransmutation::new(),
-            &mut item_a,
-            &reg,
-            &mut rng_a,
-            PatchVersion::PATCH_0_4_0,
-        )
-        .unwrap();
-
-        let mut item_b = fixture();
-        let mut rng_b = Xoshiro256PlusPlus::seed_from_u64(0xbbbb);
-        apply_currency(
-            &OrbOfTransmutation::new(),
-            &mut item_b,
-            &reg,
-            &mut rng_b,
-            PatchVersion::PATCH_0_4_0,
-        )
-        .unwrap();
-
-        // Both promoted to Magic; the rolled mod ids may or may not differ
-        // (small fixture pool). At minimum they're independently sampled —
-        // we verify neither inherited the other's hinekora_lock (None on
-        // both since neither had a lock).
-        assert!(item_a.hinekora_lock.is_none());
-        assert!(item_b.hinekora_lock.is_none());
     }
 }

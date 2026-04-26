@@ -135,21 +135,67 @@ fn collect_occupied_groups(
     out
 }
 
-/// All non-fractured visible explicit mods on the item, in a stable order.
-/// Used by remove-style currencies (Annul/Chaos) for uniform random selection.
-fn collect_removable(item: &Item) -> SmallVec<[(AffixType, usize); 8]> {
+/// Filtered variant for omen-aware Annul/Chaos paths.
+///
+/// - `affix_filter` (Some(_)) restricts the result to mods of that affix
+///   type (Sinistral/Dextral Annulment, Sinistral/Dextral Erasure).
+/// - `desecrated_only` restricts to mods of `kind = Desecrated` (Omen of
+///   Light: next Annul removes only Desecrated mods).
+fn collect_removable_filtered(
+    item: &Item,
+    affix_filter: Option<AffixType>,
+    desecrated_only: bool,
+) -> SmallVec<[(AffixType, usize); 8]> {
     let mut out = SmallVec::new();
-    for (i, m) in item.prefixes.iter().enumerate() {
-        if !m.is_fractured {
+    if affix_filter != Some(AffixType::Suffix) {
+        for (i, m) in item.prefixes.iter().enumerate() {
+            if m.is_fractured {
+                continue;
+            }
+            if desecrated_only && m.kind != crate::mods::ModKind::Desecrated {
+                continue;
+            }
             out.push((AffixType::Prefix, i));
         }
     }
-    for (i, m) in item.suffixes.iter().enumerate() {
-        if !m.is_fractured {
+    if affix_filter != Some(AffixType::Prefix) {
+        for (i, m) in item.suffixes.iter().enumerate() {
+            if m.is_fractured {
+                continue;
+            }
+            if desecrated_only && m.kind != crate::mods::ModKind::Desecrated {
+                continue;
+            }
             out.push((AffixType::Suffix, i));
         }
     }
     out
+}
+
+/// Find the lowest-required-level mod among the candidates. Used by
+/// Omen of Whittling. Returns the index in `candidates` of the chosen mod,
+/// or `None` if `candidates` is empty.
+fn pick_lowest_mod_level(
+    item: &Item,
+    candidates: &[(AffixType, usize)],
+    registry: &ModRegistry,
+) -> Option<usize> {
+    let mut best_idx = None;
+    let mut best_lvl = u32::MAX;
+    for (i, (slot, idx)) in candidates.iter().enumerate() {
+        let roll = match slot {
+            AffixType::Prefix => &item.prefixes[*idx],
+            AffixType::Suffix => &item.suffixes[*idx],
+            _ => continue,
+        };
+        if let Some(def) = registry.get(&roll.mod_id) {
+            if def.required_level < best_lvl {
+                best_lvl = def.required_level;
+                best_idx = Some(i);
+            }
+        }
+    }
+    best_idx
 }
 
 /// Remove a mod by `(affix, index)` and return the removed `ModRoll`.
@@ -183,7 +229,12 @@ fn roll_mod(m: &ModDefinition, rng: &mut dyn rand::RngCore) -> ModRoll {
     }
 }
 
-/// Pick uniformly between Prefix and Suffix among empty slots.
+/// Pick a Prefix-or-Suffix slot among empty slots.
+///
+/// Without omens: uniform random over open slots.
+/// With Sinistral/Dextral *Exaltation* (or any AffixOnly omen): forced to
+/// the omen's affix if a slot is open; otherwise the omen is consumed but
+/// no slot is opened (caller errors with [`EngineError::AffixSlotFull`]).
 fn pick_open_affix(item: &Item, rng: &mut dyn rand::RngCore, max_slots: u8) -> Option<AffixType> {
     let prefix_open = item.prefixes.len() < max_slots as usize;
     let suffix_open = item.suffixes.len() < max_slots as usize;
@@ -197,6 +248,28 @@ fn pick_open_affix(item: &Item, rng: &mut dyn rand::RngCore, max_slots: u8) -> O
         (false, true) => Some(AffixType::Suffix),
         (false, false) => None,
     }
+}
+
+/// Pick a Prefix-or-Suffix, consulting omens. Used by Exalt-class currencies
+/// (Exalted, Greater/Perfect Exalted) where Sinistral/Dextral Exaltation
+/// constrains the choice.
+fn pick_open_affix_with_omen(
+    item: &Item,
+    ctx: &mut ApplyContext<'_>,
+    max_slots: u8,
+) -> Option<AffixType> {
+    if let Some(forced) = ctx.omens.consume_affix_only(ctx.patch) {
+        let occupied = match forced {
+            AffixType::Prefix => item.prefixes.len() >= max_slots as usize,
+            AffixType::Suffix => item.suffixes.len() >= max_slots as usize,
+            _ => return None,
+        };
+        if occupied {
+            return None;
+        }
+        return Some(forced);
+    }
+    pick_open_affix(item, ctx.rng, max_slots)
 }
 
 /// Static label for an affix slot (used in error messages).
@@ -502,17 +575,27 @@ impl Currency for ExaltedOrb {
                 "Exalted Orb requires a Rare-rarity item".into(),
             ));
         }
-        let affix = pick_open_affix(item, ctx.rng, 3).ok_or(EngineError::AffixSlotFull {
-            affix_type: "rare item is at the prefix+suffix cap",
-        })?;
-        let m = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, 0).ok_or_else(
-            || EngineError::NoEligibleMods {
-                base: item.base.to_string(),
-                ilvl: item.ilvl,
-                affix_type: affix_label(affix),
-            },
-        )?;
-        push_mod(item, roll_mod(m, ctx.rng));
+
+        // Greater Exaltation: add 2 mods if active.
+        let n_mods = if ctx.omens.consume_greater_exaltation(ctx.patch) {
+            2
+        } else {
+            1
+        };
+
+        for _ in 0..n_mods {
+            let affix =
+                pick_open_affix_with_omen(item, ctx, 3).ok_or(EngineError::AffixSlotFull {
+                    affix_type: "Exalted Orb: no eligible affix slot",
+                })?;
+            let m = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, 0)
+                .ok_or_else(|| EngineError::NoEligibleMods {
+                    base: item.base.to_string(),
+                    ilvl: item.ilvl,
+                    affix_type: affix_label(affix),
+                })?;
+            push_mod(item, roll_mod(m, ctx.rng));
+        }
         Ok(())
     }
 }
@@ -563,10 +646,14 @@ impl Currency for OrbOfAnnulment {
                 "Orb of Annulment requires a Magic or Rare item".into(),
             ));
         }
-        let removables = collect_removable(item);
+        // Sinistral/Dextral Annulment force a side; Omen of Light forces
+        // Desecrated-only. The two filters compose — both can apply.
+        let affix_filter = ctx.omens.consume_affix_only(ctx.patch);
+        let desecrated_only = ctx.omens.consume_light(ctx.patch);
+        let removables = collect_removable_filtered(item, affix_filter, desecrated_only);
         if removables.is_empty() {
             return Err(EngineError::InvalidApplication(
-                "Orb of Annulment: no non-fractured affix mod to remove".into(),
+                "Orb of Annulment: no eligible mod to remove given omens / fractures".into(),
             ));
         }
         let pick = ctx.rng.gen_range(0..removables.len());
@@ -613,42 +700,61 @@ impl Currency for ChaosOrb {
     }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
-        if !item.is_modifiable() {
-            return Err(EngineError::InvalidApplication(
-                "Chaos Orb requires a modifiable item".into(),
-            ));
-        }
-        if item.rarity != Rarity::Rare {
-            return Err(EngineError::InvalidApplication(
-                "Chaos Orb requires a Rare-rarity item".into(),
-            ));
-        }
-        let removables = collect_removable(item);
-        if removables.is_empty() {
-            return Err(EngineError::InvalidApplication(
-                "Chaos Orb: no non-fractured affix mod to remove".into(),
-            ));
-        }
-        let pick = ctx.rng.gen_range(0..removables.len());
-        let (removed_affix, idx) = removables[pick];
-        remove_mod_at(item, removed_affix, idx);
-
-        // Choose a fresh affix slot to fill. Per planning notes, vanilla
-        // Chaos can fill EITHER prefix or suffix — Sinistral/Dextral Erasure
-        // omens (M2.6) constrain it. Without omens, sample uniformly over
-        // currently-empty slots.
-        let new_affix = pick_open_affix(item, ctx.rng, 3).ok_or(EngineError::AffixSlotFull {
-            affix_type: "no slot opened up after Chaos Orb removal",
-        })?;
-        let m = sample_eligible_mod(ctx.registry, item, new_affix, ctx.rng, ctx.patch, 0)
-            .ok_or_else(|| EngineError::NoEligibleMods {
-                base: item.base.to_string(),
-                ilvl: item.ilvl,
-                affix_type: affix_label(new_affix),
-            })?;
-        push_mod(item, roll_mod(m, ctx.rng));
-        Ok(())
+        chaos_apply(item, ctx, 0)
     }
+}
+
+/// Shared Chaos apply. Used by both vanilla [`ChaosOrb`] and the Greater /
+/// Perfect variants (which thread a min-mod-level through).
+fn chaos_apply(
+    item: &mut Item,
+    ctx: &mut ApplyContext<'_>,
+    min_level: u32,
+) -> EngineResult<ApplyOutcome> {
+    if !item.is_modifiable() {
+        return Err(EngineError::InvalidApplication(
+            "Chaos Orb requires a modifiable item".into(),
+        ));
+    }
+    if item.rarity != Rarity::Rare {
+        return Err(EngineError::InvalidApplication(
+            "Chaos Orb requires a Rare-rarity item".into(),
+        ));
+    }
+
+    // Removal step. Omens that may fire on this Chaos:
+    //   Sinistral/Dextral Erasure  → AffixOnly filter
+    //   Whittling                  → pick lowest-required-level mod
+    let affix_filter = ctx.omens.consume_affix_only(ctx.patch);
+    let whittling = ctx.omens.consume_whittling(ctx.patch);
+    let removables = collect_removable_filtered(item, affix_filter, false);
+    if removables.is_empty() {
+        return Err(EngineError::InvalidApplication(
+            "Chaos Orb: no eligible mod to remove given omens / fractures".into(),
+        ));
+    }
+    let pick_idx = if whittling {
+        pick_lowest_mod_level(item, &removables, ctx.registry).unwrap_or(0)
+    } else {
+        ctx.rng.gen_range(0..removables.len())
+    };
+    let (removed_affix, idx) = removables[pick_idx];
+    remove_mod_at(item, removed_affix, idx);
+
+    // Add step. The new affix slot is uniform among empty slots (or forced
+    // by Sinistral/Dextral Erasure if it had a sister Add omen, but Erasure
+    // covers only the removal side per planning).
+    let new_affix = pick_open_affix(item, ctx.rng, 3).ok_or(EngineError::AffixSlotFull {
+        affix_type: "no slot opened up after Chaos Orb removal",
+    })?;
+    let m = sample_eligible_mod(ctx.registry, item, new_affix, ctx.rng, ctx.patch, min_level)
+        .ok_or_else(|| EngineError::NoEligibleMods {
+            base: item.base.to_string(),
+            ilvl: item.ilvl,
+            affix_type: affix_label(new_affix),
+        })?;
+    push_mod(item, roll_mod(m, ctx.rng));
+    Ok(())
 }
 
 // =========================================================================
@@ -901,42 +1007,15 @@ fn add_one_mod_with_min(
     Ok(())
 }
 
-/// Generic Chaos-with-min-level: remove 1 random non-fractured + add 1 ≥ min.
+/// Generic Chaos-with-min-level used by Greater/Perfect Chaos variants.
+/// Delegates to [`chaos_apply`] which already handles omens.
 fn chaos_with_min(
     item: &mut Item,
     ctx: &mut ApplyContext<'_>,
     min_level: u32,
-    name: &'static str,
+    _name: &'static str,
 ) -> EngineResult<()> {
-    if !item.is_modifiable() {
-        return Err(EngineError::InvalidApplication(format!(
-            "{name} requires a modifiable item"
-        )));
-    }
-    if item.rarity != Rarity::Rare {
-        return Err(EngineError::InvalidApplication(format!(
-            "{name} requires a Rare-rarity item"
-        )));
-    }
-    let removables = collect_removable(item);
-    if removables.is_empty() {
-        return Err(EngineError::InvalidApplication(format!(
-            "{name}: no non-fractured affix mod to remove"
-        )));
-    }
-    let pick = ctx.rng.gen_range(0..removables.len());
-    let (removed_affix, idx) = removables[pick];
-    remove_mod_at(item, removed_affix, idx);
-    let new_affix =
-        pick_open_affix(item, ctx.rng, 3).ok_or(EngineError::AffixSlotFull { affix_type: name })?;
-    let m = sample_eligible_mod(ctx.registry, item, new_affix, ctx.rng, ctx.patch, min_level)
-        .ok_or_else(|| EngineError::NoEligibleMods {
-            base: item.base.to_string(),
-            ilvl: item.ilvl,
-            affix_type: affix_label(new_affix),
-        })?;
-    push_mod(item, roll_mod(m, ctx.rng));
-    Ok(())
+    chaos_apply(item, ctx, min_level)
 }
 
 /// Defines a Greater/Perfect tier currency that wraps `add_one_mod_with_min`.
@@ -1197,17 +1276,22 @@ mod tests {
         ])
     }
 
-    fn ctx<'a>(registry: &'a ModRegistry, rng: &'a mut Xoshiro256PlusPlus) -> ApplyContext<'a> {
-        ApplyContext::new(registry, rng, PatchVersion::PATCH_0_4_0)
+    fn ctx<'a>(
+        registry: &'a ModRegistry,
+        rng: &'a mut Xoshiro256PlusPlus,
+        omens: &'a mut crate::omen::OmenSet,
+    ) -> ApplyContext<'a> {
+        ApplyContext::new(registry, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     #[test]
     fn transmute_promotes_normal_to_magic_and_adds_one_mod() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(42);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfTransmutation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         assert_eq!(item.rarity, Rarity::Magic);
         assert_eq!(item.prefixes.len() + item.suffixes.len(), 1);
@@ -1217,9 +1301,10 @@ mod tests {
     fn transmute_rejects_magic_item() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Magic;
-        let r = OrbOfTransmutation::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = OrbOfTransmutation::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -1227,12 +1312,13 @@ mod tests {
     fn augment_fills_empty_slot_on_magic() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(7);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfTransmutation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         OrbOfAugmentation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         assert_eq!(item.rarity, Rarity::Magic);
         assert_eq!(item.prefixes.len() + item.suffixes.len(), 2);
@@ -1251,14 +1337,15 @@ mod tests {
         // Magic = 1 prefix + 1 suffix max; saturated => Augment errors.
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(7);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfTransmutation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         OrbOfAugmentation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
-        let r = OrbOfAugmentation::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = OrbOfAugmentation::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::AffixSlotFull { .. })));
     }
 
@@ -1266,16 +1353,17 @@ mod tests {
     fn regal_promotes_magic_to_rare_with_3rd_mod() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(13);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfTransmutation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         OrbOfAugmentation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let before = item.prefixes.len() + item.suffixes.len();
         RegalOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let after = item.prefixes.len() + item.suffixes.len();
         assert_eq!(item.rarity, Rarity::Rare);
@@ -1286,15 +1374,16 @@ mod tests {
     fn regal_rejects_normal_or_rare() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(99);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
 
         // Normal
-        let r = RegalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = RegalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
 
         // Rare
         item.rarity = Rarity::Rare;
-        let r = RegalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = RegalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -1302,9 +1391,10 @@ mod tests {
     fn currencies_reject_corrupted_items() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.corrupted = true;
-        let r = OrbOfTransmutation::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = OrbOfTransmutation::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -1313,15 +1403,16 @@ mod tests {
         let reg = fixture_registry();
         let make = || {
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x00c0_ffee);
+            let mut omens = crate::omen::OmenSet::new();
             let mut item = fixture_normal_boots();
             OrbOfTransmutation::new()
-                .apply(&mut item, &mut ctx(&reg, &mut rng))
+                .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
                 .unwrap();
             OrbOfAugmentation::new()
-                .apply(&mut item, &mut ctx(&reg, &mut rng))
+                .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
                 .unwrap();
             RegalOrb::new()
-                .apply(&mut item, &mut ctx(&reg, &mut rng))
+                .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
                 .unwrap();
             item
         };
@@ -1334,9 +1425,10 @@ mod tests {
     fn alchemy_promotes_normal_to_rare_with_up_to_4_mods() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xa1c);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfAlchemy::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         assert_eq!(item.rarity, Rarity::Rare);
         let n = item.prefixes.len() + item.suffixes.len();
@@ -1355,9 +1447,10 @@ mod tests {
     fn alchemy_rejects_non_normal() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Magic;
-        let r = OrbOfAlchemy::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = OrbOfAlchemy::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -1365,9 +1458,10 @@ mod tests {
     fn exalt_adds_one_mod_to_rare() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xe7);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfAlchemy::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let before = item.prefixes.len() + item.suffixes.len();
         if before >= 6 {
@@ -1375,7 +1469,7 @@ mod tests {
             return;
         }
         ExaltedOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let after = item.prefixes.len() + item.suffixes.len();
         assert_eq!(after, before + 1);
@@ -1385,8 +1479,9 @@ mod tests {
     fn exalt_rejects_non_rare() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
-        let r = ExaltedOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = ExaltedOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -1394,13 +1489,14 @@ mod tests {
     fn annul_removes_exactly_one_mod() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xa9);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfAlchemy::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let before = item.prefixes.len() + item.suffixes.len();
         OrbOfAnnulment::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let after = item.prefixes.len() + item.suffixes.len();
         assert_eq!(after, before - 1);
@@ -1412,6 +1508,7 @@ mod tests {
         // should never remove the fractured one.
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xfff);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Rare;
         item.prefixes.push(ModRoll {
@@ -1429,7 +1526,7 @@ mod tests {
             is_fractured: false,
         });
         OrbOfAnnulment::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         // Fractured prefix survives; suffix is gone.
         assert_eq!(item.prefixes.len(), 1);
@@ -1437,7 +1534,7 @@ mod tests {
         assert!(item.prefixes[0].is_fractured);
 
         // Second annul: nothing left to remove (only fractured).
-        let r = OrbOfAnnulment::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = OrbOfAnnulment::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -1445,16 +1542,17 @@ mod tests {
     fn chaos_keeps_mod_count_constant() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xcaa05);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfAlchemy::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let before = item.prefixes.len() + item.suffixes.len();
         if before == 0 {
             return; // alch produced 0 mods; can't chaos
         }
         ChaosOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let after = item.prefixes.len() + item.suffixes.len();
         // Chaos = -1 + 1 = same count
@@ -1466,6 +1564,7 @@ mod tests {
     #[test]
     fn divine_rerolls_non_fractured_values() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xd1);
+        let mut omens = crate::omen::OmenSet::new();
         // Build a Rare with one mod whose stats have a wide range.
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Rare;
@@ -1504,7 +1603,7 @@ mod tests {
         }]);
 
         DivineOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let v = item.prefixes[0].values[0];
         assert!((100.0..=200.0).contains(&v), "got {v}");
@@ -1513,6 +1612,7 @@ mod tests {
     #[test]
     fn divine_skips_fractured_mods() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xd2);
+        let mut omens = crate::omen::OmenSet::new();
         let reg = ModRegistry::from_mods(vec![ModDefinition {
             id: ModId::from("Life1"),
             name: None,
@@ -1548,7 +1648,7 @@ mod tests {
             is_fractured: true,
         });
         DivineOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         // Fractured value is unchanged.
         assert!((item.prefixes[0].values[0] - 123.0).abs() < 1e-9);
@@ -1558,13 +1658,14 @@ mod tests {
     fn divine_rejects_normal_or_corrupted() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xd3);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
-        let r = DivineOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = DivineOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
 
         item.rarity = Rarity::Rare;
         item.corrupted = true;
-        let r = DivineOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = DivineOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -1574,10 +1675,11 @@ mod tests {
     fn vaal_marks_item_corrupted() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x1);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Rare;
         VaalOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         assert!(item.corrupted);
     }
@@ -1586,9 +1688,10 @@ mod tests {
     fn vaal_rejects_already_corrupted() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x2);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.corrupted = true;
-        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::ItemCorrupted)));
     }
 
@@ -1596,14 +1699,15 @@ mod tests {
     fn vaal_rejects_sanctified_or_mirrored() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x3);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.sanctified = true;
-        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::ItemSanctified)));
 
         let mut item = fixture_normal_boots();
         item.mirrored = true;
-        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -1613,6 +1717,7 @@ mod tests {
         use std::collections::HashSet;
         let mut seen: HashSet<u8> = HashSet::new();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x600);
+        let mut _omens = crate::omen::OmenSet::new();
         for _ in 0..600 {
             let outcome = sample_vaal_outcome(&mut rng);
             seen.insert(outcome as u8);
@@ -1685,9 +1790,10 @@ mod tests {
         // Life_T3 (1) are filtered out.
         let reg = fixture_tiered_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9001);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         PerfectOrbOfTransmutation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         // The single rolled mod must be one of the T1 (req >= 70) candidates.
         let roll = item
@@ -1705,12 +1811,13 @@ mod tests {
         // land on a high-tier mod.
         let reg = fixture_tiered_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9002);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         OrbOfTransmutation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         GreaterRegalOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         assert_eq!(item.rarity, Rarity::Rare);
         // Among the up-to-3 mods on the Rare, the Regal-added one must be a
@@ -1730,6 +1837,7 @@ mod tests {
         // must be required_level >= 70.
         let reg = fixture_tiered_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9003);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Rare;
         item.prefixes.push(ModRoll {
@@ -1740,7 +1848,7 @@ mod tests {
             is_fractured: false,
         });
         PerfectExaltedOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         // The newly added mod (the LAST one in either prefixes or suffixes)
         // must end with _T1 since that's the only required_level>=70 mod
@@ -1759,6 +1867,7 @@ mod tests {
         // mod must be required_level >= 70.
         let reg = fixture_tiered_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9004);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Rare;
         item.prefixes.push(ModRoll {
@@ -1769,7 +1878,7 @@ mod tests {
             is_fractured: false,
         });
         PerfectChaosOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         // After Chaos, the T3 mod is removed and a new high-level mod is added.
         let any_t3 = item
@@ -1786,12 +1895,159 @@ mod tests {
         assert!(any_t1, "Perfect Chaos should add a T1");
     }
 
+    // ---- Omen interactions -------------------------------------------------
+
+    fn fill_rare_with_groups(item: &mut Item, prefix_groups: &[&str], suffix_groups: &[&str]) {
+        item.rarity = Rarity::Rare;
+        for g in prefix_groups {
+            item.prefixes.push(ModRoll {
+                mod_id: ModId::from(*g),
+                affix_type: AffixType::Prefix,
+                kind: ModKind::Explicit,
+                values: smallvec![],
+                is_fractured: false,
+            });
+        }
+        for g in suffix_groups {
+            item.suffixes.push(ModRoll {
+                mod_id: ModId::from(*g),
+                affix_type: AffixType::Suffix,
+                kind: ModKind::Explicit,
+                values: smallvec![],
+                is_fractured: false,
+            });
+        }
+    }
+
+    #[test]
+    fn dextral_exaltation_forces_suffix() {
+        let reg = fixture_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xde0);
+        let mut omens = crate::omen::OmenSet::new();
+        omens.push(crate::omen::Omen::dextral_exaltation());
+
+        let mut item = fixture_normal_boots();
+        // Rare with one suffix open and one prefix open.
+        fill_rare_with_groups(&mut item, &["Life1"], &[]);
+
+        ExaltedOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
+            .unwrap();
+
+        // The omen forced Suffix; we should have at least one suffix.
+        assert!(!item.suffixes.is_empty());
+        assert!(omens.is_empty(), "omen should be consumed");
+    }
+
+    #[test]
+    fn sinistral_exaltation_forces_prefix() {
+        let reg = fixture_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x517);
+        let mut omens = crate::omen::OmenSet::new();
+        omens.push(crate::omen::Omen::sinistral_exaltation());
+
+        let mut item = fixture_normal_boots();
+        fill_rare_with_groups(&mut item, &[], &["FireRes1"]);
+
+        ExaltedOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
+            .unwrap();
+
+        assert!(!item.prefixes.is_empty(), "prefix should have been added");
+    }
+
+    #[test]
+    fn greater_exaltation_adds_two_mods() {
+        let reg = fixture_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xa2);
+        let mut omens = crate::omen::OmenSet::new();
+        omens.push(crate::omen::Omen::greater_exaltation());
+
+        let mut item = fixture_normal_boots();
+        // Empty Rare so we have plenty of slots.
+        item.rarity = Rarity::Rare;
+
+        ExaltedOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
+            .unwrap();
+
+        assert_eq!(
+            item.prefixes.len() + item.suffixes.len(),
+            2,
+            "Greater Exaltation should add 2 mods"
+        );
+    }
+
+    #[test]
+    fn dextral_annulment_only_removes_suffix() {
+        let reg = fixture_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xab);
+        let mut omens = crate::omen::OmenSet::new();
+        omens.push(crate::omen::Omen::dextral_annulment());
+
+        let mut item = fixture_normal_boots();
+        fill_rare_with_groups(&mut item, &["Life1"], &["FireRes1"]);
+
+        OrbOfAnnulment::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
+            .unwrap();
+
+        assert_eq!(item.prefixes.len(), 1, "prefix must survive");
+        assert_eq!(item.suffixes.len(), 0, "suffix must be removed");
+    }
+
+    #[test]
+    fn whittling_picks_lowest_required_level_mod_in_chaos() {
+        // Two prefixes: high-req and low-req. Chaos with Whittling removes
+        // the lowest-required-level one.
+        let reg = ModRegistry::from_mods(vec![
+            mk_mod_lvl("HighReqLife", "Life", AffixType::Prefix, "Boots", 80),
+            mk_mod_lvl("LowReqMana", "Mana", AffixType::Prefix, "Boots", 5),
+            mk_mod_lvl("FreshMod", "FreshGroup", AffixType::Suffix, "Boots", 1),
+        ]);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xc1);
+        let mut omens = crate::omen::OmenSet::new();
+        omens.push(crate::omen::Omen::whittling());
+
+        let mut item = fixture_normal_boots();
+        item.rarity = Rarity::Rare;
+        item.prefixes.push(ModRoll {
+            mod_id: ModId::from("HighReqLife"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![],
+            is_fractured: false,
+        });
+        item.prefixes.push(ModRoll {
+            mod_id: ModId::from("LowReqMana"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![],
+            is_fractured: false,
+        });
+
+        ChaosOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
+            .unwrap();
+
+        // The low-req mod must be gone; the high-req must survive.
+        assert!(!item
+            .prefixes
+            .iter()
+            .any(|m| m.mod_id == ModId::from("LowReqMana")));
+        assert!(item
+            .prefixes
+            .iter()
+            .any(|m| m.mod_id == ModId::from("HighReqLife")));
+    }
+
     // ---- Original tests ----------------------------------------------------
 
     #[test]
     fn chaos_rejects_non_rare() {
         let reg = fixture_registry();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(3);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Magic;
         item.prefixes.push(ModRoll {
@@ -1801,7 +2057,7 @@ mod tests {
             values: smallvec![],
             is_fractured: false,
         });
-        let r = ChaosOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = ChaosOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 }

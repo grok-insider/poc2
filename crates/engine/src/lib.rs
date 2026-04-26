@@ -62,6 +62,7 @@ pub use item_class::{AttributePool, ItemClass};
 pub use mods::{
     Concept, ModDefinition, ModDomain, ModFlags, ModGroup, ModKind, ModStat, SpawnWeight,
 };
+pub use omen::{Omen, OmenEffect, OmenSet};
 pub use patch::{PatchRange, PatchVersion};
 pub use registry::{ModIndex, ModRegistry};
 pub use tag::{Tag, TagCategory};

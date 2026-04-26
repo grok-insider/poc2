@@ -106,17 +106,22 @@ mod tests {
         }
     }
 
-    fn ctx<'a>(reg: &'a ModRegistry, rng: &'a mut Xoshiro256PlusPlus) -> ApplyContext<'a> {
-        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0)
+    fn ctx<'a>(
+        reg: &'a ModRegistry,
+        rng: &'a mut Xoshiro256PlusPlus,
+        omens: &'a mut crate::omen::OmenSet,
+    ) -> ApplyContext<'a> {
+        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     #[test]
     fn lock_sets_seed_on_clean_item() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x1);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
         HinekorasLock::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         assert!(item.hinekora_lock.is_some());
     }
@@ -125,9 +130,10 @@ mod tests {
     fn lock_rejects_corrupted() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x2);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
         item.corrupted = true;
-        let r = HinekorasLock::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = HinekorasLock::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -135,9 +141,10 @@ mod tests {
     fn lock_rejects_mirrored() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x3);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
         item.mirrored = true;
-        let r = HinekorasLock::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = HinekorasLock::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -145,9 +152,10 @@ mod tests {
     fn lock_rejects_already_locked() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x4);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
         item.hinekora_lock = Some(42);
-        let r = HinekorasLock::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        let r = HinekorasLock::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -156,15 +164,17 @@ mod tests {
         let reg = ModRegistry::from_mods(vec![]);
 
         let mut rng_a = Xoshiro256PlusPlus::seed_from_u64(0x00c0_ffee);
+        let mut omens_a = crate::omen::OmenSet::new();
         let mut a = fixture_item();
         HinekorasLock::new()
-            .apply(&mut a, &mut ctx(&reg, &mut rng_a))
+            .apply(&mut a, &mut ctx(&reg, &mut rng_a, &mut omens_a))
             .unwrap();
 
         let mut rng_b = Xoshiro256PlusPlus::seed_from_u64(0x00c0_ffee);
+        let mut omens_b = crate::omen::OmenSet::new();
         let mut b = fixture_item();
         HinekorasLock::new()
-            .apply(&mut b, &mut ctx(&reg, &mut rng_b))
+            .apply(&mut b, &mut ctx(&reg, &mut rng_b, &mut omens_b))
             .unwrap();
 
         assert_eq!(a.hinekora_lock, b.hinekora_lock);

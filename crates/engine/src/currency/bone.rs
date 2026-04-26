@@ -108,31 +108,56 @@ impl Currency for Bone {
             ));
         }
 
-        // Pick affix slot — uniform random among empty slots (without omens).
+        // Pick affix slot.
+        // Sinistral / Dextral Necromancy force the affix.
+        // Lord-targeting omens (Blackblooded / Liege / Sovereign) tag the
+        //   slot so the reveal pool is restricted to that lord's mods.
+        let forced_affix = ctx.omens.consume_affix_only(ctx.patch);
+        let lord = ctx.omens.consume_lord_target(ctx.patch);
+
         let prefix_open = item.prefixes.len() < 3;
         let suffix_open = item.suffixes.len() < 3;
-        let affix = match (prefix_open, suffix_open) {
-            (true, true) => {
-                if ctx.rng.gen::<bool>() {
-                    AffixType::Prefix
-                } else {
-                    AffixType::Suffix
-                }
-            }
-            (true, false) => AffixType::Prefix,
-            (false, true) => AffixType::Suffix,
-            (false, false) => {
+        let affix = match forced_affix {
+            Some(AffixType::Prefix) if prefix_open => AffixType::Prefix,
+            Some(AffixType::Prefix) => {
                 return Err(EngineError::AffixSlotFull {
-                    affix_type: "no open prefix/suffix slot for Bone",
-                })
+                    affix_type: "Sinistral Necromancy: prefix slots are full",
+                });
             }
+            Some(AffixType::Suffix) if suffix_open => AffixType::Suffix,
+            Some(AffixType::Suffix) => {
+                return Err(EngineError::AffixSlotFull {
+                    affix_type: "Dextral Necromancy: suffix slots are full",
+                });
+            }
+            Some(_) => {
+                return Err(EngineError::AffixSlotFull {
+                    affix_type: "non-prefix/suffix omen affix for Bone",
+                });
+            }
+            None => match (prefix_open, suffix_open) {
+                (true, true) => {
+                    if ctx.rng.gen::<bool>() {
+                        AffixType::Prefix
+                    } else {
+                        AffixType::Suffix
+                    }
+                }
+                (true, false) => AffixType::Prefix,
+                (false, true) => AffixType::Suffix,
+                (false, false) => {
+                    return Err(EngineError::AffixSlotFull {
+                        affix_type: "no open prefix/suffix slot for Bone",
+                    });
+                }
+            },
         };
 
         item.hidden_desecrated = Some(HiddenDesecratedSlot {
             affix_type: affix,
             bone_size: self.size,
             bone_subtype: self.subtype,
-            abyss_lord: None,
+            abyss_lord: lord,
         });
         Ok(())
     }
@@ -296,8 +321,12 @@ mod tests {
         }
     }
 
-    fn ctx<'a>(reg: &'a ModRegistry, rng: &'a mut Xoshiro256PlusPlus) -> ApplyContext<'a> {
-        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0)
+    fn ctx<'a>(
+        reg: &'a ModRegistry,
+        rng: &'a mut Xoshiro256PlusPlus,
+        omens: &'a mut crate::omen::OmenSet,
+    ) -> ApplyContext<'a> {
+        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     fn desecrated_mod(id: &str, affix: AffixType, group: &str) -> ModDefinition {
@@ -331,9 +360,10 @@ mod tests {
     fn bone_adds_hidden_desecrated_slot() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         Bone::new(BoneSize::Preserved, BoneSubtype::Rib)
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         assert!(item.hidden_desecrated.is_some());
         let h = item.hidden_desecrated.as_ref().unwrap();
@@ -348,12 +378,13 @@ mod tests {
     fn bone_rejects_when_already_has_hidden() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         Bone::new(BoneSize::Preserved, BoneSubtype::Rib)
-            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
         let r = Bone::new(BoneSize::Ancient, BoneSubtype::Rib)
-            .apply(&mut item, &mut ctx(&reg, &mut rng));
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -361,10 +392,11 @@ mod tests {
     fn bone_rejects_non_rare() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(3);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         item.rarity = Rarity::Magic;
         let r = Bone::new(BoneSize::Preserved, BoneSubtype::Rib)
-            .apply(&mut item, &mut ctx(&reg, &mut rng));
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
@@ -372,6 +404,7 @@ mod tests {
     fn bone_rejects_when_both_slots_full() {
         let reg = ModRegistry::from_mods(vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
+        let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         // Fill all 3+3 slots.
         item.prefixes = smallvec![
@@ -395,13 +428,14 @@ mod tests {
             3
         ];
         let r = Bone::new(BoneSize::Preserved, BoneSubtype::Rib)
-            .apply(&mut item, &mut ctx(&reg, &mut rng));
+            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::AffixSlotFull { .. })));
     }
 
     #[test]
     fn reveal_offers_three_options_and_filters_by_affix() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(5);
+        let mut _omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         item.hidden_desecrated = Some(HiddenDesecratedSlot {
             affix_type: AffixType::Suffix,
@@ -429,6 +463,7 @@ mod tests {
     #[test]
     fn reveal_commits_chosen_mod_to_correct_slot() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(6);
+        let mut _omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         item.hidden_desecrated = Some(HiddenDesecratedSlot {
             affix_type: AffixType::Suffix,
@@ -451,6 +486,7 @@ mod tests {
     #[test]
     fn reveal_rejects_chosen_with_wrong_affix() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(7);
+        let mut _omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         item.hidden_desecrated = Some(HiddenDesecratedSlot {
             affix_type: AffixType::Suffix,
@@ -468,6 +504,7 @@ mod tests {
     #[test]
     fn reveal_rejects_unknown_mod() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(8);
+        let mut _omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         item.hidden_desecrated = Some(HiddenDesecratedSlot {
             affix_type: AffixType::Suffix,
@@ -483,6 +520,7 @@ mod tests {
     #[test]
     fn reveal_rejects_when_no_hidden_slot() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(9);
+        let mut _omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
         let pool = vec![desecrated_mod("DS_SUF1", AffixType::Suffix, "GA")];
         let r = reveal_at_well_of_souls(&mut item, &pool, &ModId::from("DS_SUF1"), &mut rng);
