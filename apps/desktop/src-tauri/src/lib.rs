@@ -64,6 +64,20 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
         "catalysing-exaltation",
         include_str!("../../../../crates/strategies/strategies/catalysing-exaltation.toml"),
     ),
+    (
+        "perfect-essence-crystallisation",
+        include_str!(
+            "../../../../crates/strategies/strategies/perfect-essence-crystallisation.toml"
+        ),
+    ),
+    (
+        "greater-exaltation-stacking",
+        include_str!("../../../../crates/strategies/strategies/greater-exaltation-stacking.toml"),
+    ),
+    (
+        "sanctification-finish",
+        include_str!("../../../../crates/strategies/strategies/sanctification-finish.toml"),
+    ),
 ];
 
 /// Shared, read-only application state. Built once at startup; cloned

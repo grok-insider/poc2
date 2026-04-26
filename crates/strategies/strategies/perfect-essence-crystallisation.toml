@@ -1,0 +1,93 @@
+# Perfect Essence + Crystallisation (Isolation Crafting Variant)
+#
+# Source: sirgog (Mobalytics isolation-crafting guide), refined for 0.4
+# by Belton.
+# See /docs/33-strategy-library.md sec. 5 for the full breakdown.
+#
+# Key insight: Perfect Essence forces a guaranteed mod, and the
+# Sinistral / Dextral Crystallisation omen forces the essence to remove
+# from the targeted side only. Combined: surgical 1-mod swap on a
+# near-finished rare without touching the locked side.
+
+id = "perfect-essence-crystallisation"
+name = "Perfect Essence + Crystallisation (Isolation Swap)"
+patch_min = "0.4.0"
+expected_cost_div = [5, 25]
+expected_success_prob = [0.85, 0.95]
+confidence = "verified"
+note = """
+Best on rares with 5–6 mods where one side is locked-good and the
+other has exactly one junk mod. The Crystallisation omen targets the
+side; Perfect Essence drops a guaranteed essence mod into that slot.
+
+Compatibility check: Perfect Essence cannot be used on an item that
+already carries that essence's specific mod (e.g. can't Perfect Essence
+of Sorcery onto a staff that already has +X Cold Spell levels). Pin
+the item before slamming.
+"""
+
+[source]
+kind = "community"
+credit = "sirgog (Mobalytics isolation crafting), refined by Belton 0.4"
+reference = "https://mobalytics.gg/poe-2/guides/isolation-crafting"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    # Need at least 5 mods so Crystallisation has something to remove.
+    { mod_count = { op = "gte", value = 5 } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-activate-crystallisation"
+action = { kind = "activate_omen", omen = "OmenOfDextralCrystallisation" }
+note = """
+Activate Sinistral (prefix-only) or Dextral (suffix-only)
+Crystallisation depending on which side carries the junk. Default
+shown is Dextral; override by editing the omen id.
+"""
+on_success = "S2-perfect-essence"
+on_failure = "S2-perfect-essence"
+
+[[steps]]
+id = "S2-perfect-essence"
+action = { kind = "apply_currency", currency = "PerfectEssenceOfSeeking" }
+target_check = { has_concept = { concept = "CriticalDamageReduction", affix = "suffix" } }
+note = """
+Apply the Perfect Essence matching your target mod. Crystallisation
+guarantees the swap stays on the chosen side. Replace the currency id
+with whichever Perfect Essence fits your goal — Seeking is a common
+suffix for crit-defensive rares.
+"""
+on_success = "S3-done"
+on_failure = "S2b-recover"
+recovery = [
+    { message = "If essence missed because the slot already carried that mod: re-apply on a different side or swap essence type.", added_cost_div = 5 },
+    { message = "If wrong-side mod was hit: refill via Sinistral/Dextral Exaltation + Greater Exalt.", added_cost_div = 8 },
+]
+
+[[steps]]
+id = "S2b-recover"
+action = { kind = "apply_currency", currency = "GreaterExaltedOrb", omens = ["OmenOfDextralExaltation"] }
+note = "Recovery: refill the side you accidentally emptied via a side-locked Greater Exalt."
+on_success = "S3-done"
+on_failure = "S3-done"
+
+[[steps]]
+id = "S3-done"
+action = { kind = "done" }
+note = "Surgical swap complete. Continue to Vaal finish (#12) or Sanctification (#11) if mirror-tier."

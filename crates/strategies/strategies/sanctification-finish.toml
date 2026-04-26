@@ -1,0 +1,96 @@
+# Sanctification Finish (Mirror-Tier Polish)
+#
+# Source: Mobalytics 0.3 crafting changes (Lolcohol);
+# Belton's "Sanctifying a Mirror Amulet With Locks Until +4 Projectile
+# Skills" video.
+# See /docs/33-strategy-library.md sec. 11 for the full breakdown.
+#
+# Sanctification rerolls every modifier's value to between 80%–120% of
+# its normal range, then permanently locks the item from all further
+# crafting. Mirror-tier finisher only — Sanctify makes the item
+# uncraftable forever.
+
+id = "sanctification-finish"
+name = "Sanctification Finish (Mirror-Tier Polish)"
+patch_min = "0.4.0"
+expected_cost_div = [60, 200]
+expected_success_prob = [0.10, 0.30]
+confidence = "verified"
+note = """
+Use ONLY when:
+  1. The item is fully crafted (5–6 desired T1 mods).
+  2. The item is already worth ≥3× the omen cost.
+  3. You have a Hinekora's Lock to preview the Sanctification outcome
+     before committing (see strategy #10).
+
+Cannot Sanctify fractured mods past their normal max — fracture's
+value stays locked at the original roll.
+"""
+
+[source]
+kind = "community"
+credit = "Mobalytics 0.3 crafting changes (Lolcohol), Belton mirror-amulet stream"
+reference = "https://mobalytics.gg/poe-2/guides/0-3-crafting-changes"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { mirrored = false },
+    # Sanctify is mirror-tier only: 5+ desired mods.
+    { mod_count = { op = "gte", value = 5 } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-pre-lock-preview"
+action = { kind = "apply_currency", currency = "HinekorasLock" }
+note = """
+Apply Hinekora's Lock first so you can preview the Sanctification
+outcome before committing. Re-Lock with non-destructive currency
+(Tailoring Orb, anointing) until the previewed Sanctify result is
+acceptable.
+"""
+on_success = "S2-activate-sanctification"
+on_failure = "S2-activate-sanctification"
+recovery = [
+    { message = "If Lock unavailable: skip and accept the variance — Sanctify is single-shot per item.", added_cost_div = 0 },
+    { message = "Pre-clear bad previews via socket / quality changes (preserves the foreseeing state).", added_cost_div = 1 },
+]
+
+[[steps]]
+id = "S2-activate-sanctification"
+action = { kind = "activate_omen", omen = "OmenOfSanctification" }
+note = "Next Divine Orb will Sanctify the item: each mod rolled to 80–120% of its normal range, then permanently locked."
+on_success = "S3-divine"
+on_failure = "S3-divine"
+
+[[steps]]
+id = "S3-divine"
+action = { kind = "apply_currency", currency = "DivineOrb" }
+note = "Sanctification commit. Item gains the Sanctified tag — ALL further crafting locked out forever."
+on_success = "S4-done"
+on_failure = "S4-done"
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = """
+Sanctification complete. Item is now mirror-tier polished and
+permanently uncraftable. Suggested next: list at the mirror service
+or sell for end-game prices. Convention is to stop here — adding a
+Vaal corruption on top of Sanctification trades off the locked-perfect
+roll for a 25% brick chance, which the value math rarely justifies.
+"""

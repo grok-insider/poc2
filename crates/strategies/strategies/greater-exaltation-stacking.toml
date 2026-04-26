@@ -1,0 +1,89 @@
+# Greater Exaltation Stacking — 2 mods per slam
+#
+# Source: PoE2DB mechanic + Mobalytics omen-crafting guide.
+# See /docs/33-strategy-library.md sec. 6 for the full breakdown.
+#
+# Greater Exaltation makes the next Exalt add TWO mods instead of one.
+# Combined with Sinistral / Dextral Exaltation it can fill both slots
+# on one side in a single click. Riskiest single click in the game
+# without Hinekora's Lock — preview first when stakes are high.
+
+id = "greater-exaltation-stacking"
+name = "Greater Exaltation Stacking (2 mods per slam)"
+patch_min = "0.4.0"
+expected_cost_div = [2, 8]
+expected_success_prob = [0.10, 0.30]
+confidence = "community"
+note = """
+Best on rares at 3–4 mods with at least 2 open slots. Stack with
+Sinistral/Dextral Exaltation to force both new mods to one side; stack
+with Catalysing Exaltation on jewelry (#18) to bias mod-tag matches.
+"""
+
+[source]
+kind = "community"
+credit = "PoE2DB mechanic, Mobalytics omen-crafting"
+reference = "https://mobalytics.gg/poe-2/guides/omen-crafting"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    # Need at least 2 open slots somewhere; mod_count <= 4 guarantees
+    # at least 2 free slots across prefix+suffix.
+    { mod_count = { op = "lte", value = 4 } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-activate-greater-exaltation"
+action = { kind = "activate_omen", omen = "OmenOfGreaterExaltation" }
+note = "Next Exalt will add 2 mods instead of 1."
+on_success = "S2-optional-side-bias"
+on_failure = "S2-optional-side-bias"
+
+[[steps]]
+id = "S2-optional-side-bias"
+action = { kind = "activate_omen", omen = "OmenOfSinistralExaltation" }
+note = """
+Optional: stack a side-bias omen so both new mods land on the same
+side. Default shown is Sinistral (prefix-only); switch to Dextral if
+you need both on the suffix side.
+"""
+on_success = "S3-perfect-exalt"
+on_failure = "S3-perfect-exalt"
+
+[[steps]]
+id = "S3-perfect-exalt"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb" }
+note = "Perfect Exalt + activated omens: 2 new mods at min mod-level 50."
+on_success = "S4-done"
+on_failure = "S3b-recover"
+recovery = [
+    { message = "If both mods are junk: pre-bind Hinekora's Lock next time to preview the outcome before committing.", added_cost_div = 10 },
+    { message = "If only one is good and you have side coverage: Sinistral/Dextral Eraser the trash side.", added_cost_div = 5 },
+]
+
+[[steps]]
+id = "S3b-recover"
+action = { kind = "apply_currency", currency = "ChaosOrb", omens = ["OmenOfSinistralErasure"] }
+note = "Recovery: Sinistral Erasure removes only prefixes — clean trash on the slammed side without touching the locked side."
+on_success = "S4-done"
+on_failure = "S4-done"
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = "Stacking slam complete. Item is now at 5–6 mods; finish via Whittling (#7) or Sanctify (#11) if mirror-tier."
