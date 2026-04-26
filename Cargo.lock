@@ -3141,11 +3141,14 @@ dependencies = [
 name = "poc2-strategies"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "indexmap 2.14.0",
  "insta",
  "poc2-data",
  "poc2-engine",
  "serde",
+ "serde_json",
+ "smallvec",
  "thiserror 1.0.69",
  "toml 0.8.2",
  "tracing",

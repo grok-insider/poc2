@@ -1,19 +1,26 @@
 //! # poc2-strategies
 //!
-//! Codified strategy library — multi-step crafting recipes loaded from TOML.
+//! Codified strategy library — multi-step crafting recipes loaded from
+//! TOML or JSON. Strategies are **data**, not code: they ship in the data
+//! bundle and can be authored, swapped, and patched without rebuilding the
+//! binary.
 //!
-//! Each strategy declares preconditions, ordered steps, branch outcomes, and
-//! recovery sub-trees up to 3 levels deep (per planning docs). Strategies are
-//! data, not code: they ship in the data bundle and can be authored, swapped,
-//! and patched without rebuilding the binary.
+//! The seed catalogue is documented in
+//! [`/docs/33-strategy-library.md`](../../../docs/33-strategy-library.md);
+//! the canonical user-authored "Triple T1 Energy Shield Body Armour"
+//! fixture lives in `assets/strategies/3xt1-es-body-armour.toml`.
 //!
-//! In v1.1+, the [plugin system](../plugin/index.html) (Wasm Component Model)
-//! will allow third-party strategy authors to ship strategies as plugins.
+//! ## Module layout
 //!
-//! Seed catalog: 23 strategies from `/docs/33-strategy-library.md` plus the
-//! canonical user-authored "Triple T1 Energy Shield Body Armour" test fixture.
+//! - [`dsl`] — strategy types (Strategy, Step, Action, Branch, Predicate,
+//!   Target, RecoveryHint)
+//! - [`loader`] — TOML / JSON file loader, plus directory walker
+//! - [`registry`] — runtime registry of loaded strategies, queryable by
+//!   item class + goal
 //!
-//! Stub for M1; real implementation in M3.
+//! In v1.1+ the plugin system (Wasm Component Model) will allow third-party
+//! strategy authors to ship strategies as plugins. v1.0 supports only TOML
+//! (or in-process Strategy values).
 
 #![forbid(unsafe_code)]
 #![warn(clippy::pedantic)]
@@ -26,3 +33,10 @@
 pub mod dsl;
 pub mod loader;
 pub mod registry;
+
+pub use dsl::{
+    Action, Branch, ItemPredicate, RecoveryHint, Step, StepId, Strategy, StrategyId, Target,
+    TargetSpec, ValuePredicate,
+};
+pub use loader::{load_strategy_str, load_strategy_toml, StrategyError, StrategyResult};
+pub use registry::StrategyRegistry;

@@ -16,12 +16,68 @@ use std::str::FromStr;
 ///
 /// Internally stored as `(major, minor, patch, subpatch)` where `subpatch` is a
 /// lowercase letter mapped to `1..=26` (`a` = 1, `b` = 2, ...) or `0` if absent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// Serializes as a string (`"0.4.0c"`) for human-readable formats; deserializes
+/// from either the string form or the explicit struct form, so TOML and JSON
+/// can use whichever is convenient.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PatchVersion {
     pub major: u8,
     pub minor: u8,
     pub patch: u8,
     pub subpatch: u8, // 0 = no subpatch; 1 = a; 2 = b; ...
+}
+
+impl Serialize for PatchVersion {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(&self)
+    }
+}
+
+impl<'de> Deserialize<'de> for PatchVersion {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = PatchVersion;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a patch version string like \"0.4.0\" or \"0.4.0c\"")
+            }
+            fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                s.parse().map_err(serde::de::Error::custom)
+            }
+            // Accept the struct form too, so existing JSON output round-trips.
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut major = 0u8;
+                let mut minor = 0u8;
+                let mut patch = 0u8;
+                let mut subpatch = 0u8;
+                while let Some(k) = map.next_key::<String>()? {
+                    match k.as_str() {
+                        "major" => major = map.next_value()?,
+                        "minor" => minor = map.next_value()?,
+                        "patch" => patch = map.next_value()?,
+                        "subpatch" => subpatch = map.next_value()?,
+                        other => {
+                            return Err(serde::de::Error::unknown_field(
+                                other,
+                                &["major", "minor", "patch", "subpatch"],
+                            ))
+                        }
+                    }
+                }
+                Ok(PatchVersion {
+                    major,
+                    minor,
+                    patch,
+                    subpatch,
+                })
+            }
+        }
+        d.deserialize_any(V)
+    }
 }
 
 impl PatchVersion {

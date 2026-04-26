@@ -1,0 +1,174 @@
+# Triple T1 Energy Shield Body Armour Isolation
+#
+# This strategy is the user's worked-example craft, encoded as data.
+# It walks the engine through the 10-step flow described in
+# /docs/11-game-mechanics.md (and exercised by the worked-example
+# integration test in crates/engine/tests/worked_example_es_body_armour.rs).
+#
+# The TargetSpec uses concept matching with allow_hybrid=true so that
+# a hybrid mod producing both EnergyShield AND Life satisfies an
+# EnergyShield target — exactly the user's "T1 ES flat or hybrid" semantics.
+
+id = "3xt1-es-body-armour-isolation"
+name = "Triple T1 Energy Shield Body Armour Isolation"
+patch_min = "0.4.0"
+item_classes = ["BodyArmour"]
+attribute_pools = ["int", "dex_int", "str_int"]
+expected_cost_div = [40, 200]
+expected_success_prob = [0.05, 0.25]
+confidence = "community"
+note = """
+The engine-side fixture for this strategy lives at
+crates/engine/tests/worked_example_es_body_armour.rs. Each step here maps
+to one or more `step_*` integration tests there. Numbers in `expected_cost_div`
+are rough community estimates from late-0.4 — refine when CoE weight data
+lands.
+"""
+
+[source]
+kind = "user"
+credit = "project-author"
+reference = "POC2-design"
+
+# ---- Preconditions ----
+# ItemPredicate uses externally-tagged serde (default). In TOML inline form
+# the variant name is the key.
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+# ---- Target ----
+[target]
+constraints = []
+
+[[target.prefixes]]
+concept = "EnergyShield"
+count = 3
+min_tier = 1
+allow_hybrid = true
+
+[[target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 2
+min_tier = 1
+
+# ---- Abandon criteria ----
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-validate-base"
+action = { kind = "noop" }
+note = "Sanity-check that the base meets ilvl 82 — handled by preconditions."
+on_success = "S2-perfect-transmute"
+
+[[steps]]
+id = "S2-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+target_check = { has_concept = { concept = "EnergyShield", affix = "prefix" } }
+note = "Step 2: rolls a high-tier (req >=70) mod; we hope for ES."
+on_success = "S3-perfect-augment"
+on_failure = "S2b-restart-base"
+
+[[steps]]
+id = "S2b-restart-base"
+action = { kind = "abandon", reason = "Transmute did not hit Energy Shield; cheaper to start over." }
+note = "Per worked example: 'we tried perfect Transmutation, nothing'; abandon."
+
+[[steps]]
+id = "S3-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+target_check = { has_concept = { concept = "EnergyShield", affix = "prefix" } }
+note = "Augment fills the open Magic slot. Either outcome continues to S4."
+on_success = "S4-perfect-regal"
+on_failure = "S4-perfect-regal"
+
+[[steps]]
+id = "S4-perfect-regal"
+action = { kind = "apply_currency", currency = "PerfectRegalOrb" }
+note = "Step 4 of worked example."
+on_success = "S5-exalt-toward-3-prefixes"
+on_failure = "S4b-annul-and-chaos-spam"
+
+[[steps]]
+id = "S4b-annul-and-chaos-spam"
+note = "User's recovery branch when Regal didn't produce an ES Rare."
+action = { kind = "apply_currency", currency = "OrbOfAnnulment" }
+on_success = "S5-exalt-toward-3-prefixes"
+on_failure = "S4c-give-up"
+
+[[steps]]
+id = "S4c-give-up"
+action = { kind = "abandon", reason = "Annul-Chaos-spam exceeded budget without hitting T1 ES." }
+
+[[steps]]
+id = "S5-exalt-toward-3-prefixes"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb", omens = ["OmenOfSinistralExaltation"] }
+target_check = { affix_count = { affix = "prefix", count = { op = "gte", value = 2 } } }
+on_success = "S6-bone-with-dextral-necromancy"
+on_failure = "S5-exalt-toward-3-prefixes"
+note = "Forces prefix via Sinistral Exaltation. Loop until 2 ES prefixes present."
+
+[[steps]]
+id = "S6-bone-with-dextral-necromancy"
+action = { kind = "apply_currency", currency = "PreservedRib", omens = ["OmenOfDextralNecromancy"] }
+target_check = { has_hidden_desecrated = true }
+on_success = "S7-divine"
+on_failure = "S6-bone-with-dextral-necromancy"
+note = "Step 6: Preserved Rib + Omen of Dextral Necromancy adds a hidden SUFFIX desecrated mod."
+
+[[steps]]
+id = "S7-divine"
+action = { kind = "apply_currency", currency = "DivineOrb" }
+note = "Optional max-roll polish before fracture."
+on_success = "S7b-fracture"
+on_failure = "S7b-fracture"
+
+[[steps]]
+id = "S7b-fracture"
+action = { kind = "apply_currency", currency = "FracturingOrb" }
+target_check = { has_fractured = true }
+on_success = "S8-reveal"
+on_failure = "S7c-fracture-fail"
+recovery = [
+    { message = "Continue with whichever mod was fractured; the craft can still finish at lower tier.", goto = "S8-reveal", added_cost_div = 0 },
+    { message = "Hinekora's Lock can preview before commit.", added_cost_div = 5 },
+]
+
+[[steps]]
+id = "S7c-fracture-fail"
+action = { kind = "abandon", reason = "Fracturing Orb landed on the wrong mod (1/3 chance per visible mod)." }
+
+[[steps]]
+id = "S8-reveal"
+action = { kind = "reveal", prefer = ["EnergyShield", "AllResistances", "FireResistance"], use_abyssal_echoes = true }
+on_success = "S9-essence-with-crystallisation"
+on_failure = "S9-essence-with-crystallisation"
+note = "Step 8: Reveal. Prefer ES → AllRes → FireRes when picking from the 3 (or 6) options."
+
+[[steps]]
+id = "S9-essence-with-crystallisation"
+action = { kind = "apply_currency", currency = "PerfectEssenceOfSeeking", omens = ["OmenOfDextralCrystallisation"] }
+on_success = "S10-vaal-finish"
+on_failure = "S10-vaal-finish"
+note = "Step 9: Crystallisation forces removal type to suffix; Seeking adds the Crit-Damage-Reduced suffix."
+
+[[steps]]
+id = "S10-vaal-finish"
+action = { kind = "apply_currency", currency = "VaalOrb", omens = ["OmenOfCorruption"] }
+on_success = "S11-done"
+on_failure = "S11-done"
+note = "Step 10: Vaal finish. Omen of Corruption removes the NoChange outcome."
+
+[[steps]]
+id = "S11-done"
+action = { kind = "done" }
