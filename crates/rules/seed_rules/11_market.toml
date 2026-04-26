@@ -1,0 +1,122 @@
+# 11. Market Awareness Heuristics
+# Per /docs/34 §11. All rules are tagged league_advice — they are
+# un-fireable on engine state alone (depend on time-of-league, meta
+# popularity, currency exchange snapshots), so they surface as Settings-
+# panel tips rather than top-N actionable recommendations.
+
+[[rule]]
+id = "R450-check-poe-ninja-meta-builds"
+category = "market"
+when = "always"
+explanation = "Meta builds drive demand for specific mod combinations; off-meta = low liquidity."
+source = "/docs/34 §11.1"
+confidence = "community"
+
+[[rule.then]]
+note = "Before picking a craft target, check poe.ninja/poe2 most-played builds. Meta builds drive demand for specific mod combinations; off-meta crafts have low liquidity even when technically powerful."
+priority = 20
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R451-league-day-1-7-resists-life-ms"
+category = "market"
+when = "always"
+explanation = "Universal demand at league start; specific scaling mods undervalued."
+source = "/docs/34 §11.2"
+confidence = "community"
+
+[[rule.then]]
+note = "League day 1–7: craft generic resists / life / movement speed. Universal demand. Specific scaling mods are devalued before builds gear up."
+priority = 22
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R452-league-day-7-21-build-specific-god-rolls"
+category = "market"
+when = "always"
+explanation = "Demand peaks as players hit endgame and need build-specific god rolls."
+source = "/docs/34 §11.3"
+confidence = "community"
+
+[[rule.then]]
+note = "League day 7–21: pivot to build-specific god rolls (+3 spell, +4 minion, crit weapons). Endgame demand peaks. Window closes around day 21."
+priority = 22
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R453-league-day-21-plus-mirror-or-recombinator"
+category = "market"
+when = "always"
+explanation = "Mid crafts collapse by week 3; only mirror-tier or recombinator-tier remain profitable."
+source = "/docs/34 §11.4"
+confidence = "community"
+
+[[rule.then]]
+note = "League day 21+: bulk crafts have saturated the market. Pivot to mirror-tier or recombinator-tier exclusively. Mid-tier crafts will lose money."
+priority = 22
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R454-niche-off-meta-supply-side"
+category = "market"
+when = "always"
+explanation = "Off-meta crafters dominate the niche due to low competition; risky but higher margin."
+source = "/docs/34 §11.5"
+confidence = "community"
+
+[[rule.then]]
+note = "Niche off-meta build with high crafting need: profitable IF you can supply consistently. Off-meta crafters dominate the niche due to low competition. Riskier but higher margin."
+priority = 20
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R455-fracture-orbs-volatility-warning"
+category = "market"
+when = "always"
+explanation = "Currency volatile per Maxroll: 'value of fracturing orbs fell from 30+ div to <20 div in an hour or two'."
+source = "/docs/34 §11.6"
+confidence = "community"
+
+[[rule.then]]
+note = "Fracture-orb prices are volatile. Sell harvest currency fast at league start; hold currency long only if it's stable. Watch the currency-exchange feed for sudden drops."
+priority = 18
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R456-time-of-day-trade-flipping"
+category = "market"
+when = "always"
+explanation = "Maxroll: 'flip based on time of day. Often times, certain time zones have a difference.'"
+source = "/docs/34 §11.7"
+confidence = "community"
+
+[[rule.then]]
+note = "Time-of-day trade flipping: Asia/EU/NA peak hours have predictable currency-exchange swings. List during your region's peak; buy crafting currency during off-peak."
+priority = 16
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"

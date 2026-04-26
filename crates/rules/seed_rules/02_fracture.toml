@@ -1,0 +1,172 @@
+# 2. Fracture Timing Heuristics
+# Per /docs/34 §2. Fracturing Orb requires ≥4 explicit mods; the
+# sweet spot is exactly 4 mods with one excellent target.
+
+[[rule]]
+id = "R010-fracture-at-4-mods"
+category = "fracture"
+explanation = "Fracture-eligibility hits its sweet spot at exactly 4 mods."
+source = "/docs/34 §2.2 (MOBA-FRAC)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 3 } } },
+    { has_hidden_desecrated = true },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "3 visible prefixes + 1 hidden desecrated = 4 mods. 1/3 chance to lock a target prefix; consider Hinekora's Lock first."
+priority = 250
+[rule.then.action]
+kind = "apply_currency"
+currency = "FracturingOrb"
+omens = []
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R081-divine-before-fracture"
+category = "fracture"
+explanation = "Divine-then-fracture maximizes locked-mod values."
+source = "User worked example, step 7"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 2 } } },
+    { has_hidden_desecrated = true },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "Divine first to maximize values BEFORE fracture locks them."
+priority = 240
+[rule.then.action]
+kind = "apply_currency"
+currency = "DivineOrb"
+omens = []
+
+# ---------------------------------------------------------------------
+# §2.1 — Don't fracture below 4 mods
+[[rule]]
+id = "R310-no-fracture-below-4-mods"
+category = "fracture"
+explanation = "Fracturing Orb requires a rare item with four or more explicit modifiers."
+source = "/docs/34 §2.1 (MOBA-FRAC)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "lt", value = 4 } },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "Fewer than 4 explicit mods: cannot fracture. Continue building toward 4 mods first."
+priority = 30
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §2.4 — Avoid fracturing 5–6 mod items
+[[rule]]
+id = "R311-avoid-fracture-at-5-or-6-mods"
+category = "fracture"
+explanation = "Brick-rate exceeds 80% at 5+ mods (1/5 or 1/6 to lock the right one)."
+source = "/docs/34 §2.4 (MOBA-FRAC)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "gte", value = 5 } },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "WARNING: 5–6 mod fracture = 80%+ brick rate. Strip a mod via Annul + reset to 4 mods first."
+priority = 80
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §2.6 — High-value items: pre-Lock before Fracture
+[[rule]]
+id = "R312-lock-before-high-value-fracture"
+category = "fracture"
+explanation = "Lock < cost of multiple Fracturing Orbs in EV when value(item) ≥ 3× value(reduction)."
+source = "/docs/34 §2.6 (POE-WIKI-HL + MOBA-FRAC)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "eq", value = 4 } },
+    { has_fractured = false },
+    { has_hinekora_lock = false },
+    { expected_sale_price = { op = "gte", value = 30.0 } },
+]
+
+[[rule.then]]
+note = "High-value 4-mod base: pre-Lock before Fracturing Orb so you can preview which mod gets locked. Saves you from a 75% brick rate."
+priority = 220
+[rule.then.action]
+kind = "apply_currency"
+currency = "HinekorasLock"
+omens = []
+
+# ---------------------------------------------------------------------
+# §2.5 — Desecrated mods are excluded from fracture pool
+[[rule]]
+id = "R313-pre-bone-to-improve-fracture-odds"
+category = "fracture"
+explanation = "Desecrated mods are excluded from the fracture pool; pre-bone raises hero-mod odds from 1/N to 1/(N-1)."
+source = "/docs/34 §2.5 + §2.7 (AOEAH-GMC)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "eq", value = 3 } },
+    { has_hidden_desecrated = false },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "Pre-bone before fracturing: the desecrated mod won't be a fracture target, so the hero mod's lock odds improve from 1/4 to 1/3."
+priority = 180
+[rule.then.action]
+kind = "apply_currency"
+currency = "PreservedRib"
+omens = ["OmenOfDextralNecromancy"]
+
+# ---------------------------------------------------------------------
+# §2.8 — Fracture an unwanted prefix to enable isolation Annul
+[[rule]]
+id = "R314-fracture-unwanted-for-isolation-annul"
+category = "fracture"
+explanation = "Fracturing an unwanted prefix bans it from a future Sinistral Annul, isolating the good prefix."
+source = "/docs/34 §2.8 (MOBA-ISOL)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "lte", value = 2 } } },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "Advanced isolation play: fracture an UNWANTED prefix to 'ban' it from later Sinistral Annul. Then Sinistral Annul deterministically removes the only non-fractured non-good prefix."
+priority = 100
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

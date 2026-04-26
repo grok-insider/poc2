@@ -116,6 +116,7 @@ mod tests {
                     "Apply Perfect Transmutation to upgrade Normal to Magic with a high-tier mod."
                         .into(),
                 priority: 100,
+                tag: None,
             }],
             explanation: "Normal -> Magic step uses Perfect Transmutation when ilvl gates allow."
                 .into(),
@@ -145,6 +146,7 @@ mod tests {
                 },
                 note: "≥2 prefixes on a Rare suggests preparing a fracture.".into(),
                 priority: 200,
+                tag: None,
             }],
             explanation: "Fracture-then-finish workflow.".into(),
             source: "test".into(),

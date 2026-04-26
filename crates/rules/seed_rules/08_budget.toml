@@ -1,0 +1,116 @@
+# 8. Budget Rules
+# Per /docs/34 §8. All rules in this section reference cost_so_far via
+# the new (A.1) CostSpent / ExpectedSalePrice predicates. Some are
+# tagged league_advice (un-fireable based on engine state alone).
+
+# §8.2 — Never spend more than 3× expected sale price
+[[rule]]
+id = "R380-budget-3x-sale-cap"
+category = "budget"
+explanation = "EV equivalence pricing per MOBA-VAAL ('4 Vaals + 4 items ≈ 3 Vaals + 3 items + 3 Omens')."
+source = "/docs/34 §8.2"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { cost_spent = { op = "gt", value = 30.0 } },
+    { expected_sale_price = { op = "lt", value = 10.0 } },
+]
+
+[[rule.then]]
+note = "Cumulative cost is now > 3× expected sale price. EV is strongly negative — abandon and use the bankroll on a fresh attempt."
+priority = 200
+tag = "warning"
+[rule.then.action]
+kind = "abandon"
+reason = "Cost-vs-sale 3× cap exceeded."
+
+# ---------------------------------------------------------------------
+# §8.3 — Mirror-tier only after consistently producing 100D+ items
+[[rule]]
+id = "R381-mirror-tier-readiness-check"
+category = "budget"
+when = "always"
+explanation = "Mirror-tier is endgame for *mastered* crafters per MOBA-FRAC."
+source = "/docs/34 §8.3"
+confidence = "community"
+
+[[rule.then]]
+note = "Mirror-tier readiness: only attempt mirror crafts after consistently producing 100+ div items. The variance compounds; novice mirror-tier attempts brick 5+ Lock-cycles before producing an acceptable result."
+priority = 25
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §8.4 — Reinvest profit, not principal
+[[rule]]
+id = "R382-reinvest-profit-not-principal"
+category = "budget"
+when = "always"
+explanation = "Standard ARPG flipper guidance; appears in Maxroll currency-flipping resource."
+source = "/docs/34 §8.4"
+confidence = "community"
+
+[[rule.then]]
+note = "Bankroll discipline: reinvest profit, not principal. Keep a reserve equal to your starting bankroll. Crafting variance can wipe a session — never cross the principal line."
+priority = 20
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §8.5 — Currency velocity: 24h capital return
+[[rule]]
+id = "R383-currency-velocity-24h-rule"
+category = "budget"
+when = "always"
+explanation = "Crafts that don't return capital within 24h are losing to opportunity cost (Maxroll flipping)."
+source = "/docs/34 §8.5"
+confidence = "community"
+
+[[rule.then]]
+note = "Time-of-craft check: if your craft hasn't returned its capital within 24h of trade-league time, the opportunity cost (currency flipping yields) is now winning. Consider closing the position."
+priority = 22
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §8.6 — Deterministic-step cost should be < 0.5× expected sale
+[[rule]]
+id = "R384-deterministic-cost-half-of-sale-rule"
+category = "budget"
+explanation = "Boot recipe and amulet recipe both follow this implicit ratio (MOBA-BOOTS, AOEAH-GMC)."
+source = "/docs/34 §8.6"
+confidence = "community"
+
+[rule.when]
+all = [
+    { cost_spent = { op = "gt", value = 0.0 } },
+    { expected_sale_price = { op = "gt", value = 0.0 } },
+]
+
+[[rule.then]]
+note = "Deterministic-recipe budget rule: total Lock + Perfect Exalt + Homogenising + bone deterministic-step cost should stay < 0.5× expected sale price. Once cost exceeds half the sale, the recipe is leaking value somewhere."
+priority = 28
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §8.1 — 1/20 net worth bankroll rule (Tarke)
+[[rule]]
+id = "R385-tarke-1-in-20-net-worth-rule"
+category = "budget"
+when = "always"
+explanation = "Tarke Cat / community folk rule (echoed across r/Poe2BudgetCraftGuide)."
+source = "/docs/34 §8.1"
+confidence = "community"
+
+[[rule.then]]
+note = "Tarke rule: never spend more on a single craft than 1/20 of your liquid net worth. If this craft would cross that line, scale down the target or pick a cheaper base."
+priority = 24
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"

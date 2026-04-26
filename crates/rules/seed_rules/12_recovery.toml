@@ -1,0 +1,241 @@
+# 12. Recovery Heuristics — When a Step Fails
+# Per /docs/34 §12. Most rules are state-conditional recoveries; some
+# are tagged warnings (no recovery possible).
+
+[[rule]]
+id = "R080-respect-fracture-immutability"
+category = "recovery"
+when = { has_fractured = true }
+explanation = "Reminder that fracture is permanent."
+source = "/docs/11-game-mechanics.md"
+confidence = "verified"
+
+[[rule.then]]
+note = "Fractured mod is locked: Annul/Chaos cannot remove it; Divine cannot reroll it. Plan around it."
+priority = 70
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# Bricked fracture: sell as fractured base
+[[rule]]
+id = "R460-bricked-fracture-sell-as-base"
+category = "recovery"
+explanation = "Mods still desirable to recombinator users (MOBA-FRAC)."
+source = "/docs/34 §12 row 1"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { mod_count = { op = "lte", value = 4 } },
+    { expected_sale_price = { op = "lt", value = 5.0 } },
+]
+
+[[rule.then]]
+note = "Bricked fracture (locked the wrong mod): sell as a fractured base. Mods are still desirable to recombinator users."
+priority = 50
+tag = "meta"
+[rule.then.action]
+kind = "stop_and_sell"
+
+# ---------------------------------------------------------------------
+# Bad reveal at Well of Souls → Light + Annul
+[[rule]]
+id = "R461-bad-reveal-light-annul-restart"
+category = "recovery"
+explanation = "Pick least bad → Omen of Light + Annul (deterministic for desecrated) → reapply bone (MOBA-OMEN)."
+source = "/docs/34 §12 row 2"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_desecrated_revealed = true },
+]
+
+[[rule.then]]
+note = "Bad reveal at Well of Souls: pick the least-bad of the offered options, then strip via Omen of Light + Annul (deterministic for desecrated). Re-apply a bone with a fresh Lord omen for a different pool."
+priority = 145
+[rule.then.action]
+kind = "apply_currency"
+currency = "OrbOfAnnulment"
+omens = ["OmenOfLight"]
+
+# ---------------------------------------------------------------------
+# Bad reveal AND no Omen of Light → side-targeted Annul
+[[rule]]
+id = "R462-bad-reveal-no-light-side-annul"
+category = "recovery"
+explanation = "Side-targeted Annul as fallback when Omen of Light is unavailable."
+source = "/docs/34 §12 row 3"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_desecrated_revealed = true },
+]
+
+[[rule.then]]
+note = "If no Omen of Light: a Sinistral or Dextral Annul Omen targets the side the desecrated mod sits on. Often deterministic when the desecrated mod is the only mod on that side."
+priority = 100
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# Vaal bricked the item: salvage path
+[[rule]]
+id = "R463-vaal-bricked-salvage-or-partial"
+category = "recovery"
+explanation = "Salvage for sockets/quality currency; uniques may sell as 'partial corrupt'."
+source = "/docs/34 §12 row 4"
+confidence = "community"
+
+[rule.when]
+all = [
+    { corrupted = true },
+    { sanctified = false },
+    { mirrored = false },
+]
+
+[[rule.then]]
+note = "Vaal bricked the item. Salvage paths: scrap for sockets/quality currency; if it's a unique with one good mod left, sell as a 'partial corrupt' (some buyers want specific corrupted enchants). Architect's Orb double-corrupt is also an option for high-value rares."
+priority = 60
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# Wrong mod from Perfect Essence: re-essence with different family
+[[rule]]
+id = "R464-wrong-essence-mod-overwrite"
+category = "recovery"
+explanation = "Another Perfect Essence on the same slot will overwrite if Crystallisation targets it."
+source = "/docs/34 §12 row 5"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "gte", value = 4 } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Wrong mod from Perfect Essence: another Perfect Essence of a different family on the SAME slot will overwrite the existing essence mod (if Crystallisation targets it). Cycle until the desired essence mod sticks."
+priority = 75
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# Annul removed wrong mod: re-Exalt
+[[rule]]
+id = "R465-bad-annul-re-exalt-recovery"
+category = "recovery"
+explanation = "Re-Exalt with appropriate Omens; if all Omens spent, sell as 5-mod and start over."
+source = "/docs/34 §12 row 6"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "eq", value = 5 } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Annul removed the wrong mod: re-Exalt with side-locked Omens to refill. If all your side-locked Omens are spent, sell as 5-mod base and start over on a fresh attempt."
+priority = 95
+[rule.then.action]
+kind = "apply_currency"
+currency = "PerfectExaltedOrb"
+omens = ["OmenOfDextralExaltation"]
+
+# ---------------------------------------------------------------------
+# Twice-corrupt destroyed: no recovery (warning only)
+[[rule]]
+id = "R466-twice-corrupt-destroyed-warning"
+category = "recovery"
+when = "always"
+explanation = "Item is gone. Buy replacement on market or restart from base."
+source = "/docs/34 §12 row 7 (AOEAH-2X)"
+confidence = "verified"
+
+[[rule.then]]
+note = "Twice-corrupt destroy outcome: NO RECOVERY. Item is permanently gone. Either buy a replacement on the market or restart the entire pipeline from a fresh corrupted base."
+priority = 25
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# Hit T1 mod but suffix full, need a prefix slot
+[[rule]]
+id = "R467-suffix-full-need-prefix-slot"
+category = "recovery"
+explanation = "Sinistral Annul Omen on a fractured-suffix item, then Exalt (MOBA-ISOL)."
+source = "/docs/34 §12 row 8"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+]
+
+[[rule.then]]
+note = "All slots full but you need to swap a prefix: Sinistral Annul on the fractured-suffix item (suffix is locked, prefix annul is deterministic on the open side). Then Exalt to refill."
+priority = 105
+[rule.then.action]
+kind = "apply_currency"
+currency = "OrbOfAnnulment"
+omens = ["OmenOfSinistralAnnulment"]
+
+# ---------------------------------------------------------------------
+# Sanctification rolled badly: NO RECOVERY (warning)
+[[rule]]
+id = "R468-sanctified-bad-no-recovery"
+category = "recovery"
+when = { sanctified = true }
+explanation = "Sanctified items cannot be modified further (VULKK)."
+source = "/docs/34 §12 row 9"
+confidence = "verified"
+
+[[rule.then]]
+note = "Sanctification rolled badly: NO RECOVERY. Sanctified items are permanently locked. Either equip as-is or list at the now-final value."
+priority = 20
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# Boots step-1 fail: re-cycle Annul → Aug
+[[rule]]
+id = "R469-boots-step-1-recipe-idempotent"
+category = "recovery"
+explanation = "MOBA-BOOTS recipe is designed to be idempotent until MS hits at step 1."
+source = "/docs/34 §12 row 10"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class = "Boots" },
+    { rarity = "magic" },
+    { mod_count = { op = "lte", value = 2 } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Boots step 1 failed (no MS prefix after augs): re-cycle Annul → Aug. The recipe is idempotent at step 1 — keep cycling until MS hits."
+priority = 90
+[rule.then.action]
+kind = "apply_currency"
+currency = "OrbOfAnnulment"
+omens = []

@@ -1,0 +1,141 @@
+# 6. Stop-vs-Continue on Partial Success
+# Per /docs/34 §6.
+
+[[rule]]
+id = "R021-sanctified-stop"
+category = "stop_vs_continue"
+when = { sanctified = true }
+explanation = "Sanctification is the natural exit for mirror-tier crafts."
+source = "/docs/11-game-mechanics.md"
+confidence = "verified"
+
+[[rule.then]]
+note = "Sanctified items are uncraftable. Sell or equip."
+priority = 50
+[rule.then.action]
+kind = "stop_and_sell"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R140-sanctify-mirror-tier-finisher"
+category = "stop_vs_continue"
+explanation = "Sanctified items are uncraftable but typically more valuable."
+source = "/docs/11-game-mechanics.md"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { mirrored = false },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+]
+
+[[rule.then]]
+note = "6-mod rare ready for Sanctification. Locks the item permanently — only do this when satisfied."
+priority = 60
+[rule.then.action]
+kind = "apply_currency"
+currency = "DivineOrb"
+omens = ["OmenOfSanctification"]
+
+# ---------------------------------------------------------------------
+# §6.5 — 4-mod unrevealed jewel: sell as-is for premium
+[[rule]]
+id = "R350-sell-unrevealed-4mod-jewel"
+category = "stop_vs_continue"
+explanation = "Per /docs/34 sec 6.5 — unrevealed jewel exit captures premium."
+source = "/docs/34 §6.5"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class = "Jewel" },
+    { rarity = "rare" },
+    { has_hidden_desecrated = true },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 2 } } },
+]
+
+[[rule.then]]
+note = "4-mod unrevealed jewels are in high demand. Consider listing without revealing — buyer prefers the gamble."
+priority = 65
+tag = "meta"
+[rule.then.action]
+kind = "stop_and_sell"
+
+# ---------------------------------------------------------------------
+# §6.1 — 4 of 6 hit, all remaining steps deterministic → CONTINUE
+[[rule]]
+id = "R351-continue-when-deterministic-remaining"
+category = "stop_vs_continue"
+explanation = "Deterministic = guaranteed value-add."
+source = "/docs/34 §6.1 (MOBA-BOOTS, AOEAH-GMC)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { mod_count = { op = "gte", value = 4 } },
+    { mod_count = { op = "lte", value = 5 } },
+]
+
+[[rule.then]]
+note = "Fracture locked + 4–5 mods + deterministic finish remaining (Essence-Crystallisation, Sinistral/Dextral targeted, Bone-into-empty-slot): CONTINUE. Stopping now leaves guaranteed value on the table."
+priority = 110
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §6.2 — 4 of 6 hit, next step RNG with > 30% brick → SELL
+[[rule]]
+id = "R352-sell-when-next-step-high-variance"
+category = "stop_vs_continue"
+explanation = "Risk-adjusted EV often below current sale price by step 4–5."
+source = "/docs/34 §6.2 (REDDIT-BUDGET)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "gte", value = 4 } },
+    { mod_count = { op = "lte", value = 5 } },
+    { expected_sale_price = { op = "gte", value = 10.0 } },
+    { cost_spent = { op = "gte", value = 20.0 } },
+]
+
+[[rule.then]]
+note = "Item is worth ≥ 10 div as-is and the next slam has high brick risk. Selling now beats EV of continuing."
+priority = 100
+tag = "meta"
+[rule.then.action]
+kind = "stop_and_sell"
+
+# ---------------------------------------------------------------------
+# §6.6 — Single hero mod on mostly-empty: sell as recombinator base
+[[rule]]
+id = "R181-hero-mod-on-mid-rest-sell-as-base"
+category = "stop_vs_continue"
+explanation = "Single-hero-mod fractured items are recombinator fodder with their own market."
+source = "/docs/34 §6.6"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { corrupted = false },
+    { affix_count = { affix = "prefix", count = { op = "lte", value = 2 } } },
+    { affix_count = { affix = "suffix", count = { op = "lte", value = 2 } } },
+]
+
+[[rule.then]]
+note = "Single fractured hero mod on a mostly-empty item: sell as a recombinator-ready craft base."
+priority = 60
+tag = "meta"
+[rule.then.action]
+kind = "stop_and_sell"

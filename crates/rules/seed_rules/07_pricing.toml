@@ -1,0 +1,166 @@
+# 7. Pricing Exit Heuristics — When to Sell
+# Per /docs/34 §7.
+
+[[rule]]
+id = "R060-magic-stage-exit-on-2-good-mods"
+category = "pricing"
+explanation = "Magic-stage exit captures profit without risking Regal/Exalt RNG."
+source = "Goratha profit-craft analysis"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "magic" },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 1 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 1 } } },
+]
+
+[[rule.then]]
+note = "Magic with two desirable mods. Consider listing the magic-stage item — many builds buy these for further crafting."
+priority = 60
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R190-sell-magic-with-2-tier1-mods"
+category = "pricing"
+explanation = "0.4 specifically: post-Homogenising loss makes 2-mod magics MORE valuable."
+source = "/docs/34 §7.1"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "magic" },
+    { ilvl = { op = "gte", value = 80 } },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 1 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 1 } } },
+]
+
+[[rule.then]]
+note = "ilvl 80+ Magic with 2 mods: many crafters pay a premium for clean Regal-ready bases. Consider listing."
+priority = 65
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R191-fractured-base-premium-listing"
+category = "pricing"
+explanation = "Fracture is permanent value; further crafting risks bricking the now-valuable item."
+source = "/docs/34 §7.2"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { corrupted = false },
+    { sanctified = false },
+]
+
+[[rule.then]]
+note = "Fractured bases command premiums. Either continue if your recipe is ready, or sell now to lock in profit."
+priority = 55
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §7.3 — Quality breach catalysts BEFORE listing
+[[rule]]
+id = "R360-quality-jewelry-before-listing"
+category = "pricing"
+explanation = "Quality multiplies the sell price; breach rings can reach 40% / 68% chaos res with quality."
+source = "/docs/34 §7.3 (AOEAH-GMC)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class_any = ["Ring", "Amulet", "Belt"] },
+    { rarity = "rare" },
+    { mod_count = { op = "gte", value = 4 } },
+    { quality = { op = "lt", value = 20 } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Pre-listing tip: apply matching catalysts to bring quality to 20% (or 40% via Adaptive Catalyst from breach) BEFORE listing. Catalyst-quality multiplies the matching-tag mod values."
+priority = 70
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §7.4 — Out-of-currency mid-craft → offer as craft service
+[[rule]]
+id = "R361-offer-as-craft-service-when-out-of-currency"
+category = "pricing"
+explanation = "Common community practice in trade league when out of currency mid-craft."
+source = "/docs/34 §7.4 (REDDIT-BUDGET)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "gte", value = 4 } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Mid-craft with progress but no currency to finish? Offer as a 'craft service' — buyer brings remaining currency, pays a craft fee. Common community practice."
+priority = 35
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §7.5 — Bricked craft on a popular base → sell ilvl 82 base
+[[rule]]
+id = "R362-sell-bricked-as-ilvl-82-base"
+category = "pricing"
+explanation = "ilvl 82 bases are themselves currency-grade."
+source = "/docs/34 §7.5 (AOEAH-GMC)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { ilvl = { op = "gte", value = 82 } },
+    { mod_count = { op = "gte", value = 4 } },
+    { expected_sale_price = { op = "lt", value = 5.0 } },
+]
+
+[[rule.then]]
+note = "Bricked craft on an ilvl 82+ base? The base scarcity itself is the value. List as an 'ilvl 82' base — buyers reset and re-craft."
+priority = 50
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §7.6 — Vaal-themed unique with downside, before twice-corrupting
+[[rule]]
+id = "R363-sell-before-twice-corrupt-vaal-unique"
+category = "pricing"
+explanation = "Twice-corrupt is 50/50 destruction; selling first is often the EV-positive choice."
+source = "/docs/34 §7.6 (AOEAH-2X)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "unique" },
+    { corrupted = true },
+    { sanctified = false },
+]
+
+[[rule.then]]
+note = "Vaal-themed unique pre-twice-corrupt: consider selling first. Buying a twice-corrupted version is often safer than risking 50% destroy on your own."
+priority = 50
+tag = "warning"
+[rule.then.action]
+kind = "guidance"

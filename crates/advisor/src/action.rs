@@ -170,6 +170,9 @@ pub fn from_rule_action(action: &poc2_rules::SuggestionAction) -> AdvisorAction 
             currency: currency.clone(),
             omens: omens.clone(),
         },
+        SuggestionAction::ActivateOmen { omen } => {
+            AdvisorAction::ActivateOmen { omen: omen.clone() }
+        }
         SuggestionAction::ApplyHinekorasLock => AdvisorAction::ApplyHinekorasLock,
         SuggestionAction::Reveal => AdvisorAction::Reveal {
             prefer: Vec::new(),

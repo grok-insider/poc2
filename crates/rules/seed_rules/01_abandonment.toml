@@ -1,0 +1,203 @@
+# 1. Abandonment Heuristics — When to Scrap a Craft
+#
+# Per /docs/34 §1. Most rules in this section reference `cost_so_far`
+# / `expected_sale_price` data via the new (A.1) CostSpent /
+# ExpectedSalePrice predicates. Several rules surface as guidance with
+# tag = "warning" because they're cost-vs-value advisories that shouldn't
+# auto-pick over actionable steps.
+
+[[rule]]
+id = "R020-abandon-corrupted-without-target"
+category = "abandonment"
+when = { corrupted = true }
+explanation = "Corrupted state is largely a one-way door."
+source = "/docs/11-game-mechanics.md"
+confidence = "verified"
+
+[[rule.then]]
+note = "Corrupted items are mostly read-only. Only Architect's Orb / Vaal Cultivation Orb can modify them."
+priority = 50
+[rule.then.action]
+kind = "abandon"
+reason = "Item is corrupted; further crafting paths are restricted."
+
+# ---------------------------------------------------------------------
+# §1.1 — After Transmute+Aug, neither modifier is desired
+[[rule]]
+id = "R301-magic-2mod-both-junk-abandon"
+category = "abandonment"
+explanation = "Don't Regal a 2-mod Magic where neither mod is desired — locks in both as a Rare."
+source = "/docs/34 §1.1 (VULKK)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "magic" },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 1 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 1 } } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "If neither Magic mod is build-relevant: do NOT Regal. Vendor / 3-to-1 reforge / scrap the base."
+priority = 60
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §1.5 — Cumulative cost > 3× expected sale price (sunk-cost guardrail)
+[[rule]]
+id = "R302-cost-exceeds-3x-sale-price-abandon"
+category = "abandonment"
+explanation = "Sunk-cost trap. The #1 mistake per VULKK and community consensus."
+source = "/docs/34 §1.5"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { cost_spent = { op = "gt", value = 30.0 } },
+    { expected_sale_price = { op = "lt", value = 10.0 } },
+]
+
+[[rule.then]]
+note = "Cumulative cost > 3× expected sale price. Cut losses; sell whatever state the item is in."
+priority = 250
+tag = "warning"
+[rule.then.action]
+kind = "abandon"
+reason = "Cost exceeds 3× expected sale value — sunk-cost trap."
+
+# ---------------------------------------------------------------------
+# §1.6 — Cost > sale price AND craft < 50% complete
+[[rule]]
+id = "R303-cost-exceeds-sale-mid-craft-abandon"
+category = "abandonment"
+explanation = "Even on hit, expected ROI is negative when craft is < 50% complete."
+source = "/docs/34 §1.6 (REDDIT-BUDGET)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { cost_spent = { op = "gt", value = 5.0 } },
+    { mod_count = { op = "lte", value = 2 } },
+    { expected_sale_price = { op = "lt", value = 5.0 } },
+]
+
+[[rule.then]]
+note = "Cost > expected sale, item is < 50% built. EV is negative even on a successful continuation."
+priority = 200
+tag = "warning"
+[rule.then.action]
+kind = "abandon"
+reason = "ROI-negative continuation: cost > sale price at < 50% mod count."
+
+# ---------------------------------------------------------------------
+# §1.7 — Tarke rule: never bet > 1/20 of net worth on one craft
+[[rule]]
+id = "R304-tarke-net-worth-bankroll-rule"
+category = "abandonment"
+when = "always"
+explanation = "Bankroll management — never bet so much that one brick zeroes your league."
+source = "/docs/34 §1.7 (Tarke folk rule)"
+confidence = "community"
+
+[[rule.then]]
+note = "Tarke rule: never spend more on a single craft than 1/20 of your net worth. If this craft would, scale down the target or pick a cheaper base."
+priority = 35
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §1.8 — Boots: only abandon at step 1 fail (deterministic from step 2)
+[[rule]]
+id = "R305-boots-abandon-only-at-step-1"
+category = "abandonment"
+explanation = "Lolcohol's boot recipe is 100% deterministic from step 2 onward — abandoning later throws away guaranteed value."
+source = "/docs/34 §1.8 (MOBA-BOOTS)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class = "Boots" },
+    { rarity = "magic" },
+    { mod_count = { op = "gte", value = 2 } },
+]
+
+[[rule.then]]
+note = "On boots: don't abandon mid-craft past step 1 if using the Lolcohol deterministic recipe — every step from #2 onward is guaranteed value."
+priority = 40
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §1.9 — Items with Desecrated Modifiers cannot be Desecrated again
+[[rule]]
+id = "R306-already-desecrated-cannot-redesecrate"
+category = "abandonment"
+explanation = "Items with Desecrated Modifiers cannot be Desecrated again."
+source = "/docs/34 §1.9 (MOBA-ABYSS)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { has_desecrated_revealed = true },
+    { has_hidden_desecrated = false },
+]
+
+[[rule.then]]
+note = "This item already carries a revealed desecrated mod and cannot be desecrated again. Plan around it or use Omen of Light + Annul to strip it (#9)."
+priority = 70
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §1.10 — Lock previews all bad → trade away or harmless reroll
+[[rule]]
+id = "R307-lock-preview-bad-trade-away"
+category = "abandonment"
+explanation = "Quality / socket changes don't consume the foreseeing state; trading is a low-risk way to monetize a Locked-bad item."
+source = "/docs/34 §1.10 (POE-WIKI-HL)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { has_hinekora_lock = true },
+    { mod_count = { op = "gte", value = 4 } },
+]
+
+[[rule.then]]
+note = "If all currency previews are bad: trade away the Locked item (preview state survives the trade), or apply Tailoring/anointing currencies to clear the lock without consuming it."
+priority = 75
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §1.4 — Boot craft step 1: many cycles, no MS hit
+# (subjective; encoded as guidance gated on rarity=Magic + boots class)
+[[rule]]
+id = "R308-boots-step-1-cycle-warning"
+category = "abandonment"
+explanation = "Step 1 is the gating filter for the Lolcohol boot recipe; stuck > 5 cycles means re-roll the base."
+source = "/docs/34 §1.4 (MOBA-BOOTS)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class = "Boots" },
+    { rarity = "magic" },
+    { affix_count = { affix = "prefix", count = { op = "lte", value = 1 } } },
+    { cost_spent = { op = "gt", value = 3.0 } },
+]
+
+[[rule.then]]
+note = "Boots step 1 (30% MS hunt) cycled multiple times without success. Vendor and re-roll a fresh base — step 1 is the only abandon point in the deterministic recipe."
+priority = 45
+tag = "warning"
+[rule.then.action]
+kind = "guidance"

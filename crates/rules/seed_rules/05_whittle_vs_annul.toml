@@ -1,0 +1,187 @@
+# 5. Whittle-vs-Annul Choice
+# Per /docs/34 §5.
+
+[[rule]]
+id = "R050-whittle-when-low-tier-prefix-survives"
+category = "whittle_vs_annul"
+explanation = "Whittling targets cleanup precisely."
+source = "Goratha live-craft"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 2 } } },
+]
+
+[[rule.then]]
+note = "Fracture is locked in. Chaos + Whittling surgically removes the lowest-required-level mod."
+priority = 210
+[rule.then.action]
+kind = "apply_currency"
+currency = "ChaosOrb"
+omens = ["OmenOfWhittling"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R110-annul-magic-stage-when-one-junk-mod"
+category = "whittle_vs_annul"
+explanation = "Magic-stage Annul-Aug spam refines a base before Regal."
+source = "/docs/33 §3"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "magic" },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 1 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 1 } } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Magic with 2 mods, one junk: Annul is 50/50 to remove the junk. Cycle Aug after."
+priority = 130
+[rule.then.action]
+kind = "apply_currency"
+currency = "OrbOfAnnulment"
+omens = []
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R120-sinistral-erasure-when-prefix-side-junk"
+category = "whittle_vs_annul"
+explanation = "Side-targeted erasure cleans one side without risking the other."
+source = "/docs/33 §8"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { affix_count = { affix = "suffix", count = { op = "gte", value = 3 } } },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 2 } } },
+]
+
+[[rule.then]]
+note = "Suffixes are locked, prefixes have junk. Sinistral Erasure removes only prefixes."
+priority = 200
+[rule.then.action]
+kind = "apply_currency"
+currency = "ChaosOrb"
+omens = ["OmenOfSinistralErasure"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R121-dextral-erasure-when-suffix-side-junk"
+category = "whittle_vs_annul"
+explanation = "Side-targeted erasure cleans one side without risking the other."
+source = "/docs/33 §8"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "gte", value = 2 } } },
+]
+
+[[rule.then]]
+note = "Prefixes are locked, suffixes have junk. Dextral Erasure removes only suffixes."
+priority = 200
+[rule.then.action]
+kind = "apply_currency"
+currency = "ChaosOrb"
+omens = ["OmenOfDextralErasure"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R170-perfect-chaos-with-whittling-for-guaranteed-t1"
+category = "whittle_vs_annul"
+explanation = "Combines Whittling's targeting precision with Perfect Chaos's tier guarantee."
+source = "/docs/34 §5.6"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { corrupted = false },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 2 } } },
+    { affix_count = { affix = "suffix", count = { op = "gte", value = 2 } } },
+]
+
+[[rule.then]]
+note = "Perfect Chaos + Whittling: removes the lowest-mod-level mod and adds a guaranteed min-mod-level 50 (T1) replacement."
+priority = 195
+[rule.then.action]
+kind = "apply_currency"
+currency = "PerfectChaosOrb"
+omens = ["OmenOfWhittling"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R171-whittle-warning-essence-mods-low-mlvl"
+category = "whittle_vs_annul"
+explanation = "VULKK rulebook safety note; pair with stat-pin in UI before commit."
+source = "/docs/34 §5.7"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Warning: Essence-applied mods often have LOW mod-level despite being powerful. Whittling may unintentionally hit them."
+priority = 30
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §5.5 — Omen of Light + Annul to remove unwanted desecrated
+[[rule]]
+id = "R340-light-annul-removes-only-desecrated"
+category = "whittle_vs_annul"
+explanation = "Your next Orb of Annulment will remove only Desecrated Modifiers — deterministic for the desecrated mod."
+source = "/docs/34 §5.5 (MOBA-OMEN, AOEAH-GMC)"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_desecrated_revealed = true },
+]
+
+[[rule.then]]
+note = "Omen of Light + Annul = guaranteed to remove only desecrated mods. With one revealed desecrated mod, this is fully deterministic."
+priority = 240
+[rule.then.action]
+kind = "apply_currency"
+currency = "OrbOfAnnulment"
+omens = ["OmenOfLight"]
+
+# ---------------------------------------------------------------------
+# §5.8 — Pin item before Whittling Chaos to confirm target
+[[rule]]
+id = "R341-whittle-pin-item-before-commit"
+category = "whittle_vs_annul"
+when = "always"
+explanation = "Pin the item then hover with Chaos Orb to see highlight before commit."
+source = "/docs/34 §5.8 (VULKK)"
+confidence = "verified"
+
+[[rule.then]]
+note = "Workflow tip: pin the item stats, then hover with Chaos Orb to confirm which mod gets replaced. Always pin before high-stakes Whittle commits."
+priority = 35
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

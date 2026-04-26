@@ -1,0 +1,77 @@
+# 99. Catalyst recommendations (jewelry-specific).
+# These rules don't fit /docs/34's 13-section taxonomy cleanly because
+# catalysts are an item-class-specific quality currency. They feed into
+# Exalt-vs-Desecrate decisions for rings/amulets/belts.
+
+[[rule]]
+id = "R090-flesh-catalyst-on-life-rare-jewelry"
+category = "other"
+explanation = "Catalysts multiply tag-matching mod values; quality is consumed by Catalysing Exaltation later."
+source = "/docs/33 §18 (Catalysing Exaltation)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { item_class_any = ["Ring", "Amulet", "Belt"] },
+    { corrupted = false },
+    { has_concept = { concept = "Life" } },
+]
+
+[[rule.then]]
+note = "Rare jewelry with a life mod: Flesh Catalyst boosts life-tagged mods by +5%/apply (cap 20%)."
+priority = 110
+[rule.then.action]
+kind = "apply_currency"
+currency = "FleshCatalyst"
+omens = []
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R091-reaver-catalyst-on-attack-rare-jewelry"
+category = "other"
+explanation = "Catalysts pin quality to a tag; Reaver targets attack mods."
+source = "/docs/33 §18"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { item_class_any = ["Ring", "Amulet"] },
+    { corrupted = false },
+    { has_concept = { concept = "AttackDamage" } },
+]
+
+[[rule.then]]
+note = "Rare jewelry with attack-damage mods: Reaver Catalyst boosts attack-tagged mods."
+priority = 110
+[rule.then.action]
+kind = "apply_currency"
+currency = "ReaverCatalyst"
+omens = []
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R092-unstable-catalyst-on-caster-rare-jewelry"
+category = "other"
+explanation = "Catalyst-quality boosts spell mods on jewelry pre-Exalt slam."
+source = "/docs/33 §18"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { item_class_any = ["Ring", "Amulet"] },
+    { corrupted = false },
+    { has_concept = { concept = "SpellDamage" } },
+]
+
+[[rule.then]]
+note = "Rare jewelry with caster mods: Unstable Catalyst boosts caster-tagged mods."
+priority = 110
+[rule.then.action]
+kind = "apply_currency"
+currency = "UnstableCatalyst"
+omens = []

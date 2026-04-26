@@ -1,0 +1,76 @@
+# 0. Rarity-progression rules (not in /docs/34's 13-section taxonomy
+# but core to the engine's default suggestions for fresh items).
+#
+# These three rules are the "what to do next" defaults for Normal /
+# Magic-with-1-mod / Magic-with-2-mods states.
+
+[[rule]]
+id = "R001-perfect-transmute-on-normal"
+category = "base_selection"
+explanation = "Normal -> Magic step uses Perfect Transmutation when budget allows."
+source = "Tarke apprentice blueprint"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "normal" },
+    { ilvl = { op = "gte", value = 82 } },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+[[rule.then]]
+note = "Normal ilvl 82 base. Perfect Transmute guarantees a required-level >= 70 mod."
+priority = 200
+[rule.then.action]
+kind = "apply_currency"
+currency = "PerfectOrbOfTransmutation"
+omens = []
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R002-augment-magic-1-mod"
+category = "other"
+explanation = "Aug fills the open Magic slot."
+source = "Mosey beginner-to-apprentice"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "magic" },
+    { affix_count = { affix = "prefix", count = { op = "lte", value = 1 } } },
+    { affix_count = { affix = "suffix", count = { op = "lte", value = 0 } } },
+]
+
+[[rule.then]]
+note = "Magic with one prefix and an empty suffix. Perfect Augment fills the empty slot."
+priority = 180
+[rule.then.action]
+kind = "apply_currency"
+currency = "PerfectOrbOfAugmentation"
+omens = []
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R003-regal-ready"
+category = "other"
+explanation = "Regal promotes Magic to Rare."
+source = "Tarke apprentice blueprint"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "magic" },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 1 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 1 } } },
+]
+
+[[rule.then]]
+note = "Magic with both slots filled. Perfect Regal promotes to Rare with a third high-tier mod."
+priority = 190
+[rule.then.action]
+kind = "apply_currency"
+currency = "PerfectRegalOrb"
+omens = []

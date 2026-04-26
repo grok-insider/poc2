@@ -1,0 +1,127 @@
+# 3. Hinekora's Lock Decision Rules
+# Per /docs/34 §3.
+
+[[rule]]
+id = "R011-hinekoras-lock-before-fracture"
+category = "hinekora_lock"
+explanation = "Lock-before-risky-step is a high-value pattern at fracture time."
+source = "Mosey, Tarke streams"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 3 } } },
+    { has_hidden_desecrated = true },
+    { has_fractured = false },
+    { has_hinekora_lock = false },
+]
+
+[[rule.then]]
+note = "Apply Hinekora's Lock before Fracture so you can preview which mod gets locked."
+priority = 260
+[rule.then.action]
+kind = "apply_hinekoras_lock"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R150-hinekora-lock-before-vaal-on-mirror-tier"
+category = "hinekora_lock"
+explanation = "Lock-before-finisher converts the riskiest single-click step into a known outcome."
+source = "/docs/34 §3.1 + §10"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { has_hinekora_lock = false },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+]
+
+[[rule.then]]
+note = "6-mod rare ready for high-stakes finisher (Vaal/Sanctify). Lock first to preview the outcome."
+priority = 220
+[rule.then.action]
+kind = "apply_hinekoras_lock"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R151-hinekora-cannot-be-applied-to-corrupted"
+category = "hinekora_lock"
+explanation = "Lock requires unmodifiable=false; corrupted is immune."
+source = "/docs/34 §3.3"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { corrupted = true },
+    { has_hinekora_lock = false },
+]
+
+[[rule.then]]
+note = "Hinekora's Lock cannot be applied to corrupted items."
+priority = 30
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R152-hinekora-bench-recombinator-no-preview"
+category = "hinekora_lock"
+when = { has_hinekora_lock = true }
+explanation = "Reminder of the Lock's coverage limits."
+source = "/docs/34 §3.5"
+confidence = "verified"
+
+[[rule.then]]
+note = "Lock CANNOT preview crafting bench, recombinator, beastcrafting, or Corruption Altar. Apply Lock only when the next currency is a regular orb."
+priority = 40
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §3.4 — Lock previews bad → harmless reroll trick
+[[rule]]
+id = "R320-lock-bad-preview-harmless-reroll"
+category = "hinekora_lock"
+when = { has_hinekora_lock = true }
+explanation = "Quality / socket changes don't consume the foreseeing state — low-risk method of rerolling other previewed outcomes."
+source = "/docs/34 §3.4 (POE-WIKI-HL)"
+confidence = "verified"
+
+[[rule.then]]
+note = "If all previews are bad: apply a 'harmless' currency (Tailoring Orb on body armour, anointing on rings/amulets) to clear the lock without modifying explicits, then re-Lock."
+priority = 65
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §3.6 — EV gate: Lock cost > 1/3 × replacement cost → skip
+[[rule]]
+id = "R321-lock-ev-gate-cheap-items"
+category = "hinekora_lock"
+explanation = "On low-value items the Lock's cost dominates EV — just take the gamble or buy a finished item."
+source = "/docs/34 §3.6 (MOBA-VAAL analogy)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { has_hinekora_lock = false },
+    { expected_sale_price = { op = "lt", value = 5.0 } },
+]
+
+[[rule.then]]
+note = "Item value < 5 div: a Hinekora's Lock costs more than the variance you're hedging. Skip the Lock and accept the RNG outcome."
+priority = 25
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

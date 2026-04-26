@@ -1,0 +1,228 @@
+# 4. Exalt-vs-Desecrate Choice
+# Per /docs/34 §4.
+
+[[rule]]
+id = "R040-bone-with-dextral-necromancy"
+category = "exalt_vs_desecrate"
+explanation = "User's worked-example pattern: bone hidden mod into the side you control."
+source = "User project-author worked example"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "lte", value = 1 } } },
+    { has_hidden_desecrated = false },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "Prefixes complete. Preserved Rib + Dextral Necromancy adds a hidden suffix while preserving the open suffix slot for free choice at reveal."
+priority = 220
+[rule.then.action]
+kind = "apply_currency"
+currency = "PreservedRib"
+omens = ["OmenOfDextralNecromancy"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R041-reveal-with-abyssal-echoes"
+category = "exalt_vs_desecrate"
+when = { has_hidden_desecrated = true }
+explanation = "After bone, reveal converts the hidden mod into a real one."
+source = "User worked example, step 8"
+confidence = "verified"
+
+[[rule.then]]
+note = "Reveal at the Well of Souls. Pair with Omen of Abyssal Echoes for a 3+3 choice."
+priority = 230
+[rule.then.action]
+kind = "reveal"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R070-essence-with-crystallisation-suffix-swap"
+category = "exalt_vs_desecrate"
+explanation = "User's worked-example culminating step."
+source = "User project-author worked example"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_fractured = true },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "gte", value = 1 } } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "All 3 prefixes present and at least one suffix. Perfect Essence + Dextral Crystallisation swaps a bad suffix for the Seeking suffix without touching prefixes."
+priority = 200
+[rule.then.action]
+kind = "apply_currency"
+currency = "PerfectEssenceOfSeeking"
+omens = ["OmenOfDextralCrystallisation"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R130-omen-of-light-on-rare-with-bad-desecrated"
+category = "exalt_vs_desecrate"
+explanation = "Omen of Light is the keystone trick for desecrated-mod cleanup."
+source = "/docs/33 §9"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_desecrated_revealed = true },
+]
+
+[[rule.then]]
+note = "Omen of Light + Annul removes ONLY desecrated mods. Use this whenever a desecrated mod is unwanted."
+priority = 90
+[rule.then.action]
+kind = "apply_currency"
+currency = "OrbOfAnnulment"
+omens = ["OmenOfLight"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R160-perfect-exalt-with-homogenising-on-isolated-rare"
+category = "exalt_vs_desecrate"
+explanation = "Open-prefix-only is the canonical isolated Exalt setup."
+source = "/docs/34 §4.3"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { affix_count = { affix = "prefix", count = { op = "lte", value = 2 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+]
+
+[[rule.then]]
+note = "Suffixes complete (3/3) but prefix slot open. Sinistral Exaltation forces the slam to land prefix; Perfect Exalt guarantees min-mod-level 50."
+priority = 215
+[rule.then.action]
+kind = "apply_currency"
+currency = "PerfectExaltedOrb"
+omens = ["OmenOfSinistralExaltation"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R161-dextral-exalt-on-prefix-locked-rare"
+category = "exalt_vs_desecrate"
+explanation = "Mirror of the Sinistral case."
+source = "/docs/34 §4.3"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "lte", value = 2 } } },
+]
+
+[[rule.then]]
+note = "Prefixes complete; suffix slot open. Dextral Exaltation + Perfect Exalt is deterministic for slot."
+priority = 215
+[rule.then.action]
+kind = "apply_currency"
+currency = "PerfectExaltedOrb"
+omens = ["OmenOfDextralExaltation"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R162-bone-on-isolated-armor-prefix"
+category = "exalt_vs_desecrate"
+explanation = "Bone path competes with Exalt; prefer it when the desecrated mod pool is desirable."
+source = "/docs/34 §4.4"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { item_class = "BodyArmour" },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "prefix", count = { op = "lte", value = 2 } } },
+    { has_hidden_desecrated = false },
+]
+
+[[rule.then]]
+note = "Body armour + open prefix slot: Ancient Rib + Sinistral Necromancy guarantees a high-tier desecrated prefix."
+priority = 200
+[rule.then.action]
+kind = "apply_currency"
+currency = "AncientRib"
+omens = ["OmenOfSinistralNecromancy"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R163-abyssal-echoes-before-reveal"
+category = "exalt_vs_desecrate"
+when = { has_hidden_desecrated = true }
+explanation = "Cheap insurance against bad reveal options."
+source = "/docs/34 §4.9"
+confidence = "verified"
+
+[[rule.then]]
+note = "Activate Omen of Abyssal Echoes BEFORE Reveal — gives 6 options total instead of 3."
+priority = 235
+[rule.then.action]
+kind = "activate_omen"
+omen = "OmenOfAbyssalEchoes"
+
+# ---------------------------------------------------------------------
+# §4.8 — Mark of the Abyss combo (Essence of the Abyss before bone)
+[[rule]]
+id = "R330-mark-of-the-abyss-combo"
+category = "exalt_vs_desecrate"
+explanation = "Essence of the Abyss + bone guarantees a higher-mod-level desecrated mod than the original."
+source = "/docs/34 §4.8 (MOBA-ABYSS)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "eq", value = 6 } },
+    { has_hidden_desecrated = false },
+    { has_desecrated_revealed = false },
+]
+
+[[rule.then]]
+note = "Apply Essence of the Abyss BEFORE the bone to guarantee the next desecrated mod is higher-mod-level than the originally-removed mod (Mark of the Abyss combo, see strategy #20)."
+priority = 195
+[rule.then.action]
+kind = "apply_currency"
+currency = "EssenceOfTheAbyss"
+omens = ["OmenOfDextralCrystallisation"]
+
+# ---------------------------------------------------------------------
+# §4.10 — Bones cheap, exalts scarce (early league)
+[[rule]]
+id = "R331-bones-cheap-early-league-prefer"
+category = "exalt_vs_desecrate"
+when = "always"
+explanation = "Bones drop from Abyssal Fissures and scale with Atlas tree — abundant in week 1–2 vs scarce Greater/Perfect Exalts."
+source = "/docs/34 §4.10 (MEDIUM-DESEC)"
+confidence = "community"
+
+[[rule.then]]
+note = "Early league tip: bones are typically more abundant than Greater/Perfect Exalts in week 1–2. Lean on bones for filling slots when exalts are scarce."
+priority = 30
+tag = "league_advice"
+[rule.then.action]
+kind = "guidance"

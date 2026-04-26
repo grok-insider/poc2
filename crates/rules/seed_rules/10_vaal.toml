@@ -1,0 +1,274 @@
+# 10. Vaal Corruption Decisions
+# Per /docs/34 §10. 13 rules total covering pre-Vaal checks, item-class
+# nuances, double-corruption gating, and the 0.4 portable orbs.
+
+[[rule]]
+id = "R030-vaal-finish-with-corruption-omen"
+category = "vaal"
+explanation = "Mirror-tier finishing step."
+source = "Tarke late-league streams"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { mirrored = false },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+]
+
+[[rule.then]]
+note = "Item is fully crafted. Vaal Orb + Omen of Corruption removes the no-change outcome."
+priority = 80
+[rule.then.action]
+kind = "apply_currency"
+currency = "VaalOrb"
+omens = ["OmenOfCorruption"]
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R100-vaal-corrupt-with-lock-on-mirror-tier"
+category = "vaal"
+explanation = "Lock-then-Vaal turns the most volatile finisher into a known outcome."
+source = "/docs/34 §10"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { mirrored = false },
+    { has_fractured = true },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+    { has_hinekora_lock = false },
+]
+
+[[rule.then]]
+note = "Mirror-tier item is one Vaal away from done. Lock first to preview the corruption outcome."
+priority = 230
+[rule.then.action]
+kind = "apply_hinekoras_lock"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R210-vaal-rare-warning-irreplaceable"
+category = "vaal"
+explanation = "6-mod completed rare is the highest-stakes Vaal target."
+source = "/docs/34 §10.1"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+    { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+]
+
+[[rule.then]]
+note = "VULKK warning: 'Don't Corrupt something you cannot replace or have a replacement for.' Have a backup or use Hinekora's Lock first."
+priority = 40
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R211-vaal-armour-or-martial-for-extra-socket"
+category = "vaal"
+explanation = "Per /docs/34 §10.3 — extra-socket Vaal outcome is exclusive to armour + martial weapons."
+source = "/docs/34 §10.3"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class_any = ["BodyArmour", "Helmet", "Gloves", "Boots", "Shield", "Focus", "OneHandSword", "OneHandMace", "TwoHandSword", "TwoHandMace", "Bow", "Crossbow"] },
+    { rarity = "rare" },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Armour / martial weapon: Vaal has 1-in-4 chance to add an extra socket past the limit. Higher EV than caster items."
+priority = 65
+[rule.then.action]
+kind = "apply_currency"
+currency = "VaalOrb"
+omens = []
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R212-vaal-caster-jewelry-warning"
+category = "vaal"
+explanation = "Per /docs/34 §10.4 — these classes can't get sockets from Vaal."
+source = "/docs/34 §10.4"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class_any = ["Wand", "Staff", "Sceptre", "Ring", "Amulet", "Belt"] },
+    { rarity = "rare" },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Caster weapon / jewelry / belt: NO extra-socket Vaal outcome. Lower EV — only Vaal cheap replaceable items."
+priority = 35
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R213-vaal-prep-quality-and-sockets-first"
+category = "vaal"
+explanation = "Sequencing matters — Vaal is one-way."
+source = "/docs/34 §10.11"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { mirrored = false },
+]
+
+[[rule.then]]
+note = "Pre-Vaal checklist: apply quality, runes, all desired exalts FIRST. Vaal locks the item permanently."
+priority = 50
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R214-twice-corrupt-50pct-destroy-warning"
+category = "vaal"
+explanation = "Per /docs/34 §10.9 — destroy outcome is total."
+source = "/docs/34 §10.9"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = true },
+]
+
+[[rule.then]]
+note = "Twice-corruption (Architect's Orb / Vaal Cultivation) has a 50% destroy chance. Buy a pre-twice-corrupted version of items you can't lose."
+priority = 35
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R141-architects-orb-on-corrupted-rare"
+category = "vaal"
+explanation = "0.4 Fate of the Vaal mechanic: Architect's Orb double-corrupts."
+source = "/docs/13-patch-0.4-changes.md"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = true },
+    { sanctified = false },
+    { mirrored = false },
+]
+
+[[rule.then]]
+note = "Corrupted Rare can be re-corrupted via Architect's Orb (0.4 Fate of the Vaal). Use sparingly — adds Vaal-mod outcomes including destruction."
+priority = 70
+[rule.then.action]
+kind = "apply_currency"
+currency = "ArchitectsOrb"
+omens = []
+
+# ---------------------------------------------------------------------
+# §10.2 — Have 2+ near-identical items: Vaal one
+[[rule]]
+id = "R420-vaal-when-backup-exists"
+category = "vaal"
+when = "always"
+explanation = "MOBA-VAAL: 'Vaal one of two near-identical items… 5% upside vs backup safety net.'"
+source = "/docs/34 §10.2"
+confidence = "community"
+
+[[rule.then]]
+note = "If you own 2+ near-identical items (within 1–2% damage / stats), Vaal one. The good outcome pulls 5% ahead; the bad outcome leaves you with the backup."
+priority = 30
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §10.5 — Omen of Corruption: only on items > 3× omen value
+[[rule]]
+id = "R421-omen-of-corruption-3x-rule"
+category = "vaal"
+explanation = "MOBA-VAAL: 4 Vaals + 4 items ≈ 3 Vaals + 3 items + 3 Omens (EV equivalence)."
+source = "/docs/34 §10.5"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { expected_sale_price = { op = "lt", value = 5.0 } },
+]
+
+[[rule.then]]
+note = "EV gate: only use Omen of Corruption when item value ≥ 3× omen cost. Below that, raw Vaal + accept the no-change is statistically equivalent and cheaper."
+priority = 32
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §10.6 — Unique with single dominant scaling stat: Vaal
+[[rule]]
+id = "R422-vaal-unique-single-dominant-mod"
+category = "vaal"
+explanation = "MAXROLL-CORR: Unique modifier can be increased to above the maximum value via 'krangledivine'."
+source = "/docs/34 §10.6"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "unique" },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Unique with one dominant scaling stat (Fireflower +Fire skills, Kaom's life): Vaal can push the mod past max via the krangledivine outcome. Worth it on uniques where one stat dominates."
+priority = 55
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §10.10 — Vaal level-20 gem for +1 level
+[[rule]]
+id = "R423-vaal-level-20-gem"
+category = "vaal"
+when = "always"
+explanation = "12.5% chance of +1 gem level on a level-20 gem Vaal — generally the best outcome."
+source = "/docs/34 §10.10 (MOBA-VAAL)"
+confidence = "community"
+
+[[rule.then]]
+note = "Skill gem at level 20: Vaal it for the 12.5% chance to enchant +1 gem level. The other outcomes are all acceptable on a level-20 gem (no destroy chance on gems)."
+priority = 30
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

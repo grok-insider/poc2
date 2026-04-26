@@ -351,6 +351,7 @@ mod tests {
                 },
                 note: "test".into(),
                 priority: 100,
+                tag: None,
             }],
             explanation: "test".into(),
             source: "test".into(),

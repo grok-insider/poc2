@@ -1,0 +1,138 @@
+# 13. Confidence / Expected-Value Heuristics
+# Per /docs/34 §13. All rules are tagged "meta" or "league_advice" —
+# they're EV principles that don't drive direct action, surfaced as
+# tips for the user's mental model.
+
+[[rule]]
+id = "R480-geometric-distribution-rule"
+category = "ev"
+when = "always"
+explanation = "Geometric distribution: expected attempts = 1/p; 50%-confidence ≈ 0.69/p for small p."
+source = "/docs/34 §13.1"
+confidence = "verified"
+
+[[rule.then]]
+note = "EV math reminder: if a single Chaos Spam attempt has success probability p, expected attempts = 1/p. 50%-confidence attempts ≈ 0.69/p for small p. Use this to size your stop-loss."
+priority = 22
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R481-total-weight-target-weight-attempts"
+category = "ev"
+when = "always"
+explanation = "total_weight / target_weight = expected attempts when slamming an open slot (Belton)."
+source = "/docs/34 §13.2"
+confidence = "verified"
+
+[[rule.then]]
+note = "Per Belton: total_weight / target_weight = expected attempts when slamming an open slot. Look up weights on poe2db.tw before committing to an exalt-spam pipeline."
+priority = 22
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R482-2x-expected-cost-stop-rule"
+category = "ev"
+when = "always"
+explanation = "If 2× expected-attempt cost > value(target), STOP. Standard EV stopping rule."
+source = "/docs/34 §13.3"
+confidence = "verified"
+
+[[rule.then]]
+note = "Standard EV stop rule: if 2× expected-attempt cost > target value, the next attempt is almost certainly negative-EV given variance. STOP and re-evaluate."
+priority = 24
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R483-trust-math-vs-feel-deterministic"
+category = "ev"
+when = "always"
+explanation = "Deterministic recipes (MOBA-BOOTS, AOEAH-GMC) explicitly remove EV calculation by removing variance."
+source = "/docs/34 §13.4"
+confidence = "community"
+
+[[rule.then]]
+note = "Decision rule: trust the EV math when craft is RNG-only; trust feel/recipes when there are deterministic finishing options. Deterministic recipes explicitly remove EV calculation by removing variance."
+priority = 18
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R484-hinekoras-lock-ev-formula"
+category = "ev"
+when = "always"
+explanation = "Lock's expected savings = (P_brick × value_loss). Apply Lock when this exceeds Lock cost."
+source = "/docs/34 §13.5 (POE-WIKI-HL)"
+confidence = "verified"
+
+[[rule.then]]
+note = "Hinekora's Lock EV formula: expected_savings = P(brick) × value_loss. Apply Lock when expected_savings > Lock cost. With multi-currency previews, value_loss is the worst-case across all candidate previews."
+priority = 24
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R485-isolation-crafting-banning-cost"
+category = "ev"
+when = "always"
+explanation = "Isolation cost (Omens + Perfect tier) should be < expected un-isolated attempts × per-attempt cost."
+source = "/docs/34 §13.6 (MOBA-ISOL)"
+confidence = "community"
+
+[[rule.then]]
+note = "Isolation crafting reduces effective attempts to 1 by banning all other RNG branches. Cost gate: the cost of 'banning' (Omens + Perfect tier) should be LESS than the expected un-isolated attempts × per-attempt cost. Otherwise the un-isolated path is cheaper."
+priority = 22
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R486-sanctification-probability-math"
+category = "ev"
+when = "always"
+explanation = "P(all positive) ≈ 1.56%; P(all neutral-or-positive) ≈ 2.1%; max-roll all-6 ≈ 1 in 4.75 billion."
+source = "/docs/34 §13.7 (VULKK)"
+confidence = "verified"
+
+[[rule.then]]
+note = "Sanctification probability: P(all 6 mods rolled positive) ≈ 1.56%. P(all neutral-or-positive) ≈ 2.1%. Max-roll-on-all-6 is roughly 1 in 4.75 billion. Treat Sanctify as a final upgrade gamble, not a craft step."
+priority = 26
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R487-vaal-orb-ev-50-percent-rule"
+category = "ev"
+when = "always"
+explanation = "Vaal is a 4-way 25% split; positive only when good outcomes for THIS slot exceed 50% of current item value."
+source = "/docs/34 §13.8 (MAXROLL-CORR, MOBA-VAAL)"
+confidence = "community"
+
+[[rule.then]]
+note = "Vaal Orb EV: 4-way 25% split. EV is positive only when the krangledivine/+socket/+enchant outcomes for THIS slot exceed 50% of current item value. Cheap re-rollable items: Vaal freely. Expensive items: only Vaal with a backup or Hinekora's Lock preview."
+priority = 24
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

@@ -67,6 +67,19 @@ pub struct Suggestion {
     /// of the same category. Default 100.
     #[serde(default = "default_priority")]
     pub priority: u32,
+    /// Optional UI category for non-actionable suggestions. Surfaced
+    /// values (A.5):
+    ///
+    /// - `"league_advice"`: market-awareness rule, surfaced as a tip
+    ///   in the Settings panel rather than as a top-N recommendation.
+    /// - `"meta"`: confidence / EV note that doesn't drive action.
+    /// - `"warning"`: high-stakes caution that should be surfaced
+    ///   prominently.
+    ///
+    /// `None` means the suggestion is a regular actionable
+    /// recommendation that goes through the advisor's ranking.
+    #[serde(default)]
+    pub tag: Option<String>,
 }
 
 fn default_priority() -> u32 {
@@ -83,6 +96,10 @@ pub enum SuggestionAction {
         #[serde(default)]
         omens: Vec<OmenId>,
     },
+    /// Pre-bind one omen for the next omen-consuming action without
+    /// applying any currency yourself. Mirrors
+    /// [`poc2_strategies::Action::ActivateOmen`] (added in A.2).
+    ActivateOmen { omen: OmenId },
     /// Apply Hinekora's Lock to make the next operation deterministic-preview.
     ApplyHinekorasLock,
     /// Reveal at the Well of Souls.

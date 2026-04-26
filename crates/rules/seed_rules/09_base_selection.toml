@@ -1,0 +1,190 @@
+# 9. Item Base Selection
+# Per /docs/34 §9.
+
+[[rule]]
+id = "R200-ilvl-82-required-for-t1-mlvl-80-mods"
+category = "base_selection"
+explanation = "ilvl 82 unlocks the highest-tier mods — base selection matters."
+source = "/docs/34 §9.1"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { ilvl = { op = "lt", value = 82 } },
+    { ilvl = { op = "gte", value = 75 } },
+]
+
+[[rule.then]]
+note = "ilvl < 82: T1 versions of mlvl-80+ mods (T1 phys%, T1 +3 spell skills, T1 max life on chest) are GATED. Replace with ilvl 82 base if you need them."
+priority = 75
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R201-low-ilvl-leveling-floor"
+category = "base_selection"
+when = { ilvl = { op = "lt", value = 75 } }
+explanation = "VULKK base-pick floor for endgame."
+source = "/docs/34 §9.3"
+confidence = "verified"
+
+[[rule.then]]
+note = "ilvl < 75: leveling-tier base. For endgame crafts, replace with ilvl 75+ to open mid/high-tier mods."
+priority = 80
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §9.2 — ilvl 80 sufficient for most non-T1-cap mods
+[[rule]]
+id = "R400-ilvl-80-baseline-coverage"
+category = "base_selection"
+when = "always"
+explanation = "ilvl 80 opens most tiers of many modifiers, save for a few mlvl 80+ T1 caps."
+source = "/docs/34 §9.2 (VULKK)"
+confidence = "community"
+
+[[rule.then]]
+note = "Base-selection note: ilvl 80 unlocks most mod tiers. Reserve ilvl 82 hunts for builds that specifically need T1 of mlvl-82 mods (T1 phys%, T1 +3 spell skills, T1 chest max life)."
+priority = 25
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §9.4 — +4 minion gems requires ilvl 78+ rattling sceptre
+[[rule]]
+id = "R401-rattling-sceptre-ilvl-78-floor"
+category = "base_selection"
+explanation = "Sceptre must be ilvl 78+ to roll +4 to minion skill gems (AOEAH-GMC)."
+source = "/docs/34 §9.4"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class = "Sceptre" },
+    { ilvl = { op = "lt", value = 78 } },
+]
+
+[[rule.then]]
+note = "Sceptre at ilvl < 78 cannot roll +4 to minion skill gems. Replace base if you're chasing the +4 minion craft."
+priority = 70
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §9.5 — Exceptional sockets bases (extra-socket Exceptionals)
+[[rule]]
+id = "R402-exceptional-bases-priority"
+category = "base_selection"
+when = "always"
+explanation = "Exceptional bases drop with up to 30% quality OR extra rune sockets — best bases in the game."
+source = "/docs/34 §9.5 (VULKK, MOBA-BOOTS)"
+confidence = "verified"
+
+[[rule.then]]
+note = "Behavioural priority: prefer Exceptional bases (30% quality OR extra socket) for endgame crafts. Compounds with every applied craft. See strategy #23 for the full hold-and-wait workflow."
+priority = 28
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §9.6 — STR-stacker bases
+[[rule]]
+id = "R403-str-stacker-base-pick"
+category = "base_selection"
+when = "always"
+explanation = "STR bases roll higher armour values; standard ARPG itemization."
+source = "/docs/34 §9.6 (VULKK)"
+confidence = "community"
+
+[[rule.then]]
+note = "STR-stacker builds: prefer STR-requirement bases (higher armour rolls compound with the percent armour from prefixes)."
+priority = 20
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §9.7 — INT/ES-stacker bases
+[[rule]]
+id = "R404-int-es-stacker-base-pick"
+category = "base_selection"
+when = "always"
+explanation = "INT bases roll higher ES; AOEAH-GMC uses Siren Scale Gloves for ES craft."
+source = "/docs/34 §9.7"
+confidence = "community"
+
+[[rule.then]]
+note = "INT/ES-stacker builds: prefer INT-requirement bases (Siren Scale family) for highest base ES values."
+priority = 20
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §9.8 — DEX/Evasion bases
+[[rule]]
+id = "R405-dex-evasion-base-pick"
+category = "base_selection"
+when = "always"
+explanation = "DEX bases (Cinched Boots family) roll higher evasion; MOBA-BOOTS uses Dragonscale (DEX/INT hybrid)."
+source = "/docs/34 §9.8"
+confidence = "community"
+
+[[rule.then]]
+note = "DEX/Evasion builds: prefer DEX-requirement bases. For hybrid evasion+ES, Dragonscale (DEX/INT) is the canonical pick."
+priority = 20
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §9.9 — Chaos res jewelry: Amethyst + Breach catalyst recipe
+[[rule]]
+id = "R406-chaos-res-amethyst-breach"
+category = "base_selection"
+explanation = "Amethyst (chaos res implicit) + Breach catalyst-quality boost — recombine."
+source = "/docs/34 §9.9 (AOEAH-GMC)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class_any = ["Ring", "Amulet"] },
+    { rarity = "normal" },
+]
+
+[[rule.then]]
+note = "Chaos res target: pick an Amethyst-family base (chaos res implicit) and combine with Breach catalysts for the catalyst-quality boost. T1 chaos res ring with 40%+ qual reaches 68% chaos resist."
+priority = 30
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §9.10 — Crit attack weapon: ilvl 81+ Gemini bow
+[[rule]]
+id = "R407-gemini-bow-crit-attack-base"
+category = "base_selection"
+explanation = "Start with an item level 81 Gemini bow base for the crit attack-weapon recipe (AOEAH-GMC)."
+source = "/docs/34 §9.10"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class = "Bow" },
+    { ilvl = { op = "lt", value = 81 } },
+]
+
+[[rule.then]]
+note = "Crit-attack bow craft floor: the canonical recipe starts at ilvl 81 Gemini bow base for the bolt-speed implicit. Replace your base if you're chasing this recipe."
+priority = 60
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
