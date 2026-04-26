@@ -41,4 +41,7 @@ pub enum PipelineError {
 
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
+
+    #[error("{message}")]
+    Other { message: String },
 }

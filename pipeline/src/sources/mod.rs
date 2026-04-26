@@ -7,4 +7,6 @@
 //!
 //! Normalization (raw → bundle) lives in `crate::normalize`.
 
+pub mod coe;
+pub mod poe2db;
 pub mod repoe;

@@ -43,6 +43,12 @@ enum Command {
         /// Skip cross-reference validation.
         #[arg(long)]
         skip_validation: bool,
+        /// Skip the Craft of Exile fetch (offline / faster mode).
+        #[arg(long)]
+        skip_coe: bool,
+        /// Skip the poe2db scrape.
+        #[arg(long)]
+        skip_poe2db: bool,
     },
     /// Load an existing bundle and print its summary.
     Info {
@@ -62,12 +68,16 @@ async fn main() -> Result<()> {
             patch,
             pretty,
             skip_validation,
+            skip_coe,
+            skip_poe2db,
         } => {
             let game_patch: PatchVersion = patch.parse()?;
             let opts = BuildOptions {
                 game_patch,
                 built_by: format!("poc2-pipeline@{}", env!("CARGO_PKG_VERSION")),
                 skip_validation,
+                skip_coe,
+                skip_poe2db,
             };
             let bundle = build_bundle(opts).await?;
             poc2_data::io::write_bundle(&bundle, &out, pretty)?;
@@ -86,6 +96,10 @@ async fn main() -> Result<()> {
             println!("concepts          : {}", b.concepts.len());
             println!("mods              : {}", b.mods.len());
             println!("weights           : {}", b.weights.len());
+            println!("omens             : {}", b.omens.entries.len());
+            println!("essences          : {}", b.essences.entries.len());
+            println!("catalysts         : {}", b.catalysts.entries.len());
+            println!("bones             : {}", b.bones.entries.len());
             println!("synergy_edges     : {}", b.synergy_edges.len());
             println!("synergy_overrides : {}", b.synergy_overrides.len());
             println!("mods_by_base      : {}", b.mods_by_base.len());

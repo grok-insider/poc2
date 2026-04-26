@@ -25,4 +25,9 @@ pub mod meta;
 pub mod prices;
 pub mod valuator;
 
+pub use prices::{
+    apply_feed_to_valuator, default_id_mapping, fetch_snapshot, PoeScoutCurrencyEntry,
+    PoeScoutLeague, PoeScoutSnapshot, PriceError, POE2SCOUT_BASE_URL, POE2SCOUT_DEFAULT_CATEGORIES,
+    POE2SCOUT_DEFAULT_LEAGUE, POE2SCOUT_REALM,
+};
 pub use valuator::{DivEquiv, Valuator};
