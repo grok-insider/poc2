@@ -18,10 +18,12 @@
 
 pub mod basic;
 pub mod bone;
+pub mod essence;
 pub mod fracturing;
 pub mod hinekora;
 
 pub use bone::{reveal_at_well_of_souls, sample_reveal_options, Bone, RevealOptions};
+pub use essence::{Essence, EssenceQuality};
 pub use fracturing::FracturingOrb;
 pub use hinekora::HinekorasLock;
 
