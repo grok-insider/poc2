@@ -29,6 +29,7 @@ use crate::currency::basic::{
     PerfectOrbOfTransmutation, PerfectRegalOrb, RegalOrb, VaalOrb,
 };
 use crate::currency::bone::Bone;
+use crate::currency::catalyst::Catalyst;
 use crate::currency::essence::Essence;
 use crate::currency::fracturing::FracturingOrb;
 use crate::currency::hinekora::HinekorasLock;
@@ -51,6 +52,7 @@ pub trait CurrencyResolver: Send + Sync {
 #[derive(Debug, Default, Clone)]
 pub struct DefaultCurrencyResolver {
     essences: Vec<Essence>,
+    catalysts: Vec<Catalyst>,
 }
 
 impl DefaultCurrencyResolver {
@@ -58,7 +60,9 @@ impl DefaultCurrencyResolver {
     /// resolve to `None`.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        let mut s = Self::default();
+        s.register_default_catalyst_presets();
+        s
     }
 
     /// Attach an essence catalogue. Each `Essence` is matched by exact
@@ -69,9 +73,35 @@ impl DefaultCurrencyResolver {
         self
     }
 
+    /// Attach a catalyst catalogue.
+    #[must_use]
+    pub fn with_catalysts(mut self, catalysts: Vec<Catalyst>) -> Self {
+        self.catalysts = catalysts;
+        self
+    }
+
     /// Add a single essence to the catalogue.
     pub fn add_essence(&mut self, essence: Essence) {
         self.essences.push(essence);
+    }
+
+    /// Add a single catalyst to the catalogue.
+    pub fn add_catalyst(&mut self, catalyst: Catalyst) {
+        self.catalysts.push(catalyst);
+    }
+
+    /// Pre-populate the resolver with the engine's catalyst presets so
+    /// strategies / rules referring to `FleshCatalyst`, `ReaverCatalyst`,
+    /// etc. resolve out of the box. Production callers can extend with
+    /// the full bundle catalogue via [`with_catalysts`].
+    fn register_default_catalyst_presets(&mut self) {
+        self.catalysts.extend([
+            Catalyst::flesh(),
+            Catalyst::intrinsic(),
+            Catalyst::reaver(),
+            Catalyst::carapace(),
+            Catalyst::unstable(),
+        ]);
     }
 }
 
@@ -108,6 +138,11 @@ impl CurrencyResolver for DefaultCurrencyResolver {
         // Bones — `{Size}{Subtype}` canonical naming.
         if let Some((size, subtype)) = parse_bone_id(s) {
             return Some(Box::new(Bone::new(size, subtype)));
+        }
+
+        // Catalysts — preset + caller-supplied catalogue.
+        if let Some(c) = self.catalysts.iter().find(|c| c.id().as_str() == s) {
+            return Some(Box::new(c.clone()));
         }
 
         // Essences — caller-supplied catalogue.
@@ -229,5 +264,28 @@ mod tests {
         assert!(r
             .resolve(&CurrencyId::from("PerfectEssenceOfBattle"))
             .is_none());
+    }
+
+    #[test]
+    fn default_catalyst_presets_resolve() {
+        let r = DefaultCurrencyResolver::new();
+        for id in [
+            "FleshCatalyst",
+            "IntrinsicCatalyst",
+            "ReaverCatalyst",
+            "CarapaceCatalyst",
+            "UnstableCatalyst",
+        ] {
+            assert!(
+                r.resolve(&CurrencyId::from(id)).is_some(),
+                "did not resolve catalyst {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn catalyst_catalogue_extension_works() {
+        let r = DefaultCurrencyResolver::new().with_catalysts(vec![Catalyst::adaptive("breach")]);
+        assert!(r.resolve(&CurrencyId::from("AdaptiveCatalyst")).is_some());
     }
 }
