@@ -1,0 +1,94 @@
+# Apprentice Blueprint — additive-only crafting
+#
+# Source: Tarke Cat / community shorthand. The canonical entry-level
+# pipeline: never use Annul/Chaos, only steps that ADD mods. Extremely
+# common starter craft for boots/gloves/helmets/jewelry on a Normal
+# ilvl 75+ base.
+#
+# See /docs/33-strategy-library.md sec. 1 for the full breakdown.
+
+id = "apprentice-blueprint"
+name = "Apprentice Blueprint (Additive-Only Crafting)"
+patch_min = "0.4.0"
+expected_cost_div = [1, 15]
+expected_success_prob = [0.25, 0.40]
+confidence = "verified"
+note = """
+Beginner-friendly pipeline: Transmute → Aug → Regal → 3 Exalts.
+Greater/Perfect tiers are recommended at every step but not required.
+Optional Preserved Bone finisher for a 7th-effective desecrated mod.
+"""
+
+[source]
+kind = "community"
+credit = "Tarke Cat / Mobalytics beginner blueprint"
+reference = "vulkk.com / Mobalytics crafting basics"
+
+# ---- Preconditions ----
+preconditions = [
+    { ilvl = { op = "gte", value = 75 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+# ---- Target — leave open so the strategy applies to any goal ----
+[target]
+constraints = []
+
+# ---- Abandon criteria ----
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-transmute"
+action = { kind = "apply_currency", currency = "GreaterOrbOfTransmutation" }
+note = "Step 1: Transmute white -> magic with one min-mod-level 35 mod."
+on_success = "S2-augment"
+on_failure = "S2-augment"
+
+[[steps]]
+id = "S2-augment"
+action = { kind = "apply_currency", currency = "GreaterOrbOfAugmentation" }
+note = "Step 2: Augment magic -> 2 mods. Inspect: keep going if both are build-relevant."
+on_success = "S3-regal"
+on_failure = "S3-regal"
+
+[[steps]]
+id = "S3-regal"
+action = { kind = "apply_currency", currency = "GreaterRegalOrb" }
+note = "Step 3: Regal magic -> rare with 3 mods. Inspect again."
+on_success = "S4-exalt-1"
+on_failure = "S4-exalt-1"
+
+[[steps]]
+id = "S4-exalt-1"
+action = { kind = "apply_currency", currency = "GreaterExaltedOrb" }
+note = "Step 4: First Exalt fills the 4th slot."
+on_success = "S5-exalt-2"
+on_failure = "S5-exalt-2"
+
+[[steps]]
+id = "S5-exalt-2"
+action = { kind = "apply_currency", currency = "GreaterExaltedOrb" }
+note = "Step 5: Second Exalt fills the 5th slot."
+on_success = "S6-exalt-3"
+on_failure = "S6-exalt-3"
+
+[[steps]]
+id = "S6-exalt-3"
+action = { kind = "apply_currency", currency = "GreaterExaltedOrb" }
+note = "Step 6: Third Exalt fills the 6th slot. Item is now a 6-mod rare."
+on_success = "S7-done"
+on_failure = "S7-done"
+
+[[steps]]
+id = "S7-done"
+action = { kind = "done" }
+note = "Apprentice Blueprint complete. Optional: Preserved Bone for a 7th desecrated mod."

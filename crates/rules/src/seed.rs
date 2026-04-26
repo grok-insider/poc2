@@ -434,6 +434,334 @@ pub fn seed_rules() -> Vec<Rule> {
         confidence: Confidence::Verified,
     });
 
+    // ---- Catalyst rules (jewelry-specific) ------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R090-flesh-catalyst-on-life-rare-jewelry"),
+        category: Category::Other,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::ItemClassAny(vec![
+                poc2_engine::ids::ItemClassId::from("Ring"),
+                poc2_engine::ids::ItemClassId::from("Amulet"),
+                poc2_engine::ids::ItemClassId::from("Belt"),
+            ]),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::HasConcept {
+                concept: poc2_engine::ConceptId::from("Life"),
+                affix: None,
+                min_tier: None,
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("FleshCatalyst"),
+                omens: vec![],
+            },
+            note:
+                "Rare jewelry with a life mod: Flesh Catalyst boosts life-tagged mods by +5%/apply (cap 20%)."
+                    .into(),
+            priority: 110,
+        }],
+        explanation: "Catalysts multiply tag-matching mod values; quality is consumed by Catalysing Exaltation later.".into(),
+        source: "/docs/33-strategy-library.md sec 18 (Catalysing Exaltation)".into(),
+        confidence: Confidence::Community,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R091-reaver-catalyst-on-attack-rare-jewelry"),
+        category: Category::Other,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::ItemClassAny(vec![
+                poc2_engine::ids::ItemClassId::from("Ring"),
+                poc2_engine::ids::ItemClassId::from("Amulet"),
+            ]),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::HasConcept {
+                concept: poc2_engine::ConceptId::from("AttackDamage"),
+                affix: None,
+                min_tier: None,
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("ReaverCatalyst"),
+                omens: vec![],
+            },
+            note:
+                "Rare jewelry with attack-damage mods: Reaver Catalyst boosts attack-tagged mods."
+                    .into(),
+            priority: 110,
+        }],
+        explanation: "Catalysts pin quality to a tag; Reaver targets attack mods.".into(),
+        source: "/docs/33-strategy-library.md sec 18".into(),
+        confidence: Confidence::Community,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R092-unstable-catalyst-on-caster-rare-jewelry"),
+        category: Category::Other,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::ItemClassAny(vec![
+                poc2_engine::ids::ItemClassId::from("Ring"),
+                poc2_engine::ids::ItemClassId::from("Amulet"),
+            ]),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::HasConcept {
+                concept: poc2_engine::ConceptId::from("SpellDamage"),
+                affix: None,
+                min_tier: None,
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("UnstableCatalyst"),
+                omens: vec![],
+            },
+            note: "Rare jewelry with caster mods: Unstable Catalyst boosts caster-tagged mods."
+                .into(),
+            priority: 110,
+        }],
+        explanation: "Catalyst-quality boosts spell mods on jewelry pre-Exalt slam.".into(),
+        source: "/docs/33-strategy-library.md sec 18".into(),
+        confidence: Confidence::Community,
+    });
+
+    // ---- Vaal-corruption finishers --------------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R100-vaal-corrupt-with-lock-on-mirror-tier"),
+        category: Category::Vaal,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::Mirrored(false),
+            ItemPredicate::HasFractured(true),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+            ItemPredicate::HasHinekoraLock(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyHinekorasLock,
+            note: "Mirror-tier item is one Vaal away from done. Lock first to preview the corruption outcome.".into(),
+            priority: 230,
+        }],
+        explanation: "Lock-then-Vaal turns the most volatile finisher into a known outcome.".into(),
+        source: "/docs/34-heuristics-rulebook.md sec 10".into(),
+        confidence: Confidence::Verified,
+    });
+
+    // ---- Magic-stage Annul-Aug recovery ---------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R110-annul-magic-stage-when-one-junk-mod"),
+        category: Category::WhittleVsAnnul,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Magic),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 1,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 1,
+                },
+            },
+            ItemPredicate::Corrupted(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("OrbOfAnnulment"),
+                omens: vec![],
+            },
+            note:
+                "Magic with 2 mods, one junk: Annul is 50/50 to remove the junk. Cycle Aug after."
+                    .into(),
+            priority: 130,
+        }],
+        explanation: "Magic-stage Annul-Aug spam refines a base before Regal.".into(),
+        source: "/docs/33-strategy-library.md sec 3".into(),
+        confidence: Confidence::Community,
+    });
+
+    // ---- Side-targeted Erasure -----------------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R120-sinistral-erasure-when-prefix-side-junk"),
+        category: Category::WhittleVsAnnul,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::HasFractured(true),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 3,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 2,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("ChaosOrb"),
+                omens: vec![poc2_engine::ids::OmenId::from("OmenOfSinistralErasure")],
+            },
+            note:
+                "Suffixes are locked, prefixes have junk. Sinistral Erasure removes only prefixes."
+                    .into(),
+            priority: 200,
+        }],
+        explanation: "Side-targeted erasure cleans one side without risking the other.".into(),
+        source: "/docs/33-strategy-library.md sec 8".into(),
+        confidence: Confidence::Community,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R121-dextral-erasure-when-suffix-side-junk"),
+        category: Category::WhittleVsAnnul,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::HasFractured(true),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 3,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 2,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("ChaosOrb"),
+                omens: vec![poc2_engine::ids::OmenId::from("OmenOfDextralErasure")],
+            },
+            note: "Prefixes are locked, suffixes have junk. Dextral Erasure removes only suffixes."
+                .into(),
+            priority: 200,
+        }],
+        explanation: "Side-targeted erasure cleans one side without risking the other.".into(),
+        source: "/docs/33-strategy-library.md sec 8".into(),
+        confidence: Confidence::Community,
+    });
+
+    // ---- Light-omen Annul for desecrated cleanup ------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R130-omen-of-light-on-rare-with-bad-desecrated"),
+        category: Category::ExaltVsDesecrate,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::HasHiddenDesecrated(false),
+            // Has at least one revealed desecrated mod (fractured=false but
+            // we lack a HasDesecrated predicate — proxy via ilvl 82 + rare
+            // for now). Strategy authors can refine when the predicate
+            // surface gains HasDesecrated.
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("OrbOfAnnulment"),
+                omens: vec![poc2_engine::ids::OmenId::from("OmenOfLight")],
+            },
+            note: "If a desecrated mod is unwanted, Omen of Light + Annul removes ONLY desecrated mods.".into(),
+            priority: 90,
+        }],
+        explanation: "Omen of Light is the keystone trick for desecrated-mod cleanup.".into(),
+        source: "/docs/33-strategy-library.md sec 9".into(),
+        confidence: Confidence::Community,
+    });
+
+    // ---- Sanctification finisher ----------------------------------------
+
+    out.push(Rule {
+        id: RuleId::from("R141-architects-orb-on-corrupted-rare"),
+        category: Category::Vaal,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(true),
+            ItemPredicate::Sanctified(false),
+            ItemPredicate::Mirrored(false),
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("ArchitectsOrb"),
+                omens: vec![],
+            },
+            note: "Corrupted Rare can be re-corrupted via Architect's Orb (0.4 Fate of the Vaal). Use sparingly — adds Vaal-mod outcomes including destruction.".into(),
+            priority: 70,
+        }],
+        explanation: "0.4 Fate of the Vaal mechanic: Architect's Orb double-corrupts.".into(),
+        source: "/docs/13-patch-0.4-changes.md".into(),
+        confidence: Confidence::Community,
+    });
+
+    out.push(Rule {
+        id: RuleId::from("R140-sanctify-mirror-tier-finisher"),
+        category: Category::StopVsContinue,
+        when: ItemPredicate::All(vec![
+            ItemPredicate::Rarity(Rarity::Rare),
+            ItemPredicate::Corrupted(false),
+            ItemPredicate::Sanctified(false),
+            ItemPredicate::Mirrored(false),
+            ItemPredicate::AffixCount {
+                affix: AffixType::Prefix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+            ItemPredicate::AffixCount {
+                affix: AffixType::Suffix,
+                count: ValuePredicate {
+                    op: CmpOp::Eq,
+                    value: 3,
+                },
+            },
+        ]),
+        then: smallvec![Suggestion {
+            action: SuggestionAction::ApplyCurrency {
+                currency: CurrencyId::from("DivineOrb"),
+                omens: vec![poc2_engine::ids::OmenId::from("OmenOfSanctification")],
+            },
+            note: "6-mod rare ready for Sanctification. Locks the item permanently — only do this when satisfied.".into(),
+            priority: 60,
+        }],
+        explanation: "Sanctified items are uncraftable but typically more valuable.".into(),
+        source: "/docs/11-game-mechanics.md".into(),
+        confidence: Confidence::Verified,
+    });
+
     out
 }
 
@@ -444,7 +772,7 @@ mod tests {
     #[test]
     fn seed_rules_load() {
         let rules = seed_rules();
-        assert!(rules.len() >= 15, "got {} rules", rules.len());
+        assert!(rules.len() >= 25, "got {} rules", rules.len());
     }
 
     #[test]

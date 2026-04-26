@@ -1,0 +1,75 @@
+# Whittling Cleanup — surgical lowest-mod-level removal
+#
+# Source: Mobalytics omen-crafting guide; codified usage rules by Belton
+# ("Whittle to surgically remove the lowest-ilvl mod").
+#
+# Use case: 5-6 mod rares with one strictly-lowest-mod-level junk mod.
+# Lookup mod-levels on poe2db.tw to confirm the minimum is unique.
+# /docs/33-strategy-library.md sec. 7 + /docs/34-heuristics-rulebook.md
+# rule 4.x.
+
+id = "whittling-cleanup"
+name = "Whittling Cleanup (Surgical Lowest-mod-level Removal)"
+patch_min = "0.4.0"
+expected_cost_div = [5, 15]
+expected_success_prob = [0.6, 0.9]
+confidence = "verified"
+note = """
+Activate Omen of Whittling, then slam Chaos. The Whittling omen forces
+the Chaos to remove the lowest-mod-level mod (not the lowest tier).
+The new added mod is RNG and may also be junk; cycle as needed.
+"""
+
+[source]
+kind = "community"
+credit = "Belton / Mobalytics omen-crafting guide"
+reference = "/docs/33-strategy-library.md sec. 7"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { ilvl = { op = "gte", value = 75 } },
+    { corrupted = false },
+    { sanctified = false },
+    # 5 or more total mods — Whittling is wasted on simpler rares.
+    { affix_count = { affix = "prefix", count = { op = "gte", value = 2 } } },
+    { affix_count = { affix = "suffix", count = { op = "gte", value = 2 } } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-whittle"
+action = { kind = "apply_currency", currency = "ChaosOrb", omens = ["OmenOfWhittling"] }
+note = "Slam Chaos with Omen of Whittling. Removes the lowest-mod-level mod, adds a random replacement."
+on_success = "S2-evaluate"
+on_failure = "S3-failed"
+recovery = [
+    { message = "If the new mod is also junk, re-cycle Whittling (now a different mod is lowest).", added_cost_div = 5 },
+]
+
+[[steps]]
+id = "S2-evaluate"
+action = { kind = "noop" }
+note = "Inspect the new mod. If still junk, return to S1 (caller decides via target_check)."
+on_success = "S4-done"
+on_failure = "S1-whittle"
+target_check = "always"
+
+[[steps]]
+id = "S3-failed"
+action = { kind = "abandon", reason = "Whittling failed (omen consumed without removing the intended mod)." }
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
