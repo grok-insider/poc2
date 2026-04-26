@@ -67,6 +67,7 @@ pub use registry::{ModIndex, ModRegistry};
 pub use tag::{Tag, TagCategory};
 
 pub use currency::{ApplyContext, ApplyOutcome, Currency};
+pub use engine::{apply_currency, commit_with_preview, preview_currency};
 
 /// Schema version of the engine's serialized types.
 ///

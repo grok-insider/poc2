@@ -252,6 +252,14 @@ pub struct Item {
 
     // ---- Sockets / augments ---------------------------------------------
     pub sockets: SmallVec<[Socket; 2]>,
+
+    // ---- Hinekora's Lock state ------------------------------------------
+    /// `Some(seed)` when the item is currently bound by Hinekora's Lock.
+    /// The lock's seed is used (instead of the live RNG) for the next
+    /// modifying operation, then consumed. Preview mode draws from the
+    /// same seed without consuming. See `crate::engine::apply_currency`
+    /// and `crate::engine::preview_currency` for the orchestration layer.
+    pub hinekora_lock: Option<u64>,
 }
 
 impl Item {
@@ -330,6 +338,7 @@ mod tests {
             enchantments: SmallVec::new(),
             hidden_desecrated: None,
             sockets: SmallVec::new(),
+            hinekora_lock: None,
         }
     }
 

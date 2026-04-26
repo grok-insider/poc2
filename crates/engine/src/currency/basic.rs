@@ -1172,6 +1172,7 @@ mod tests {
             enchantments: smallvec![],
             hidden_desecrated: None,
             sockets: smallvec![],
+            hinekora_lock: None,
         }
     }
 
