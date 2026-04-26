@@ -184,3 +184,15 @@ export interface RefreshPricesResponse {
   meta: PriceRefreshMeta | null;
   error: string | null;
 }
+
+export interface ReloadBundleArgs {
+  /** Optional explicit bundle path; null re-runs the XDG-aware search. */
+  path?: string | null;
+}
+
+export interface ReloadBundleResponse {
+  bundle_path: string | null;
+  patch: string | null;
+  mod_count: number;
+  strategy_count: number;
+}

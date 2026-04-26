@@ -9,7 +9,7 @@
 //! IPC commands and lifecycle events.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use poc2_advisor::{plan, BeamConfig, Goal, PlanInput, Recommendation, Stash};
 use poc2_data::Bundle;
@@ -134,19 +134,29 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
     ),
 ];
 
-/// Shared, read-only application state. Built once at startup; cloned
-/// (Arc-wise) into each command invocation.
-struct AdvisorState {
+/// Bundle-derived application state that can change at runtime via the
+/// `reload_bundle` command. Wrapped in [`RwLock`] because reads (every
+/// `recommend` invocation) dominate writes (manual reloads).
+struct BundleState {
     registry: Arc<ModRegistry>,
-    rules: Arc<RuleSet>,
     strategies: Arc<StrategyRegistry>,
     resolver: Arc<DefaultCurrencyResolver>,
+    bundle_path: Option<PathBuf>,
+    bundle_patch: Option<PatchVersion>,
+}
+
+/// Shared application state. Built once at startup. Bundle-derived
+/// fields live behind an `Arc<RwLock<BundleState>>` so the
+/// `reload_bundle` Tauri command can swap them without restarting the
+/// app (per A.6 of the v1 execution plan).
+struct AdvisorState {
+    /// Bundle-derived state, hot-swappable via `reload_bundle`.
+    bundle: Arc<RwLock<BundleState>>,
+    /// Forward-chain rule catalogue. Static (loaded from embedded
+    /// seed_rules/*.toml at startup); plugins extend it in v1.x.
+    rules: Arc<RuleSet>,
     /// Mutable so live price refreshes can swap it in.
     valuator: Arc<Mutex<Valuator>>,
-    /// Path of the bundle that was loaded (for the UI's "About" / debug view).
-    bundle_path: Option<PathBuf>,
-    /// Patch version the bundle declares.
-    bundle_patch: Option<PatchVersion>,
     /// Most recent live-price refresh metadata, if any.
     price_refresh: Arc<Mutex<Option<PriceRefreshMeta>>>,
 }
@@ -163,76 +173,92 @@ struct PriceRefreshMeta {
 
 impl AdvisorState {
     fn build() -> Self {
-        let bundle_loaded = load_bundle_from_known_paths();
-        let (registry, bundle_path, bundle_patch, essences, catalysts) = match bundle_loaded {
-            Some((bundle, path)) => {
-                let patch = bundle.game_patch();
-                tracing::info!(
-                    path = %path.display(),
-                    patch = %patch,
-                    mods = bundle.mods.len(),
-                    bases = bundle.base_items.len(),
-                    omens = bundle.omens.entries.len(),
-                    essences = bundle.essences.entries.len(),
-                    catalysts = bundle.catalysts.entries.len(),
-                    bones = bundle.bones.entries.len(),
-                    weights = bundle.weights.len(),
-                    "loaded data bundle"
-                );
-                let essences = bundle.essence_catalogue();
-                let catalysts = bundle.catalyst_catalogue();
-                (
-                    ModRegistry::from_mods(bundle.mods),
-                    Some(path),
-                    Some(patch),
-                    essences,
-                    catalysts,
-                )
-            }
-            None => {
-                tracing::warn!(
-                    "no data bundle found; running with empty mod registry. \
-                     Build a bundle via the pipeline (`cargo run -p poc2-pipeline -- build`) \
-                     and place it in `~/.config/poc2/bundles/` or set POC2_BUNDLE."
-                );
-                (
-                    ModRegistry::from_mods(Vec::new()),
-                    None,
-                    None,
-                    Vec::new(),
-                    Vec::new(),
-                )
-            }
-        };
-
         let rules = RuleSet::from_rules(poc2_rules::seed_rules());
-        let mut loaded_strategies = Vec::new();
-        for (name, toml) in SEED_STRATEGIES {
-            match poc2_strategies::load_strategy_str(toml) {
-                Ok(s) => loaded_strategies.push(s),
-                Err(e) => tracing::warn!(name, error = %e, "seed strategy failed to load"),
-            }
-        }
-        // User-provided strategies in $XDG_CONFIG_HOME/poc2/strategies/.
-        load_user_strategies(&mut loaded_strategies);
-        let strategy_count = loaded_strategies.len();
-        let strategies = StrategyRegistry::from_strategies(loaded_strategies);
-        tracing::info!(strategy_count, "loaded strategies");
-
-        let resolver = DefaultCurrencyResolver::new()
-            .with_essences(essences)
-            .with_catalysts(catalysts);
-        let valuator = Valuator::default();
+        let bundle_state = build_bundle_state(None);
         Self {
-            registry: Arc::new(registry),
+            bundle: Arc::new(RwLock::new(bundle_state)),
             rules: Arc::new(rules),
-            strategies: Arc::new(strategies),
-            resolver: Arc::new(resolver),
-            valuator: Arc::new(Mutex::new(valuator)),
-            bundle_path,
-            bundle_patch,
+            valuator: Arc::new(Mutex::new(Valuator::default())),
             price_refresh: Arc::new(Mutex::new(None)),
         }
+    }
+}
+
+/// Construct a [`BundleState`] from the bundle search machinery (or
+/// from an explicit path override). Always succeeds: a missing bundle
+/// produces an empty registry with a warning log.
+///
+/// `path_override`: when `Some(p)` skips the search and loads `p`
+/// directly. When `None` runs the standard XDG-aware search per
+/// [`load_bundle_from_known_paths`].
+fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
+    let loaded = match path_override {
+        Some(p) => try_load_bundle(p),
+        None => load_bundle_from_known_paths(),
+    };
+    let (registry, bundle_path, bundle_patch, essences, catalysts) = match loaded {
+        Some((bundle, path)) => {
+            let patch = bundle.game_patch();
+            tracing::info!(
+                path = %path.display(),
+                patch = %patch,
+                mods = bundle.mods.len(),
+                bases = bundle.base_items.len(),
+                omens = bundle.omens.entries.len(),
+                essences = bundle.essences.entries.len(),
+                catalysts = bundle.catalysts.entries.len(),
+                bones = bundle.bones.entries.len(),
+                weights = bundle.weights.len(),
+                "loaded data bundle"
+            );
+            let essences = bundle.essence_catalogue();
+            let catalysts = bundle.catalyst_catalogue();
+            (
+                ModRegistry::from_mods(bundle.mods),
+                Some(path),
+                Some(patch),
+                essences,
+                catalysts,
+            )
+        }
+        None => {
+            tracing::warn!(
+                "no data bundle found; running with empty mod registry. \
+                 Build a bundle via the pipeline (`cargo run -p poc2-pipeline -- build`) \
+                 and place it in `~/.config/poc2/bundles/` or set POC2_BUNDLE."
+            );
+            (
+                ModRegistry::from_mods(Vec::new()),
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+            )
+        }
+    };
+
+    let mut loaded_strategies = Vec::new();
+    for (name, toml) in SEED_STRATEGIES {
+        match poc2_strategies::load_strategy_str(toml) {
+            Ok(s) => loaded_strategies.push(s),
+            Err(e) => tracing::warn!(name, error = %e, "seed strategy failed to load"),
+        }
+    }
+    load_user_strategies(&mut loaded_strategies);
+    let strategy_count = loaded_strategies.len();
+    let strategies = StrategyRegistry::from_strategies(loaded_strategies);
+    tracing::info!(strategy_count, "loaded strategies");
+
+    let resolver = DefaultCurrencyResolver::new()
+        .with_essences(essences)
+        .with_catalysts(catalysts);
+
+    BundleState {
+        registry: Arc::new(registry),
+        strategies: Arc::new(strategies),
+        resolver: Arc::new(resolver),
+        bundle_path,
+        bundle_patch,
     }
 }
 
@@ -419,8 +445,10 @@ fn parse_item_text(
     state: tauri::State<'_, AdvisorState>,
 ) -> Result<ParseClipboardResponse, String> {
     let parsed = parse_clipboard_text(&text).map_err(|e| e.to_string())?;
+    let bundle_guard = state.bundle.read().expect("bundle rwlock poisoned");
     let (item, unresolved) =
-        lower_to_item(&parsed, state.registry.as_ref()).map_err(|e| e.to_string())?;
+        lower_to_item(&parsed, bundle_guard.registry.as_ref()).map_err(|e| e.to_string())?;
+    drop(bundle_guard);
     Ok(ParseClipboardResponse {
         parsed,
         item,
@@ -438,8 +466,10 @@ fn read_clipboard_item(
         .read_text()
         .map_err(|e| format!("clipboard read failed: {e}"))?;
     let parsed = parse_clipboard_text(&text).map_err(|e| e.to_string())?;
+    let bundle_guard = state.bundle.read().expect("bundle rwlock poisoned");
     let (item, unresolved) =
-        lower_to_item(&parsed, state.registry.as_ref()).map_err(|e| e.to_string())?;
+        lower_to_item(&parsed, bundle_guard.registry.as_ref()).map_err(|e| e.to_string())?;
+    drop(bundle_guard);
     Ok(ParseClipboardResponse {
         parsed,
         item,
@@ -452,21 +482,22 @@ fn recommend(
     args: RecommendArgs,
     state: tauri::State<'_, AdvisorState>,
 ) -> Result<RecommendResponse, String> {
+    let bundle_guard = state.bundle.read().expect("bundle rwlock poisoned");
     // Use the loaded bundle's patch when available; otherwise default to
     // the project's baseline (0.4.0). Falling back to a baseline keeps
     // the rules + strategies in scope when no bundle is loaded.
-    let patch = state.bundle_patch.unwrap_or(PatchVersion::PATCH_0_4_0);
-    // We need a placeholder Valuator reference to satisfy PlanInput's
-    // type — the actual lock happens below.
-    let placeholder_valuator = Valuator::default();
+    let patch = bundle_guard
+        .bundle_patch
+        .unwrap_or(PatchVersion::PATCH_0_4_0);
+    let valuator_guard = state.valuator.lock().expect("valuator mutex poisoned");
     let input = PlanInput {
         item: args.item,
         goal: args.goal,
         rules: state.rules.as_ref(),
-        strategies: state.strategies.as_ref(),
-        registry: state.registry.as_ref(),
-        resolver: state.resolver.as_ref(),
-        valuator: &placeholder_valuator,
+        strategies: bundle_guard.strategies.as_ref(),
+        registry: bundle_guard.registry.as_ref(),
+        resolver: bundle_guard.resolver.as_ref(),
+        valuator: &valuator_guard,
         stash: &args.stash,
         patch,
         config: BeamConfig {
@@ -478,21 +509,70 @@ fn recommend(
             weights: poc2_advisor::ScoringWeights::default(),
         },
     };
-    let valuator_guard = state.valuator.lock().expect("valuator mutex poisoned");
-    let input = PlanInput {
-        valuator: &valuator_guard,
-        ..input
-    };
     let recommendations = plan(&input);
-    drop(valuator_guard);
-    Ok(RecommendResponse {
+    let response = RecommendResponse {
         recommendations,
         patch: format!("{patch}"),
         rule_count: state.rules.len(),
-        strategy_count: state.strategies.len(),
-        mod_count: state.registry.len(),
-        bundle_path: state.bundle_path.as_ref().map(|p| p.display().to_string()),
-    })
+        strategy_count: bundle_guard.strategies.len(),
+        mod_count: bundle_guard.registry.len(),
+        bundle_path: bundle_guard
+            .bundle_path
+            .as_ref()
+            .map(|p| p.display().to_string()),
+    };
+    drop(valuator_guard);
+    drop(bundle_guard);
+    Ok(response)
+}
+
+#[derive(Debug, Deserialize)]
+struct ReloadBundleArgs {
+    /// Optional explicit path. `None` re-runs the XDG-aware bundle
+    /// search; `Some(p)` loads the named file directly.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReloadBundleResponse {
+    /// Path of the bundle that was loaded (or null when the search
+    /// found nothing).
+    bundle_path: Option<String>,
+    patch: Option<String>,
+    mod_count: usize,
+    strategy_count: usize,
+}
+
+/// Hot-swap the loaded bundle without restarting the app.
+///
+/// Per A.6 of the v1 execution plan. Acquires a write lock on the
+/// shared `BundleState` and replaces the registry, strategies,
+/// resolver, bundle_path, and bundle_patch in one atomic update.
+/// Subsequent `recommend` calls pick up the new state immediately.
+///
+/// Re-loads user strategies from `$XDG_CONFIG_HOME/poc2/strategies/`
+/// as part of the swap.
+#[tauri::command]
+fn reload_bundle(
+    args: ReloadBundleArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<ReloadBundleResponse, String> {
+    let path_override = args.path.as_deref().map(Path::new);
+    let new_state = build_bundle_state(path_override);
+    let response = ReloadBundleResponse {
+        bundle_path: new_state
+            .bundle_path
+            .as_ref()
+            .map(|p| p.display().to_string()),
+        patch: new_state.bundle_patch.map(|p| format!("{p}")),
+        mod_count: new_state.registry.len(),
+        strategy_count: new_state.strategies.len(),
+    };
+    let mut guard = state.bundle.write().expect("bundle rwlock poisoned");
+    *guard = new_state;
+    drop(guard);
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
@@ -577,6 +657,7 @@ pub fn run() {
             parse_item_text,
             read_clipboard_item,
             refresh_prices,
+            reload_bundle,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
