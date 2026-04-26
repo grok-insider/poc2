@@ -1,0 +1,107 @@
+# ilvl 82 + Tri-Resist Convergence (Cross-Cutting Insight)
+#
+# Source: Belton's 0.4 video, deep insight section.
+# See /docs/33-strategy-library.md sec. 21.
+#
+# Insight: All T1 elemental resists (fire, cold, lightning) are
+# mod-level 82 with IDENTICAL 1000 weights. T1 chaos res is
+# mod-level 81 at 250 weight. On any item where tri-res is the
+# goal, prioritize prefixes first; then on the suffix side a
+# Whittling chain DETERMINISTICALLY converges on the three element
+# resists because they share the top mod-level.
+#
+# Encoded as a guidance + Whittle pipeline. Use case: cheap end-game
+# capping pieces (helmets, boots, body armour, gloves, jewelry, belts).
+
+id = "ilvl-82-tri-resist-convergence"
+name = "ilvl 82 + Tri-Resist Convergence (Whittle-blind tri-res)"
+patch_min = "0.4.0"
+expected_cost_div = [5, 20]
+expected_success_prob = [0.60, 0.85]
+confidence = "verified"
+note = """
+The cheap-cap workflow: build prefixes first, then Whittle-spam
+suffixes until tri-res converges. Works because the three elemental
+resist top tiers share mod-level 82 + weight 1000 — Whittle removes
+the lowest-mod-level mod, so once non-resist suffixes are stripped,
+only resist mods remain in the rotation.
+
+Avoid using on items where you specifically want chaos res: chaos
+T1 is at mod-level 81 (1 lower) and gets stripped first by Whittle.
+"""
+
+[source]
+kind = "community"
+credit = "Belton 0.4 video — deep insight section"
+reference = "https://www.youtube.com/watch?v=TSVHK8w2Gu0"
+
+# ---- Preconditions ----
+# Item-class restriction enforced by item_classes; only chest-piece-
+# style classes have all three element resist mods at the same
+# mod-level / weight.
+item_classes = [
+    "BodyArmour", "Helmet", "Gloves", "Boots",
+    "Ring", "Amulet", "Belt",
+]
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    # Need at least 4 mods for Whittling to make sense (otherwise
+    # there's nothing to cycle).
+    { mod_count = { op = "gte", value = 4 } },
+]
+
+[target]
+constraints = []
+
+[[target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 3
+min_tier = 1
+allow_hybrid = true
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-activate-whittling"
+action = { kind = "activate_omen", omen = "OmenOfWhittling" }
+note = "Next Chaos / Erasure removes the lowest-mod-level mod. With prefix-side stable, this targets non-resist suffixes."
+on_success = "S2-activate-dextral-erasure"
+on_failure = "S2-activate-dextral-erasure"
+
+[[steps]]
+id = "S2-activate-dextral-erasure"
+action = { kind = "activate_omen", omen = "OmenOfDextralErasure" }
+note = "Dextral Erasure restricts removal to the suffix side, keeping prefix-side locked."
+on_success = "S3-chaos-cycle"
+on_failure = "S3-chaos-cycle"
+
+[[steps]]
+id = "S3-chaos-cycle"
+action = { kind = "apply_currency", currency = "PerfectChaosOrb" }
+target_check = { has_concept = { concept = "FireResistance", affix = "suffix" } }
+note = """
+Perfect Chaos with Whittling + Dextral Erasure: removes the lowest-
+mod-level suffix and adds a guaranteed min-mod-level 50 replacement.
+Loop until tri-res converges.
+"""
+on_success = "S4-done"
+on_failure = "S1-activate-whittling"
+recovery = [
+    { message = "After 5+ Whittle cycles still no tri-res: switch to Greater Essence of Insulation/Frost/Ice for a guaranteed res slam.", added_cost_div = 8 },
+    { message = "Stop after 30 div spent — the base may not have all three res mods in its pool. Sell as a 2-res piece.", added_cost_div = 0 },
+]
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = "Tri-res converged. Item is ready for end-game res-capping or trade."

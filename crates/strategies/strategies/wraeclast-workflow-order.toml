@@ -1,0 +1,112 @@
+# Wraeclast / Itemized Crafting Workflow Order (Cross-Cutting)
+#
+# Source: Belton's asymmetric prefix/suffix safety principle.
+# See /docs/33-strategy-library.md sec. 22.
+#
+# Insight: Prefixes and suffixes function as SEPARATE items for crafting
+# determinism. Once you have 3 desired prefixes (or 3 desired suffixes),
+# the opposite side can be freely manipulated using Sinistral / Dextral
+# tools without ever risking the locked side.
+#
+# Strategy: always finish ONE side completely (3T1) before touching the
+# other. Fail states then only ever cost half the item, not the whole.
+#
+# Encoded as a guidance / decision-gate strategy. Surfaces side-locked
+# erasure when 3T1 is reached on either side.
+
+id = "wraeclast-workflow-order"
+name = "Wraeclast Workflow Order (one side at a time)"
+patch_min = "0.4.0"
+expected_cost_div = [10, 80]
+expected_success_prob = [0.50, 0.85]
+confidence = "verified"
+note = """
+Meta-strategy: think of prefixes + suffixes as two independent items.
+Don't touch a side that already has 3 desired mods unless you're
+side-locked (Sinistral/Dextral omens). Brick rates halve when you
+respect this discipline.
+
+Triggered when the item has 3 desired mods on one side and < 3 on the
+other. Surfaces the side-locked finish path.
+"""
+
+[source]
+kind = "community"
+credit = "Belton — asymmetric prefix/suffix safety principle"
+reference = "https://www.youtube.com/watch?v=TSVHK8w2Gu0"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    # Triggers when one side is at 3 and the other is < 3.
+    # This is the asymmetric working state Belton's rubric optimizes for.
+    { any = [
+        { all = [
+            { affix_count = { affix = "prefix", count = { op = "eq", value = 3 } } },
+            { affix_count = { affix = "suffix", count = { op = "lte", value = 2 } } },
+        ] },
+        { all = [
+            { affix_count = { affix = "suffix", count = { op = "eq", value = 3 } } },
+            { affix_count = { affix = "prefix", count = { op = "lte", value = 2 } } },
+        ] },
+    ] },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-activate-side-bias-exalt"
+action = { kind = "activate_omen", omen = "OmenOfDextralExaltation" }
+note = """
+Side-bias the next Exalt to land on the OPEN side (Dextral if your
+prefixes are locked; Sinistral if your suffixes are locked). Default
+Dextral shown.
+"""
+on_success = "S2-perfect-exalt"
+on_failure = "S2-perfect-exalt"
+
+[[steps]]
+id = "S2-perfect-exalt"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb" }
+note = "Perfect Exalt with side-bias active: guaranteed slot, min mod-level 50."
+on_success = "S3-evaluate"
+on_failure = "S3-evaluate"
+
+[[steps]]
+id = "S3-evaluate"
+action = { kind = "noop" }
+note = """
+Decision gate: was the new mod desirable?
+  - YES: continue filling the open side via more Exalts (loop S1).
+  - NO:  side-locked Annul (Sinistral or Dextral) removes ONLY the
+         bad mod from the opposite-locked side.
+"""
+on_success = "S4-done"
+on_failure = "S3b-side-locked-annul"
+
+[[steps]]
+id = "S3b-side-locked-annul"
+action = { kind = "apply_currency", currency = "OrbOfAnnulment", omens = ["OmenOfDextralAnnulment"] }
+note = """
+Side-locked Annul: removes ONLY a suffix (or prefix if Sinistral).
+Locked-good side untouched. Refill via Aug.
+"""
+on_success = "S1-activate-side-bias-exalt"
+on_failure = "S4-done"
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = "Asymmetric workflow complete. Open side filled or controlled-removal cycled."

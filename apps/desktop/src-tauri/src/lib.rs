@@ -114,6 +114,24 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
         "mark-of-the-abyss-swap",
         include_str!("../../../../crates/strategies/strategies/mark-of-the-abyss-swap.toml"),
     ),
+    (
+        "beltons-four-t1-rubric",
+        include_str!("../../../../crates/strategies/strategies/beltons-four-t1-rubric.toml"),
+    ),
+    (
+        "ilvl-82-tri-resist-convergence",
+        include_str!(
+            "../../../../crates/strategies/strategies/ilvl-82-tri-resist-convergence.toml"
+        ),
+    ),
+    (
+        "wraeclast-workflow-order",
+        include_str!("../../../../crates/strategies/strategies/wraeclast-workflow-order.toml"),
+    ),
+    (
+        "exceptional-bases-exploit",
+        include_str!("../../../../crates/strategies/strategies/exceptional-bases-exploit.toml"),
+    ),
 ];
 
 /// Shared, read-only application state. Built once at startup; cloned

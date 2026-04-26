@@ -1,0 +1,172 @@
+# Belton's Four-T1 Rubric (The 0.4 Master Pipeline)
+#
+# Source: Belton (@BeltonPoE), "How to Craft Items in Patch 0.4 Without
+# Homogenized Omens" (Dec 10, 2025, 44min). The canonical post-
+# Homogenising-removal guaranteed pipeline.
+# See /docs/33-strategy-library.md sec. 19.
+#
+# Encoded as a 4-mod hit pipeline:
+#   Mod #1 — Fracture the rarest of 3 desired same-side mods
+#   Mod #2 — Chaos-spam tag-match for the second same-side mod
+#   Mod #3 — Desecrate the third (Necromancy + Echoes + Bone + Reveal)
+#   Mod #4 — Exalt or Essence into the open OTHER side
+#
+# Belton's rule: never restart prefixes/suffixes that already hit 3T1.
+# A bricked 5T1 attempt sells as a 4T1+meh for profit. Cycle infinitely.
+
+id = "beltons-four-t1-rubric"
+name = "Belton's Four-T1 Rubric (0.4 Master Pipeline)"
+patch_min = "0.4.0"
+expected_cost_div = [30, 60]
+expected_success_prob = [0.30, 0.50]
+confidence = "verified"
+note = """
+The current canonical 0.4 strategy. Most other strategies in this
+library are tributaries / variants of this rubric. Pick 3 desired
+prefixes OR 3 desired suffixes ahead of time, all sharing similar
+target mod-levels.
+
+Per Belton: 4T1 is near 100% reachable if you accept multiple
+fracture attempts. 5T1 is ~70% per finished 4T1 base. 6T1 is ~30–50%
+per finished 5T1 base.
+"""
+
+[source]
+kind = "community"
+credit = "Belton (@BeltonPoE), 'How to Craft Items in Patch 0.4 Without Homogenized Omens' (2025-12-10)"
+reference = "https://www.youtube.com/watch?v=TSVHK8w2Gu0"
+
+# ---- Preconditions ----
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { mirrored = false },
+    # Need exactly 4 mods to fracture (the rubric starts at 4-mod state).
+    { mod_count = { op = "eq", value = 4 } },
+    { has_fractured = false },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps — Belton's 4-mod canonical pipeline
+# =========================================================================
+
+# ---- Mod #1: Fracture the rarest --------------------------------------------
+[[steps]]
+id = "S1-pre-lock-for-fracture"
+action = { kind = "apply_currency", currency = "HinekorasLock" }
+note = """
+Optional but recommended on high-value bases: pre-Lock so the
+Fracturing Orb preview is deterministic. Skip if base value < 3× Lock
+cost, or jump to S2 for the raw 1-in-N fracture gamble.
+"""
+on_success = "S2-fracture"
+on_failure = "S2-fracture"
+
+[[steps]]
+id = "S2-fracture"
+action = { kind = "apply_currency", currency = "FracturingOrb" }
+target_check = { has_fractured = true }
+note = "Fracture attempt. ~25–33% chance to lock the rarest desired same-side mod."
+on_success = "S3-chaos-tag-match"
+on_failure = "S2b-bricked-fracture"
+recovery = [
+    { message = "Bricked fracture (locked the wrong mod): vendor for 0.5–2 div recovery; restart on a fresh 4-mod base.", added_cost_div = 2 },
+]
+
+[[steps]]
+id = "S2b-bricked-fracture"
+action = { kind = "abandon", reason = "Fracturing Orb landed on a non-target mod. Restart on a new base." }
+
+# ---- Mod #2: Chaos-spam for the second same-side mod -------------------------
+[[steps]]
+id = "S3-chaos-tag-match"
+action = { kind = "apply_currency", currency = "PerfectChaosOrb" }
+note = """
+Spam Perfect/Greater Chaos until the second desired same-side mod
+appears. The fractured mod cannot be removed; the chaos cycle keeps
+the locked mod and rerolls one other. Stop the moment the second
+target appears.
+"""
+on_success = "S4-activate-necromancy"
+on_failure = "S3-chaos-tag-match"
+recovery = [
+    { message = "Stop chaos spam after ~30–50 div without hitting the second target. Sell as 2-mod fracture seed (#17).", added_cost_div = 0 },
+]
+
+# ---- Mod #3: Desecrate the third ---------------------------------------------
+[[steps]]
+id = "S4-activate-necromancy"
+action = { kind = "activate_omen", omen = "OmenOfSinistralNecromancy" }
+note = """
+Side-bias for the bone — Sinistral (prefix) or Dextral (suffix)
+matching your target side. Default Sinistral shown.
+"""
+on_success = "S5-activate-echoes"
+on_failure = "S5-activate-echoes"
+
+[[steps]]
+id = "S5-activate-echoes"
+action = { kind = "activate_omen", omen = "OmenOfAbyssalEchoes" }
+note = "Echoes for the 6-option reveal pool."
+on_success = "S6-apply-bone"
+on_failure = "S6-apply-bone"
+
+[[steps]]
+id = "S6-apply-bone"
+action = { kind = "apply_currency", currency = "AncientRib" }
+target_check = { has_hidden_desecrated = true }
+note = """
+Ancient Rib (armour) — guarantees min mod-level 40 for the
+desecrated mod. Substitute the bone matching your item class.
+"""
+on_success = "S7-reveal"
+on_failure = "S6-apply-bone"
+
+[[steps]]
+id = "S7-reveal"
+action = { kind = "reveal", prefer = ["EnergyShield", "Life", "AllResistances", "FireResistance", "ColdResistance", "LightningResistance"], use_abyssal_echoes = true }
+note = "Reveal at the Well of Souls. Up to 6 options. Pick the third desired same-side mod."
+on_success = "S8-exalt-fourth"
+on_failure = "S8-exalt-fourth"
+recovery = [
+    { message = "All 6 reveal options bad: pick least-junky and strip via Omen of Light + Annul (#9), then re-bone with a Lord omen (#15).", added_cost_div = 12 },
+]
+
+# ---- Mod #4: Exalt the open other-side slot ----------------------------------
+[[steps]]
+id = "S8-exalt-fourth"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb", omens = ["OmenOfDextralExaltation"] }
+note = """
+Path A: Perfect Exalt + Dextral Exaltation forces the slam to land
+on the opposite side from your locked-good 3-mod side. Switch to
+Sinistral if your locked side is suffixes. Path B (skipped here):
+swap currency to a Greater Essence for a guaranteed 4th mod.
+"""
+on_success = "S9-done"
+on_failure = "S8b-recover"
+recovery = [
+    { message = "Bad 4th-mod slam: Sinistral/Dextral Annulment (50/50 to remove the trash) then retry the Exalt.", added_cost_div = 8 },
+    { message = "Continue to 5T1 via Whittle (#7) — the lowest mod-level mod becomes the deterministic Whittle target.", added_cost_div = 15 },
+]
+
+[[steps]]
+id = "S8b-recover"
+action = { kind = "apply_currency", currency = "OrbOfAnnulment", omens = ["OmenOfDextralAnnulment"] }
+note = "Recovery: side-locked Annul cleans the bad 4th-mod slam without risking the 3 locked good mods."
+on_success = "S8-exalt-fourth"
+on_failure = "S9-done"
+
+[[steps]]
+id = "S9-done"
+action = { kind = "done" }
+note = "4T1 reached. Continue to 5T1 (Whittle) → 6T1 (second-side completion) per the rubric extensions."
