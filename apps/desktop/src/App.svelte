@@ -4,6 +4,7 @@
   import ClipboardImport from './lib/ClipboardImport.svelte';
   import ItemBuilder from './lib/ItemBuilder.svelte';
   import RecoveryPanel from './lib/RecoveryPanel.svelte';
+  import SettingsPanel from './lib/SettingsPanel.svelte';
   import TargetPanel from './lib/TargetPanel.svelte';
   import { FRESH_BODY_ARMOUR, WORKED_EXAMPLE_GOAL } from './lib/fixtures';
   import type { Goal, Item, PersistedState, Recommendation } from './lib/types';
@@ -14,6 +15,8 @@
   let stateLoaded = $state(false);
   let recommendations = $state<Recommendation[]>([]);
   let lastFailed = $state(false);
+  let league = $state<string>('Fate of the Vaal');
+  let autoRefreshMinutes = $state<0 | 5 | 30 | 60>(0);
 
   // Load persisted state on mount.
   $effect.pre(() => {
@@ -99,6 +102,12 @@
       <RecoveryPanel
         recommendation={recommendations[0] ?? null}
         {lastFailed}
+      />
+      <SettingsPanel
+        {league}
+        {autoRefreshMinutes}
+        onLeagueChange={(next) => (league = next)}
+        onAutoRefreshChange={(next) => (autoRefreshMinutes = next)}
       />
     </div>
   </div>

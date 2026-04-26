@@ -672,6 +672,51 @@ fn save_state(state: PersistedState) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------
+// League listing (Phase B.3) — for the Settings panel dropdown.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct LeagueInfo {
+    value: String,
+    divine_price_in_exalts: f64,
+    chaos_per_divine: f64,
+}
+
+#[tauri::command]
+async fn list_leagues() -> Result<Vec<LeagueInfo>, String> {
+    use poc2_market::{POE2SCOUT_BASE_URL, POE2SCOUT_REALM};
+    let client = reqwest::Client::builder()
+        .user_agent(concat!(
+            "poc2-desktop/",
+            env!("CARGO_PKG_VERSION"),
+            " (+contact: github issues)"
+        ))
+        .gzip(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let url = format!("{POE2SCOUT_BASE_URL}/{POE2SCOUT_REALM}/Leagues");
+    let leagues: Vec<poc2_market::PoeScoutLeague> = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(leagues
+        .into_iter()
+        .map(|l| LeagueInfo {
+            value: l.value,
+            divine_price_in_exalts: l.divine_price,
+            chaos_per_divine: l.chaos_divine_price,
+        })
+        .collect())
+}
+
+// ---------------------------------------------------------------------
 // Bundle hot-swap (Phase A.6)
 // ---------------------------------------------------------------------
 
@@ -810,6 +855,7 @@ pub fn run() {
             load_state,
             save_state,
             recovery_hints,
+            list_leagues,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

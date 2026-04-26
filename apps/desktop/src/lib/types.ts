@@ -226,3 +226,10 @@ export interface PersistedState {
   /// Last top_n recommendations to fetch (1..10).
   top_n?: number | null;
 }
+
+/// Returned by the `list_leagues` Tauri command (Phase B.3).
+export interface LeagueInfo {
+  value: string;
+  divine_price_in_exalts: number;
+  chaos_per_divine: number;
+}
