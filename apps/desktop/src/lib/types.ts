@@ -163,3 +163,16 @@ export interface ParseClipboardResponse {
   item: Item;
   unresolved: string[];
 }
+
+export interface PriceRefreshMeta {
+  league: string;
+  fetched_at: string;
+  applied_count: number;
+  total_entries: number;
+}
+
+export interface RefreshPricesResponse {
+  refreshed: boolean;
+  meta: PriceRefreshMeta | null;
+  error: string | null;
+}

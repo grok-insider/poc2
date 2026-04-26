@@ -66,7 +66,7 @@ pub async fn build_bundle(opts: BuildOptions) -> PipelineResult<Bundle> {
                 }
             }
             Err(e) => {
-                warn!(error = %e, "CoE fetch failed; bundle will lack essences/catalysts/weights")
+                warn!(error = %e, "CoE fetch failed; bundle will lack essences/catalysts/weights");
             }
         }
     }
@@ -83,7 +83,9 @@ pub async fn build_bundle(opts: BuildOptions) -> PipelineResult<Bundle> {
                     warn!(error = %e, "poe2db normalization failed");
                 }
             }
-            Err(e) => warn!(error = %e, "poe2db fetch failed; bundle will lack omens/bones"),
+            Err(e) => {
+                warn!(error = %e, "poe2db fetch failed; bundle will lack omens/bones");
+            }
         }
     }
 

@@ -27,6 +27,7 @@ tauri-plugin-shell = "2"
 poc2-engine.workspace = true
 poc2-data = { workspace = true, features = ["gzip"] }
 poc2-strategies.workspace = true
+reqwest.workspace = true
 poc2-rules.workspace = true
 poc2-probability.workspace = true
 poc2-market.workspace = true

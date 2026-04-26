@@ -9,7 +9,7 @@
 //! IPC commands and lifecycle events.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use poc2_advisor::{plan, BeamConfig, Goal, PlanInput, Recommendation, Stash};
 use poc2_data::Bundle;
@@ -17,7 +17,9 @@ use poc2_engine::currency::DefaultCurrencyResolver;
 use poc2_engine::item::Item;
 use poc2_engine::patch::PatchVersion;
 use poc2_engine::registry::ModRegistry;
-use poc2_market::Valuator;
+use poc2_market::{
+    apply_feed_to_valuator, default_id_mapping, fetch_snapshot as fetch_price_snapshot, Valuator,
+};
 use poc2_parser::{lower_to_item, parse_clipboard_text, ParsedItem};
 use poc2_rules::RuleSet;
 use poc2_strategies::StrategyRegistry;
@@ -51,17 +53,30 @@ struct AdvisorState {
     rules: Arc<RuleSet>,
     strategies: Arc<StrategyRegistry>,
     resolver: Arc<DefaultCurrencyResolver>,
-    valuator: Arc<Valuator>,
+    /// Mutable so live price refreshes can swap it in.
+    valuator: Arc<Mutex<Valuator>>,
     /// Path of the bundle that was loaded (for the UI's "About" / debug view).
     bundle_path: Option<PathBuf>,
     /// Patch version the bundle declares.
     bundle_patch: Option<PatchVersion>,
+    /// Most recent live-price refresh metadata, if any.
+    price_refresh: Arc<Mutex<Option<PriceRefreshMeta>>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PriceRefreshMeta {
+    league: String,
+    fetched_at: String,
+    /// How many engine-recognized currencies got a fresh price.
+    applied_count: usize,
+    /// How many entries the snapshot contained (informational).
+    total_entries: usize,
 }
 
 impl AdvisorState {
     fn build() -> Self {
         let bundle_loaded = load_bundle_from_known_paths();
-        let (registry, bundle_path, bundle_patch) = match bundle_loaded {
+        let (registry, bundle_path, bundle_patch, essences, catalysts) = match bundle_loaded {
             Some((bundle, path)) => {
                 let patch = bundle.game_patch();
                 tracing::info!(
@@ -69,9 +84,22 @@ impl AdvisorState {
                     patch = %patch,
                     mods = bundle.mods.len(),
                     bases = bundle.base_items.len(),
+                    omens = bundle.omens.entries.len(),
+                    essences = bundle.essences.entries.len(),
+                    catalysts = bundle.catalysts.entries.len(),
+                    bones = bundle.bones.entries.len(),
+                    weights = bundle.weights.len(),
                     "loaded data bundle"
                 );
-                (ModRegistry::from_mods(bundle.mods), Some(path), Some(patch))
+                let essences = bundle.essence_catalogue();
+                let catalysts = bundle.catalyst_catalogue();
+                (
+                    ModRegistry::from_mods(bundle.mods),
+                    Some(path),
+                    Some(patch),
+                    essences,
+                    catalysts,
+                )
             }
             None => {
                 tracing::warn!(
@@ -79,7 +107,13 @@ impl AdvisorState {
                      Build a bundle via the pipeline (`cargo run -p poc2-pipeline -- build`) \
                      and place it in `~/.config/poc2/bundles/` or set POC2_BUNDLE."
                 );
-                (ModRegistry::from_mods(Vec::new()), None, None)
+                (
+                    ModRegistry::from_mods(Vec::new()),
+                    None,
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                )
             }
         };
 
@@ -97,16 +131,19 @@ impl AdvisorState {
         let strategies = StrategyRegistry::from_strategies(loaded_strategies);
         tracing::info!(strategy_count, "loaded strategies");
 
-        let resolver = DefaultCurrencyResolver::new();
+        let resolver = DefaultCurrencyResolver::new()
+            .with_essences(essences)
+            .with_catalysts(catalysts);
         let valuator = Valuator::default();
         Self {
             registry: Arc::new(registry),
             rules: Arc::new(rules),
             strategies: Arc::new(strategies),
             resolver: Arc::new(resolver),
-            valuator: Arc::new(valuator),
+            valuator: Arc::new(Mutex::new(valuator)),
             bundle_path,
             bundle_patch,
+            price_refresh: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -331,6 +368,9 @@ fn recommend(
     // the project's baseline (0.4.0). Falling back to a baseline keeps
     // the rules + strategies in scope when no bundle is loaded.
     let patch = state.bundle_patch.unwrap_or(PatchVersion::PATCH_0_4_0);
+    // We need a placeholder Valuator reference to satisfy PlanInput's
+    // type — the actual lock happens below.
+    let placeholder_valuator = Valuator::default();
     let input = PlanInput {
         item: args.item,
         goal: args.goal,
@@ -338,7 +378,7 @@ fn recommend(
         strategies: state.strategies.as_ref(),
         registry: state.registry.as_ref(),
         resolver: state.resolver.as_ref(),
-        valuator: state.valuator.as_ref(),
+        valuator: &placeholder_valuator,
         stash: &args.stash,
         patch,
         config: BeamConfig {
@@ -350,7 +390,13 @@ fn recommend(
             weights: poc2_advisor::ScoringWeights::default(),
         },
     };
+    let valuator_guard = state.valuator.lock().expect("valuator mutex poisoned");
+    let input = PlanInput {
+        valuator: &valuator_guard,
+        ..input
+    };
     let recommendations = plan(&input);
+    drop(valuator_guard);
     Ok(RecommendResponse {
         recommendations,
         patch: format!("{patch}"),
@@ -359,6 +405,65 @@ fn recommend(
         mod_count: state.registry.len(),
         bundle_path: state.bundle_path.as_ref().map(|p| p.display().to_string()),
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct RefreshPricesArgs {
+    /// Optional league override; defaults to the bundle's patch league.
+    #[serde(default)]
+    league: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RefreshPricesResponse {
+    refreshed: bool,
+    meta: Option<PriceRefreshMeta>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+async fn refresh_prices(
+    args: RefreshPricesArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<RefreshPricesResponse, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(concat!(
+            "poc2-desktop/",
+            env!("CARGO_PKG_VERSION"),
+            " (+contact: github issues)"
+        ))
+        .gzip(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let league = args.league.as_deref();
+    match fetch_price_snapshot(&client, league, None).await {
+        Ok(snapshot) => {
+            let mapping = default_id_mapping();
+            let mut guard = state.valuator.lock().expect("valuator mutex poisoned");
+            let applied = apply_feed_to_valuator(&mut guard, &snapshot, &mapping);
+            let total = snapshot.entries.len();
+            let meta = PriceRefreshMeta {
+                league: snapshot.league.clone(),
+                fetched_at: snapshot.fetched_at.clone(),
+                applied_count: applied,
+                total_entries: total,
+            };
+            *state
+                .price_refresh
+                .lock()
+                .expect("price_refresh mutex poisoned") = Some(meta.clone());
+            Ok(RefreshPricesResponse {
+                refreshed: true,
+                meta: Some(meta),
+                error: None,
+            })
+        }
+        Err(e) => Ok(RefreshPricesResponse {
+            refreshed: false,
+            meta: None,
+            error: Some(e.to_string()),
+        }),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -382,7 +487,8 @@ pub fn run() {
             ping,
             recommend,
             parse_item_text,
-            read_clipboard_item
+            read_clipboard_item,
+            refresh_prices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

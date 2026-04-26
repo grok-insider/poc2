@@ -156,6 +156,161 @@ impl Bundle {
     pub fn game_patch(&self) -> PatchVersion {
         self.header.game_patch
     }
+
+    /// Extract the bundle's essence catalogue as a typed list of
+    /// engine [`poc2_engine::Essence`] presets ready to feed into the
+    /// engine's [`poc2_engine::DefaultCurrencyResolver`].
+    ///
+    /// The bundle's `essences` section is a list of JSON entries with
+    /// `{ id, name, corrupt, tooltip, tier_groups: [{ tiers: [{ engine_mod_id, ... }] }] }`.
+    /// Each tier group is a per-base-class shape; we collapse them into
+    /// a single canonical `(name, quality, target_mod)` per essence by
+    /// taking the highest-ilvl tier of the first valid tier group.
+    ///
+    /// Quality is inferred from the name prefix (`Lesser` / blank =
+    /// Greater / `Greater` / `Perfect` / `Corrupted`). Mod target uses
+    /// the `engine_mod_id` field embedded in each tier entry.
+    pub fn essence_catalogue(&self) -> Vec<poc2_engine::Essence> {
+        let mut out = Vec::new();
+        for entry in &self.essences.entries {
+            let Some(name) = entry.get("name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let corrupt = entry
+                .get("corrupt")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let quality = quality_from_name(name, corrupt);
+            // Find the first tier group with at least one entry, take
+            // the highest-ilvl mod id.
+            let target_mod = entry
+                .get("tier_groups")
+                .and_then(|v| v.as_array())
+                .and_then(|groups| groups.iter().find_map(extract_target_mod_id));
+            let Some(target_mod) = target_mod else {
+                continue;
+            };
+            let id = format!(
+                "{}{}",
+                quality_prefix(quality),
+                name.split_whitespace()
+                    .filter(|w| ![
+                        "Essence",
+                        "of",
+                        "the",
+                        "Lesser",
+                        "Greater",
+                        "Perfect",
+                        "Corrupted"
+                    ]
+                    .contains(w))
+                    .collect::<String>()
+            );
+            // Use a Box::leak'd display name since Engine::Essence wants &'static str.
+            let display: &'static str = Box::leak(name.to_string().into_boxed_str());
+            out.push(poc2_engine::Essence::new(
+                id,
+                display,
+                quality,
+                poc2_engine::ids::ModId::from(target_mod),
+            ));
+        }
+        out
+    }
+
+    /// Extract the bundle's catalyst catalogue as a typed list of
+    /// engine [`poc2_engine::Catalyst`] presets.
+    ///
+    /// The catalyst's `tag` field comes from the first non-jewellery
+    /// tag in the CoE pipe-string (e.g., `["life", "jewellery_attribute"]`
+    /// → `"life"`).
+    pub fn catalyst_catalogue(&self) -> Vec<poc2_engine::Catalyst> {
+        let mut out = Vec::new();
+        for entry in &self.catalysts.entries {
+            let Some(name) = entry.get("name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let tags: Vec<String> = entry
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| t.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let primary_tag = tags
+                .iter()
+                .find(|t| !t.contains("jewellery"))
+                .cloned()
+                .or_else(|| tags.first().cloned());
+            let Some(tag) = primary_tag else {
+                continue;
+            };
+            let id_pascal: String = name
+                .split_whitespace()
+                .map(|w| {
+                    let stripped = w.trim_end_matches('\'');
+                    let mut chars = stripped.chars();
+                    match chars.next() {
+                        Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
+                        None => String::new(),
+                    }
+                })
+                .collect();
+            let id = format!("{id_pascal}Catalyst");
+            let display: &'static str = Box::leak(format!("{name} Catalyst").into_boxed_str());
+            out.push(poc2_engine::Catalyst::new(id, display, tag));
+        }
+        out
+    }
+}
+
+/// Heuristically infer essence quality from its name.
+fn quality_from_name(name: &str, corrupt: bool) -> poc2_engine::EssenceQuality {
+    if corrupt {
+        return poc2_engine::EssenceQuality::Corrupted;
+    }
+    if name.starts_with("Lesser ") {
+        poc2_engine::EssenceQuality::Lesser
+    } else if name.starts_with("Greater ") {
+        poc2_engine::EssenceQuality::Greater
+    } else if name.starts_with("Perfect ") {
+        poc2_engine::EssenceQuality::Perfect
+    } else {
+        // Bare "Essence of X" → Normal tier.
+        poc2_engine::EssenceQuality::Normal
+    }
+}
+
+/// Map quality back to the canonical id prefix used in
+/// [`poc2_engine::DefaultCurrencyResolver`].
+fn quality_prefix(q: poc2_engine::EssenceQuality) -> &'static str {
+    match q {
+        poc2_engine::EssenceQuality::Lesser => "LesserEssenceOf",
+        poc2_engine::EssenceQuality::Normal => "EssenceOf",
+        poc2_engine::EssenceQuality::Greater => "GreaterEssenceOf",
+        poc2_engine::EssenceQuality::Perfect => "PerfectEssenceOf",
+        poc2_engine::EssenceQuality::Corrupted => "CorruptedEssenceOf",
+    }
+}
+
+fn extract_target_mod_id(group: &serde_json::Value) -> Option<String> {
+    let tiers = group.get("tiers").and_then(|v| v.as_array())?;
+    // Pick the highest-ilvl tier — proxy for the most representative mod.
+    let best = tiers
+        .iter()
+        .filter_map(|t| {
+            let id = t.get("engine_mod_id").and_then(|v| v.as_str())?;
+            let ilvl: u32 = t
+                .get("ilvl")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            Some((id.to_string(), ilvl))
+        })
+        .max_by_key(|(_, ilvl)| *ilvl);
+    best.map(|(id, _)| id)
 }
 
 /// Best-effort ISO 8601 UTC timestamp without pulling in `chrono`.

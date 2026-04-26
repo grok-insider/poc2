@@ -4,9 +4,11 @@
     AdvisorAction,
     Goal,
     Item,
+    PriceRefreshMeta,
     Recommendation,
     RecommendArgs,
     RecommendResponse,
+    RefreshPricesResponse,
   } from './types';
 
   type Props = {
@@ -24,10 +26,32 @@
     mod_count: number;
     bundle_path: string | null;
   } | null>(null);
+  let priceMeta = $state<PriceRefreshMeta | null>(null);
   let loading = $state(false);
+  let priceLoading = $state(false);
+  let priceError = $state<string | null>(null);
   let error = $state<string | null>(null);
   let risk = $state(0.5);
   let depth = $state(2);
+
+  async function refreshPrices() {
+    priceLoading = true;
+    priceError = null;
+    try {
+      const r = await invoke<RefreshPricesResponse>('refresh_prices', { args: {} });
+      if (r.refreshed && r.meta) {
+        priceMeta = r.meta;
+        // Trigger a re-plan with the new prices.
+        await refresh();
+      } else if (r.error) {
+        priceError = r.error;
+      }
+    } catch (err) {
+      priceError = String(err);
+    } finally {
+      priceLoading = false;
+    }
+  }
 
   async function refresh() {
     loading = true;
@@ -118,7 +142,20 @@
     <button onclick={refresh} disabled={loading}>
       {loading ? 'planning…' : 'Re-plan'}
     </button>
+    <button onclick={refreshPrices} disabled={priceLoading} class="secondary">
+      {priceLoading ? 'fetching…' : 'Refresh prices'}
+    </button>
   </div>
+
+  {#if priceMeta}
+    <p class="price-meta">
+      live prices: {priceMeta.league} · {priceMeta.applied_count} of {priceMeta.total_entries}
+      currencies priced @ {priceMeta.fetched_at}
+    </p>
+  {/if}
+  {#if priceError}
+    <pre class="error">price refresh failed: {priceError}</pre>
+  {/if}
 
   {#if meta}
     <p class="meta">
@@ -187,6 +224,20 @@
     color: var(--fg-muted);
     margin: 0 0 0.75rem;
     word-break: break-all;
+  }
+
+  .price-meta {
+    font-size: 0.75rem;
+    color: #a6d09a;
+    margin: 0 0 0.5rem;
+    word-break: break-all;
+  }
+
+  button.secondary {
+    background: var(--bg);
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+    font-weight: 400;
   }
 
   .warn {
