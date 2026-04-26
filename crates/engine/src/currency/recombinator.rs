@@ -1,0 +1,436 @@
+//! Recombinator — combine two Rare items into one (PoE2 0.4).
+//!
+//! ## Mechanic
+//!
+//! The Recombinator takes two source items of the same item-class and
+//! produces a single output item drawn from the combined mod pool of
+//! both inputs. Both sources are consumed (in real PoE2; the engine
+//! doesn't track stash here, so the caller is responsible for
+//! discarding the inputs after a successful recombine).
+//!
+//! ## Inputs
+//!
+//! - Both items must be Rare.
+//! - Both items must NOT be corrupted, sanctified, or mirrored.
+//! - Both items must share the same `base` (the recombinator combines
+//!   like-with-like — the engine enforces same `BaseTypeId`).
+//! - Hidden desecrated mods are NOT carried over (they require a real
+//!   reveal first).
+//! - Fractured mods on either input survive into the output and remain
+//!   fractured.
+//!
+//! ## Output
+//!
+//! - Same base, same ilvl as the input.
+//! - Rarity = Rare.
+//! - Quality is reset to 0; quality-tagged catalyst boosts are lost.
+//! - Mods: from the union of both inputs' explicit mod rolls,
+//!   uniformly sample a count ∈ `[1, base_class_max_per_affix * 2]`
+//!   and split between prefixes/suffixes by each mod's affix type.
+//!   Fractured mods always carry over (they're "preserved" in the recipe).
+//!   Mod-group exclusivity is honored: if two candidates share a group,
+//!   only the first sampled one is kept.
+//!
+//! ## Caveats
+//!
+//! The exact PoE2 0.4 sampling distribution is not perfectly documented;
+//! community testing suggests ~50% chance per source mod plus a bias
+//! toward retaining rare-tier mods. Until more data lands (M5+), the
+//! engine uses uniform sampling.
+
+use rand::seq::SliceRandom;
+use rand::Rng;
+use smallvec::SmallVec;
+
+use crate::error::{EngineError, EngineResult};
+use crate::item::{AffixType, Item, ModRoll, Rarity};
+use crate::registry::ModRegistry;
+
+/// Maximum prefixes/suffixes a recombined output retains.
+///
+/// PoE2 caps Rare items at 3 prefixes + 3 suffixes; the recombinator
+/// uses the same bound. Future work plumbs base-class-specific caps
+/// through `BaseType::max_prefixes` once the BaseRegistry lands.
+const RECOMBINE_MAX_PREFIXES: u8 = 3;
+const RECOMBINE_MAX_SUFFIXES: u8 = 3;
+
+/// Recombine two Rare items into one. Returns the new Rare item;
+/// callers are responsible for discarding `a` and `b`.
+pub fn recombine(
+    a: &Item,
+    b: &Item,
+    registry: &ModRegistry,
+    rng: &mut dyn rand::RngCore,
+) -> EngineResult<Item> {
+    validate_inputs(a, b)?;
+
+    // Build the combined mod pool. Fractured mods are pinned (always retained).
+    let mut pinned: Vec<ModRoll> = Vec::new();
+    let mut pool: Vec<ModRoll> = Vec::new();
+    for slot in [&a.prefixes, &b.prefixes, &a.suffixes, &b.suffixes] {
+        for roll in slot {
+            if roll.is_fractured {
+                pinned.push(roll.clone());
+            } else {
+                pool.push(roll.clone());
+            }
+        }
+    }
+    pool.shuffle(rng);
+
+    // Decide the target mod-count (1..=6). Slightly biased toward 4-5
+    // mods to mimic empirical PoE2 distributions: roll a u32 in [1, 6]
+    // with extra weight on the middle bucket.
+    let total_target = sample_recombine_count(rng);
+
+    // Honor mod-group exclusivity: dedupe by group_id of each candidate
+    // mod. Pinned mods take precedence (their groups are claimed first).
+    let mut claimed_groups: ahash::AHashSet<crate::ids::ModGroupId> = ahash::AHashSet::new();
+    let mut chosen_prefixes: SmallVec<[ModRoll; 3]> = SmallVec::new();
+    let mut chosen_suffixes: SmallVec<[ModRoll; 3]> = SmallVec::new();
+
+    let try_push = |roll: ModRoll,
+                    claimed: &mut ahash::AHashSet<crate::ids::ModGroupId>,
+                    prefixes: &mut SmallVec<[ModRoll; 3]>,
+                    suffixes: &mut SmallVec<[ModRoll; 3]>|
+     -> bool {
+        let prefix_full = prefixes.len() >= RECOMBINE_MAX_PREFIXES as usize;
+        let suffix_full = suffixes.len() >= RECOMBINE_MAX_SUFFIXES as usize;
+        let Some(group) = registry.group_of(&roll.mod_id) else {
+            // Unknown mod (out-of-bundle). Be conservative — don't drop;
+            // include it but skip the group-exclusivity check.
+            match roll.affix_type {
+                AffixType::Prefix if !prefix_full => {
+                    prefixes.push(roll);
+                    return true;
+                }
+                AffixType::Suffix if !suffix_full => {
+                    suffixes.push(roll);
+                    return true;
+                }
+                _ => return false,
+            }
+        };
+        if claimed.contains(group) {
+            return false;
+        }
+        match roll.affix_type {
+            AffixType::Prefix => {
+                if prefix_full {
+                    return false;
+                }
+                claimed.insert(group.clone());
+                prefixes.push(roll);
+                true
+            }
+            AffixType::Suffix => {
+                if suffix_full {
+                    return false;
+                }
+                claimed.insert(group.clone());
+                suffixes.push(roll);
+                true
+            }
+            _ => false,
+        }
+    };
+
+    // Pinned (fractured) mods always come first.
+    for roll in pinned {
+        try_push(
+            roll,
+            &mut claimed_groups,
+            &mut chosen_prefixes,
+            &mut chosen_suffixes,
+        );
+    }
+
+    // Sample the rest from the shuffled pool.
+    let mut count = chosen_prefixes.len() + chosen_suffixes.len();
+    for roll in pool {
+        if count >= total_target as usize {
+            break;
+        }
+        if try_push(
+            roll,
+            &mut claimed_groups,
+            &mut chosen_prefixes,
+            &mut chosen_suffixes,
+        ) {
+            count += 1;
+        }
+    }
+
+    // Even with no surviving mods, the output is still a valid Rare base.
+    Ok(Item {
+        base: a.base.clone(),
+        ilvl: a.ilvl,
+        rarity: Rarity::Rare,
+        corrupted: false,
+        sanctified: false,
+        mirrored: false,
+        quality: 0,
+        quality_kind: crate::item::QualityKind::Untagged,
+        implicits: a.implicits.clone(),
+        prefixes: chosen_prefixes,
+        suffixes: chosen_suffixes,
+        enchantments: SmallVec::new(),
+        hidden_desecrated: None,
+        sockets: SmallVec::new(),
+        hinekora_lock: None,
+    })
+}
+
+/// Reject recombines that don't satisfy the precondition list.
+fn validate_inputs(a: &Item, b: &Item) -> EngineResult<()> {
+    for (label, item) in [("a", a), ("b", b)] {
+        if item.rarity != Rarity::Rare {
+            return Err(EngineError::InvalidApplication(format!(
+                "Recombinator input {label} must be Rare; got {:?}",
+                item.rarity
+            )));
+        }
+        if item.corrupted {
+            return Err(EngineError::ItemCorrupted);
+        }
+        if item.sanctified {
+            return Err(EngineError::ItemSanctified);
+        }
+        if item.mirrored {
+            return Err(EngineError::InvalidApplication(format!(
+                "Recombinator input {label} is mirrored"
+            )));
+        }
+    }
+    if a.base != b.base {
+        return Err(EngineError::InvalidApplication(format!(
+            "Recombinator inputs must share a base; got {} vs {}",
+            a.base, b.base
+        )));
+    }
+    Ok(())
+}
+
+/// Draw the target mod-count from `[1, 6]` with mild peak at 4.
+///
+/// Approximate triangular distribution: roll 2d4-1, clamp to [1, 6].
+fn sample_recombine_count(rng: &mut dyn rand::RngCore) -> u8 {
+    let r1: u8 = rng.gen_range(1..=4);
+    let r2: u8 = rng.gen_range(0..=3);
+    (r1 + r2).clamp(1, 6)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ids::{ItemClassId, ModGroupId, ModId, TagId};
+    use crate::item::{AffixType, ModRoll, QualityKind};
+    use crate::mods::{ModDefinition, ModDomain, ModFlags, ModGroup, ModKind, SpawnWeight};
+    use crate::patch::PatchRange;
+    use rand::SeedableRng;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+    use smallvec::smallvec;
+
+    fn mk_mod(id: &str, group: &str, affix: AffixType, class: &str) -> ModDefinition {
+        ModDefinition {
+            id: ModId::from(id),
+            name: None,
+            mod_group: ModGroup(ModGroupId::from(group)),
+            affix_type: affix,
+            kind: ModKind::Explicit,
+            domain: ModDomain::Item,
+            tags: smallvec![],
+            concept_set: smallvec![],
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from(class),
+                weight: 1
+            }],
+            stats: smallvec![],
+            required_level: 1,
+            allowed_item_classes: smallvec![ItemClassId::from(class)],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: None,
+        }
+    }
+
+    fn rare_with(prefixes: &[(&str, &str)], suffixes: &[(&str, &str)]) -> Item {
+        Item {
+            base: ItemClassId::from("BodyArmour").as_str().into(),
+            ilvl: 82,
+            rarity: Rarity::Rare,
+            corrupted: false,
+            sanctified: false,
+            mirrored: false,
+            quality: 0,
+            quality_kind: QualityKind::Untagged,
+            implicits: smallvec![],
+            prefixes: prefixes
+                .iter()
+                .map(|(id, _)| ModRoll {
+                    mod_id: ModId::from(*id),
+                    affix_type: AffixType::Prefix,
+                    kind: ModKind::Explicit,
+                    values: smallvec![],
+                    is_fractured: false,
+                })
+                .collect(),
+            suffixes: suffixes
+                .iter()
+                .map(|(id, _)| ModRoll {
+                    mod_id: ModId::from(*id),
+                    affix_type: AffixType::Suffix,
+                    kind: ModKind::Explicit,
+                    values: smallvec![],
+                    is_fractured: false,
+                })
+                .collect(),
+            enchantments: smallvec![],
+            hidden_desecrated: None,
+            sockets: smallvec![],
+            hinekora_lock: None,
+        }
+    }
+
+    fn small_registry() -> ModRegistry {
+        ModRegistry::from_mods(vec![
+            mk_mod("APrefix1", "G_AP1", AffixType::Prefix, "BodyArmour"),
+            mk_mod("APrefix2", "G_AP2", AffixType::Prefix, "BodyArmour"),
+            mk_mod("BPrefix1", "G_BP1", AffixType::Prefix, "BodyArmour"),
+            mk_mod("ASuffix1", "G_AS1", AffixType::Suffix, "BodyArmour"),
+            mk_mod("BSuffix1", "G_BS1", AffixType::Suffix, "BodyArmour"),
+            mk_mod("BSuffix2", "G_BS2", AffixType::Suffix, "BodyArmour"),
+            // Two mods sharing a group, to test exclusivity.
+            mk_mod("CDup1", "G_DUP", AffixType::Prefix, "BodyArmour"),
+            mk_mod("CDup2", "G_DUP", AffixType::Prefix, "BodyArmour"),
+        ])
+    }
+
+    #[test]
+    fn recombine_outputs_rare() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xfeed);
+        let reg = small_registry();
+        let a = rare_with(
+            &[("APrefix1", "p"), ("APrefix2", "p")],
+            &[("ASuffix1", "s")],
+        );
+        let b = rare_with(
+            &[("BPrefix1", "p")],
+            &[("BSuffix1", "s"), ("BSuffix2", "s")],
+        );
+        let out = recombine(&a, &b, &reg, &mut rng).unwrap();
+        assert_eq!(out.rarity, Rarity::Rare);
+        assert!(!out.corrupted);
+        assert!(!out.sanctified);
+        assert_eq!(out.quality, 0);
+    }
+
+    #[test]
+    fn recombine_caps_at_3_per_affix() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xc0de);
+        let reg = small_registry();
+        let a = rare_with(
+            &[("APrefix1", "p"), ("APrefix2", "p"), ("BPrefix1", "p")],
+            &[("ASuffix1", "s"), ("BSuffix1", "s"), ("BSuffix2", "s")],
+        );
+        let b = rare_with(
+            &[("APrefix1", "p"), ("APrefix2", "p")],
+            &[("ASuffix1", "s")],
+        );
+        let out = recombine(&a, &b, &reg, &mut rng).unwrap();
+        assert!(out.prefixes.len() <= 3);
+        assert!(out.suffixes.len() <= 3);
+    }
+
+    #[test]
+    fn recombine_honors_mod_group_exclusivity() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xbabe);
+        let reg = small_registry();
+        let a = rare_with(&[("CDup1", "p")], &[]);
+        let b = rare_with(&[("CDup2", "p")], &[]);
+        let out = recombine(&a, &b, &reg, &mut rng).unwrap();
+        // At most one of the duplicate-group mods can survive.
+        let dup_count = out
+            .prefixes
+            .iter()
+            .filter(|m| m.mod_id.as_str() == "CDup1" || m.mod_id.as_str() == "CDup2")
+            .count();
+        assert!(dup_count <= 1);
+    }
+
+    #[test]
+    fn recombine_preserves_fractured_mods() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xfeed);
+        let reg = small_registry();
+        let mut a = rare_with(&[("APrefix1", "p")], &[]);
+        a.prefixes[0].is_fractured = true;
+        let b = rare_with(&[("BPrefix1", "p")], &[("BSuffix1", "s")]);
+        let out = recombine(&a, &b, &reg, &mut rng).unwrap();
+        assert!(out
+            .prefixes
+            .iter()
+            .any(|m| m.mod_id.as_str() == "APrefix1" && m.is_fractured));
+    }
+
+    #[test]
+    fn recombine_rejects_corrupted_input() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
+        let reg = small_registry();
+        let mut a = rare_with(&[("APrefix1", "p")], &[]);
+        let b = rare_with(&[("BPrefix1", "p")], &[]);
+        a.corrupted = true;
+        let r = recombine(&a, &b, &reg, &mut rng);
+        assert!(matches!(r, Err(EngineError::ItemCorrupted)));
+    }
+
+    #[test]
+    fn recombine_rejects_sanctified_input() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
+        let reg = small_registry();
+        let mut a = rare_with(&[("APrefix1", "p")], &[]);
+        let b = rare_with(&[("BPrefix1", "p")], &[]);
+        a.sanctified = true;
+        let r = recombine(&a, &b, &reg, &mut rng);
+        assert!(matches!(r, Err(EngineError::ItemSanctified)));
+    }
+
+    #[test]
+    fn recombine_rejects_non_rare_inputs() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
+        let reg = small_registry();
+        let mut a = rare_with(&[("APrefix1", "p")], &[]);
+        let b = rare_with(&[("BPrefix1", "p")], &[]);
+        a.rarity = Rarity::Magic;
+        let r = recombine(&a, &b, &reg, &mut rng);
+        assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
+    }
+
+    #[test]
+    fn recombine_rejects_mismatched_bases() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
+        let reg = small_registry();
+        let a = rare_with(&[("APrefix1", "p")], &[]);
+        let mut b = rare_with(&[("BPrefix1", "p")], &[]);
+        b.base = ItemClassId::from("Boots").as_str().into();
+        let r = recombine(&a, &b, &reg, &mut rng);
+        assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
+    }
+
+    #[test]
+    fn recombine_is_deterministic_for_same_seed() {
+        let reg = small_registry();
+        let a = rare_with(
+            &[("APrefix1", "p"), ("APrefix2", "p")],
+            &[("ASuffix1", "s")],
+        );
+        let b = rare_with(
+            &[("BPrefix1", "p")],
+            &[("BSuffix1", "s"), ("BSuffix2", "s")],
+        );
+        let mut rng_a = Xoshiro256PlusPlus::seed_from_u64(7);
+        let mut rng_b = Xoshiro256PlusPlus::seed_from_u64(7);
+        let out_a = recombine(&a, &b, &reg, &mut rng_a).unwrap();
+        let out_b = recombine(&a, &b, &reg, &mut rng_b).unwrap();
+        assert_eq!(out_a, out_b);
+    }
+}
