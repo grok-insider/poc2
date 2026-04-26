@@ -34,7 +34,6 @@ pub mod bundle;
 pub mod concepts;
 pub mod error;
 pub mod io;
-pub mod schema;
 pub mod sources;
 pub mod synergy;
 pub mod validation;
