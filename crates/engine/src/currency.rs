@@ -17,6 +17,9 @@
 //! - `recombinator` — Recombinator (M2.5)
 
 pub mod basic;
+pub mod fracturing;
+
+pub use fracturing::FracturingOrb;
 
 use rand::RngCore;
 
