@@ -303,17 +303,54 @@ pub enum Action {
         #[serde(default)]
         omens: Vec<OmenId>,
     },
+    /// Activate one omen for the next omen-consuming action, without
+    /// applying any currency. Useful when a strategy wants to bind an
+    /// omen ahead of a downstream `ApplyCurrency` step (e.g. activating
+    /// Omen of Abyssal Echoes before walking to the Well of Souls,
+    /// keeping the activation traceable to its own step in the graph).
+    ActivateOmen { omen: OmenId },
     /// Apply Hinekora's Lock (pure preview-bind step).
     HinekorasLock,
     /// Reveal a hidden desecrated mod at the Well of Souls.
-    /// `prefer` is a list of concepts the executor should prefer (in order)
-    /// when picking from the 3-of-N options.
+    ///
+    /// `prefer` is a list of concepts the executor should prefer (in
+    /// order) when picking from the 3-of-N options.
+    ///
+    /// `min_acceptable` (added in A.2) lets a strategy say "if NONE of
+    /// the offered options match this concept, treat the reveal as a
+    /// failure and route through `on_failure`". When combined with
+    /// `abandon_if_no_match = true`, the strategy abandons immediately
+    /// instead of accepting a junk reveal.
     Reveal {
         #[serde(default)]
         prefer: Vec<ConceptId>,
         /// Whether to consume an Abyssal Echoes omen for a re-roll.
         #[serde(default)]
         use_abyssal_echoes: bool,
+        /// Floor concept: if no offered option carries this concept, the
+        /// step is treated as a failure (`on_failure`).
+        #[serde(default)]
+        min_acceptable: Option<ConceptId>,
+        /// When `true`, a reveal that fails the `min_acceptable` floor
+        /// surfaces as an `Abandon` recommendation rather than routing
+        /// through `on_failure`.
+        #[serde(default)]
+        abandon_if_no_match: bool,
+    },
+    /// Recombine the current item with another item the player owns.
+    ///
+    /// `other_item` is an [`ItemPredicate`] the candidate-generator uses
+    /// to select the second item from the player's stash. `omens` are
+    /// pre-activated for the recombine (e.g. `OmenOfRecombination`).
+    ///
+    /// In v1, the advisor surfaces this as a recommendation only when
+    /// the planner can locate a matching second item — otherwise the
+    /// candidate is dropped. Plugin SDK (Phase F) will let plugins
+    /// emit richer Recombine candidates with custom selection logic.
+    Recombine {
+        other_item: ItemPredicate,
+        #[serde(default)]
+        omens: Vec<OmenId>,
     },
     /// Run a sub-loop until the inner step's `target_check` is satisfied
     /// or `abandon_after_cost_div` is exceeded.
@@ -491,5 +528,70 @@ mod tests {
         let s = serde_json::to_string(&p).unwrap();
         let back: ItemPredicate = serde_json::from_str(&s).unwrap();
         assert_eq!(back, p);
+    }
+
+    // ------------------------------------------------------------------
+    // A.2 — DSL action extensions
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn activate_omen_action_serde_round_trip() {
+        let a = Action::ActivateOmen {
+            omen: poc2_engine::ids::OmenId::from("OmenOfAbyssalEchoes"),
+        };
+        let s = serde_json::to_string(&a).unwrap();
+        let back: Action = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, a);
+    }
+
+    #[test]
+    fn reveal_action_backward_compatible_with_minimal_toml() {
+        // Existing strategies (e.g. 3xt1-es-body-armour.toml) use
+        // `action = { kind = "reveal", prefer = [...] }` without the
+        // new min_acceptable / abandon_if_no_match fields. Serde must
+        // accept that shape via #[serde(default)].
+        let toml_str = r#"
+            kind = "reveal"
+            prefer = ["EnergyShield"]
+            use_abyssal_echoes = true
+        "#;
+        let action: Action = toml::from_str(toml_str).expect("legacy reveal shape parses");
+        let Action::Reveal {
+            prefer,
+            use_abyssal_echoes,
+            min_acceptable,
+            abandon_if_no_match,
+        } = action
+        else {
+            panic!("expected Reveal");
+        };
+        assert_eq!(prefer.len(), 1);
+        assert!(use_abyssal_echoes);
+        assert!(min_acceptable.is_none());
+        assert!(!abandon_if_no_match);
+    }
+
+    #[test]
+    fn reveal_with_floor_serde_round_trip() {
+        let a = Action::Reveal {
+            prefer: vec![ConceptId::from("EnergyShield")],
+            use_abyssal_echoes: true,
+            min_acceptable: Some(ConceptId::from("EnergyShield")),
+            abandon_if_no_match: true,
+        };
+        let s = serde_json::to_string(&a).unwrap();
+        let back: Action = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, a);
+    }
+
+    #[test]
+    fn recombine_action_serde_round_trip() {
+        let a = Action::Recombine {
+            other_item: ItemPredicate::HasFractured(true),
+            omens: vec![poc2_engine::ids::OmenId::from("OmenOfRecombination")],
+        };
+        let s = serde_json::to_string(&a).unwrap();
+        let back: Action = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, a);
     }
 }

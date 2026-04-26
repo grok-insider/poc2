@@ -27,15 +27,40 @@ pub enum AdvisorAction {
         #[serde(default)]
         omens: Vec<OmenId>,
     },
+    /// Pre-bind one omen for the next omen-consuming action without
+    /// applying any currency yourself. Lifted from the strategy DSL's
+    /// [`poc2_strategies::Action::ActivateOmen`] (A.2).
+    ActivateOmen { omen: OmenId },
     /// Bind Hinekora's Lock to the item (preview the next operation).
     ApplyHinekorasLock,
     /// Reveal a hidden desecrated mod at the Well of Souls.
+    ///
     /// `prefer` is the priority order for picking from the offered options.
+    /// `min_acceptable` (A.2) is the floor concept — when set, a reveal
+    /// where no offered option carries this concept fails the step.
+    /// `abandon_if_no_match` (A.2) escalates that failure into a hard
+    /// abandon recommendation.
     Reveal {
         #[serde(default)]
         prefer: Vec<ConceptId>,
         #[serde(default)]
         use_abyssal_echoes: bool,
+        #[serde(default)]
+        min_acceptable: Option<ConceptId>,
+        #[serde(default)]
+        abandon_if_no_match: bool,
+    },
+    /// Recombine the current item with a second one matching `other_item_id`.
+    /// `other_item_id` is the stash item id selected by the candidate
+    /// generator; `omens` are pre-activated for the recombine.
+    Recombine {
+        /// Identifier the UI uses to display the second item; the
+        /// advisor surfaces this as part of the recommendation
+        /// rationale. v1 uses a placeholder string ("any") when the
+        /// candidate generator can't yet locate stash items.
+        other_item_id: String,
+        #[serde(default)]
+        omens: Vec<OmenId>,
     },
     /// The item is good enough; stop and sell or equip.
     Stop,
@@ -56,6 +81,7 @@ impl AdvisorAction {
             AdvisorAction::ApplyCurrency { .. }
                 | AdvisorAction::ApplyHinekorasLock
                 | AdvisorAction::Reveal { .. }
+                | AdvisorAction::Recombine { .. }
         )
     }
 
@@ -78,7 +104,10 @@ impl AdvisorAction {
     #[must_use]
     pub fn omens(&self) -> &[OmenId] {
         match self {
-            AdvisorAction::ApplyCurrency { omens, .. } => omens,
+            AdvisorAction::ApplyCurrency { omens, .. } | AdvisorAction::Recombine { omens, .. } => {
+                omens
+            }
+            AdvisorAction::ActivateOmen { omen } => std::slice::from_ref(omen),
             _ => &[],
         }
     }
@@ -90,6 +119,12 @@ impl AdvisorAction {
 /// — the candidate generator unwraps those structurally rather than
 /// representing them as advisor steps. Returns `None` for `Noop` because
 /// the advisor never proposes a no-op.
+///
+/// `Action::Recombine` lifts to `AdvisorAction::Recombine` with a
+/// placeholder `other_item_id = "<unresolved>"`; the candidate generator
+/// is responsible for setting the real id once it's located the second
+/// item in the user's stash. Until that machinery lands (Phase F plugin
+/// SDK), the advisor surfaces the unresolved variant as guidance.
 #[must_use]
 pub fn from_strategy_action(action: &poc2_strategies::Action) -> Option<AdvisorAction> {
     use poc2_strategies::Action;
@@ -98,13 +133,25 @@ pub fn from_strategy_action(action: &poc2_strategies::Action) -> Option<AdvisorA
             currency: currency.clone(),
             omens: omens.clone(),
         }),
+        Action::ActivateOmen { omen } => Some(AdvisorAction::ActivateOmen { omen: omen.clone() }),
         Action::HinekorasLock => Some(AdvisorAction::ApplyHinekorasLock),
         Action::Reveal {
             prefer,
             use_abyssal_echoes,
+            min_acceptable,
+            abandon_if_no_match,
         } => Some(AdvisorAction::Reveal {
             prefer: prefer.clone(),
             use_abyssal_echoes: *use_abyssal_echoes,
+            min_acceptable: min_acceptable.clone(),
+            abandon_if_no_match: *abandon_if_no_match,
+        }),
+        Action::Recombine {
+            other_item: _,
+            omens,
+        } => Some(AdvisorAction::Recombine {
+            other_item_id: "<unresolved>".into(),
+            omens: omens.clone(),
         }),
         Action::Done => Some(AdvisorAction::Stop),
         Action::Abandon { reason } => Some(AdvisorAction::Abandon {
@@ -127,6 +174,8 @@ pub fn from_rule_action(action: &poc2_rules::SuggestionAction) -> AdvisorAction 
         SuggestionAction::Reveal => AdvisorAction::Reveal {
             prefer: Vec::new(),
             use_abyssal_echoes: false,
+            min_acceptable: None,
+            abandon_if_no_match: false,
         },
         SuggestionAction::StopAndSell => AdvisorAction::Stop,
         SuggestionAction::Abandon { reason } => AdvisorAction::Abandon {
@@ -184,5 +233,75 @@ mod tests {
         let a = from_rule_action(&poc2_rules::SuggestionAction::Guidance);
         assert!(!a.is_mutating());
         assert!(!a.is_terminal());
+    }
+
+    // ------------------------------------------------------------------
+    // A.2 — DSL action extensions
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn lift_strategy_activate_omen() {
+        let s = poc2_strategies::Action::ActivateOmen {
+            omen: OmenId::from("OmenOfAbyssalEchoes"),
+        };
+        let a = from_strategy_action(&s).unwrap();
+        let AdvisorAction::ActivateOmen { omen } = &a else {
+            panic!("expected ActivateOmen, got {a:?}");
+        };
+        assert_eq!(omen.as_str(), "OmenOfAbyssalEchoes");
+        // ActivateOmen does NOT mutate the item; the next currency action does.
+        assert!(!a.is_mutating());
+        assert!(!a.is_terminal());
+        // Omen list surface includes the activated omen.
+        assert_eq!(a.omens().len(), 1);
+    }
+
+    #[test]
+    fn lift_strategy_recombine() {
+        use poc2_strategies::ItemPredicate;
+        let s = poc2_strategies::Action::Recombine {
+            other_item: ItemPredicate::HasFractured(true),
+            omens: vec![OmenId::from("OmenOfRecombination")],
+        };
+        let a = from_strategy_action(&s).unwrap();
+        let AdvisorAction::Recombine {
+            other_item_id,
+            omens,
+        } = &a
+        else {
+            panic!("expected Recombine, got {a:?}");
+        };
+        assert_eq!(other_item_id, "<unresolved>");
+        assert_eq!(omens.len(), 1);
+        assert!(a.is_mutating());
+        assert!(!a.is_terminal());
+    }
+
+    #[test]
+    fn lift_strategy_reveal_with_floor() {
+        use poc2_engine::ConceptId;
+        let s = poc2_strategies::Action::Reveal {
+            prefer: vec![ConceptId::from("EnergyShield")],
+            use_abyssal_echoes: true,
+            min_acceptable: Some(ConceptId::from("EnergyShield")),
+            abandon_if_no_match: true,
+        };
+        let a = from_strategy_action(&s).unwrap();
+        let AdvisorAction::Reveal {
+            prefer,
+            use_abyssal_echoes,
+            min_acceptable,
+            abandon_if_no_match,
+        } = &a
+        else {
+            panic!("expected Reveal, got {a:?}");
+        };
+        assert_eq!(prefer.len(), 1);
+        assert!(*use_abyssal_echoes);
+        assert_eq!(
+            min_acceptable.as_ref().map(poc2_engine::ConceptId::as_str),
+            Some("EnergyShield")
+        );
+        assert!(*abandon_if_no_match);
     }
 }

@@ -97,10 +97,21 @@
         return a.omens.length
           ? `${a.currency} + omens [${a.omens.join(', ')}]`
           : a.currency;
+      case 'activate_omen':
+        return `Activate omen: ${a.omen}`;
       case 'apply_hinekoras_lock':
         return "Apply Hinekora's Lock";
-      case 'reveal':
-        return `Reveal at Well of Souls (prefer: ${a.prefer.join(', ') || 'any'})`;
+      case 'reveal': {
+        const prefer = a.prefer.join(', ') || 'any';
+        const echoes = a.use_abyssal_echoes ? ' + Abyssal Echoes' : '';
+        const floor = a.min_acceptable ? ` (require ${a.min_acceptable})` : '';
+        const fail = a.abandon_if_no_match ? ' [abandon on no match]' : '';
+        return `Reveal at Well of Souls (prefer: ${prefer})${echoes}${floor}${fail}`;
+      }
+      case 'recombine': {
+        const omens = a.omens.length ? ` + omens [${a.omens.join(', ')}]` : '';
+        return `Recombine with ${a.other_item_id}${omens}`;
+      }
       case 'stop':
         return 'Stop — goal already met';
       case 'abandon':

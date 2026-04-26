@@ -50,109 +50,131 @@ pub fn simulate(
     patch: PatchVersion,
     rng_seed: u64,
 ) -> SimulationOutcome {
-    let mut item = item.clone();
+    let item = item.clone();
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(rng_seed);
 
     match action {
-        AdvisorAction::ApplyCurrency { currency, omens } => {
-            let mut omen_set = omens_in.clone();
-            // Push any pre-activated omens. Stash-checked upstream.
-            for oid in omens {
-                if let Some(o) = build_omen_for_id(oid) {
-                    omen_set.push(o);
-                }
-            }
-            let Some(c) = resolver.resolve(currency) else {
-                return SimulationOutcome {
-                    item,
-                    success: false,
-                    error: Some(format!("unknown currency: {currency}")),
-                    change_count: 0,
-                };
-            };
-            let before = describe_item_state(&item);
-            let result = poc2_engine::apply_currency(
-                c.as_ref(),
-                &mut item,
-                registry,
-                &mut rng,
-                patch,
-                &mut omen_set,
-            );
-            match result {
-                Ok(()) => {
-                    let after = describe_item_state(&item);
-                    SimulationOutcome {
-                        item,
-                        success: true,
-                        error: None,
-                        change_count: state_diff_count(&before, &after),
-                    }
-                }
-                Err(e) => SimulationOutcome {
-                    item,
-                    success: false,
-                    error: Some(format_engine_error(&e)),
-                    change_count: 0,
-                },
-            }
-        }
+        AdvisorAction::ApplyCurrency { currency, omens } => simulate_apply_currency(
+            item, currency, omens, omens_in, registry, resolver, patch, &mut rng,
+        ),
         AdvisorAction::ApplyHinekorasLock => {
-            let mut omen_set = omens_in.clone();
-            let lock = poc2_engine::HinekorasLock::new();
-            let result = poc2_engine::apply_currency(
-                &lock,
-                &mut item,
-                registry,
-                &mut rng,
-                patch,
-                &mut omen_set,
-            );
-            match result {
-                Ok(()) => SimulationOutcome {
-                    item,
-                    success: true,
-                    error: None,
-                    change_count: 1,
-                },
-                Err(e) => SimulationOutcome {
-                    item,
-                    success: false,
-                    error: Some(format_engine_error(&e)),
-                    change_count: 0,
-                },
-            }
+            simulate_apply_lock(item, omens_in, registry, patch, &mut rng)
         }
-        AdvisorAction::Reveal { .. } => {
-            // The reveal mechanic needs a desecrated mod pool; until
-            // poe2db data is integrated, we can only treat Reveal as a
-            // marker step that "succeeds" if a hidden_desecrated slot
-            // exists. The slot is left in place — converting it to a
-            // ModRoll requires the pool. M5+ wires real reveal pools.
-            if item.hidden_desecrated.is_some() {
-                SimulationOutcome {
-                    item,
-                    success: true,
-                    error: None,
-                    change_count: 0,
-                }
-            } else {
-                SimulationOutcome {
-                    item,
-                    success: false,
-                    error: Some("no hidden desecrated mod to reveal".into()),
-                    change_count: 0,
-                }
-            }
-        }
+        AdvisorAction::Reveal { .. } => simulate_reveal(item),
+        AdvisorAction::ActivateOmen { .. } => noop_success(item),
+        AdvisorAction::Recombine { .. } => SimulationOutcome {
+            item,
+            success: false,
+            error: Some("Recombine simulation requires a second item (deferred to Phase F)".into()),
+            change_count: 0,
+        },
         AdvisorAction::Stop | AdvisorAction::Abandon { .. } | AdvisorAction::Guidance { .. } => {
+            noop_success(item)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // module-internal helper, mirrors apply_currency contract
+fn simulate_apply_currency(
+    mut item: Item,
+    currency: &poc2_engine::ids::CurrencyId,
+    omens: &[poc2_engine::ids::OmenId],
+    omens_in: &OmenSet,
+    registry: &ModRegistry,
+    resolver: &dyn CurrencyResolver,
+    patch: PatchVersion,
+    rng: &mut Xoshiro256PlusPlus,
+) -> SimulationOutcome {
+    let mut omen_set = omens_in.clone();
+    for oid in omens {
+        if let Some(o) = build_omen_for_id(oid) {
+            omen_set.push(o);
+        }
+    }
+    let Some(c) = resolver.resolve(currency) else {
+        return SimulationOutcome {
+            item,
+            success: false,
+            error: Some(format!("unknown currency: {currency}")),
+            change_count: 0,
+        };
+    };
+    let before = describe_item_state(&item);
+    let result =
+        poc2_engine::apply_currency(c.as_ref(), &mut item, registry, rng, patch, &mut omen_set);
+    match result {
+        Ok(()) => {
+            let after = describe_item_state(&item);
             SimulationOutcome {
                 item,
                 success: true,
                 error: None,
-                change_count: 0,
+                change_count: state_diff_count(&before, &after),
             }
         }
+        Err(e) => SimulationOutcome {
+            item,
+            success: false,
+            error: Some(format_engine_error(&e)),
+            change_count: 0,
+        },
+    }
+}
+
+fn simulate_apply_lock(
+    mut item: Item,
+    omens_in: &OmenSet,
+    registry: &ModRegistry,
+    patch: PatchVersion,
+    rng: &mut Xoshiro256PlusPlus,
+) -> SimulationOutcome {
+    let mut omen_set = omens_in.clone();
+    let lock = poc2_engine::HinekorasLock::new();
+    let result = poc2_engine::apply_currency(&lock, &mut item, registry, rng, patch, &mut omen_set);
+    match result {
+        Ok(()) => SimulationOutcome {
+            item,
+            success: true,
+            error: None,
+            change_count: 1,
+        },
+        Err(e) => SimulationOutcome {
+            item,
+            success: false,
+            error: Some(format_engine_error(&e)),
+            change_count: 0,
+        },
+    }
+}
+
+/// Reveal needs a desecrated mod pool; until poe2db data is integrated,
+/// the simulator treats Reveal as a marker step that "succeeds" if a
+/// hidden_desecrated slot exists. The slot is left in place — converting
+/// it to a ModRoll requires the pool. Phase F+ wires real reveal pools.
+fn simulate_reveal(item: Item) -> SimulationOutcome {
+    if item.hidden_desecrated.is_some() {
+        SimulationOutcome {
+            item,
+            success: true,
+            error: None,
+            change_count: 0,
+        }
+    } else {
+        SimulationOutcome {
+            item,
+            success: false,
+            error: Some("no hidden desecrated mod to reveal".into()),
+            change_count: 0,
+        }
+    }
+}
+
+fn noop_success(item: Item) -> SimulationOutcome {
+    SimulationOutcome {
+        item,
+        success: true,
+        error: None,
+        change_count: 0,
     }
 }
 

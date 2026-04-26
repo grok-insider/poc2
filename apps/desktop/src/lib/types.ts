@@ -92,8 +92,16 @@ export interface Stash {
 
 export type AdvisorAction =
   | { kind: 'apply_currency'; currency: string; omens: string[] }
+  | { kind: 'activate_omen'; omen: string }
   | { kind: 'apply_hinekoras_lock' }
-  | { kind: 'reveal'; prefer: string[]; use_abyssal_echoes: boolean }
+  | {
+      kind: 'reveal';
+      prefer: string[];
+      use_abyssal_echoes: boolean;
+      min_acceptable: string | null;
+      abandon_if_no_match: boolean;
+    }
+  | { kind: 'recombine'; other_item_id: string; omens: string[] }
   | { kind: 'stop' }
   | { kind: 'abandon'; reason: string }
   | { kind: 'guidance'; note: string };
