@@ -14,15 +14,17 @@
 //!
 //! ## Module layout
 //!
-//! - [`item`] — `Item`, `ModRoll`, `BaseType`, rarity, slots, fractured/sanctified flags
-//! - [`mods`] — `ModDefinition`, mod groups, tiers, tags, hybrid analysis
-//! - [`currency`] — every orb, essence, bone, catalyst with `apply()` operations
-//! - [`omen`] — omen system + synergy hooks into currency operations
-//! - [`engine`] — top-level `apply(currency, item, omens, rng) -> Result<Item, Error>`
-//! - [`patch`] — `PatchVersion` with `patch_min`/`patch_max` semantics
+//! - [`ids`] — newtype identifiers (`ModId`, `BaseTypeId`, `TagId`, ...)
+//! - [`patch`] — `PatchVersion` / `PatchRange` versioning
 //! - [`error`] — typed errors for invalid operations
-//!
-//! All modules are stubs at M1; populated in M2 (Engine Core).
+//! - [`tag`] — gameplay tag definitions
+//! - [`item_class`] — `ItemClass`, `AttributePool`
+//! - [`base`] — `BaseType` definitions
+//! - [`mods`] — `ModDefinition`, `ModGroup`, `Concept`, hybrid analysis
+//! - [`item`] — `Item` runtime state, `ModRoll`, `HiddenDesecratedSlot`, sockets
+//! - [`currency`] — every orb, essence, bone, catalyst with `apply()` operations (M2.4-M2.5)
+//! - [`omen`] — omen system + synergy hooks (M2.6)
+//! - [`engine`] — top-level `apply(currency, item, omens, rng)` (M2.4+)
 
 #![forbid(unsafe_code)]
 #![warn(clippy::pedantic)]
@@ -33,16 +35,34 @@
 #![allow(clippy::doc_markdown)] // PoE2 / POE / RNG / UI etc. show up everywhere
 #![allow(missing_docs)] // TODO(M2): require doc comments on all public items
 
+pub mod base;
 pub mod currency;
 pub mod engine;
 pub mod error;
+pub mod ids;
 pub mod item;
+pub mod item_class;
 pub mod mods;
 pub mod omen;
 pub mod patch;
+pub mod tag;
 
+pub use base::{BaseType, InventorySize, ReleaseState};
 pub use error::{EngineError, EngineResult};
-pub use patch::PatchVersion;
+pub use ids::{
+    BaseTypeId, ConceptId, CurrencyId, EssenceId, ItemClassId, ModGroupId, ModId, OmenId, StatId,
+    TagId,
+};
+pub use item::{
+    AbyssLord, AffixType, AugmentSlot, BoneSize, BoneSubtype, HiddenDesecratedSlot, Item, ModRoll,
+    QualityKind, Rarity, Socket,
+};
+pub use item_class::{AttributePool, ItemClass};
+pub use mods::{
+    Concept, ModDefinition, ModDomain, ModFlags, ModGroup, ModKind, ModStat, SpawnWeight,
+};
+pub use patch::{PatchRange, PatchVersion};
+pub use tag::{Tag, TagCategory};
 
 /// Schema version of the engine's serialized types.
 ///

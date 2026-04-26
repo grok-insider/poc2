@@ -2941,8 +2941,10 @@ name = "poc2-engine"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "bitflags 2.11.1",
  "indexmap 2.14.0",
  "insta",
+ "once_cell",
  "proptest",
  "rand 0.8.6",
  "rand_xoshiro",

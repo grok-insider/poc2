@@ -23,6 +23,8 @@ rand.workspace = true
 rand_xoshiro.workspace = true
 semver.workspace = true
 tracing.workspace = true
+bitflags = { version = "2.6", features = ["serde"] }
+once_cell.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
