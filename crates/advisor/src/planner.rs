@@ -24,11 +24,11 @@ use poc2_engine::patch::PatchVersion;
 use poc2_engine::registry::ModRegistry;
 use poc2_market::{DivEquiv, Valuator};
 use poc2_rules::RuleSet;
-use poc2_strategies::StrategyRegistry;
+use poc2_strategies::{PredicateContext, StrategyRegistry};
 
 use crate::action::AdvisorAction;
 use crate::candidate::{generate_candidates, Candidate};
-use crate::goal::{is_satisfied, should_abandon, Goal};
+use crate::goal::{is_satisfied_with_ctx, should_abandon_with_ctx, Goal};
 use crate::recommendation::{Recommendation, RecommendationSource};
 use crate::scorer::{action_cost, score, ScoringWeights};
 use crate::simulator::{simulate, SimulationOutcome};
@@ -117,6 +117,17 @@ pub struct PlanInput<'a> {
     pub config: BeamConfig,
 }
 
+/// Build a [`PredicateContext`] for `item` against the planner inputs +
+/// the per-node accumulated cost. Predicates that reference cost / stash
+/// / valuator data evaluate against this context; everything else
+/// continues to read the item directly.
+fn ctx_for_node<'a>(input: &'a PlanInput<'a>, accumulated_cost: DivEquiv) -> PredicateContext<'a> {
+    PredicateContext::new(input.registry)
+        .with_cost(accumulated_cost.expected)
+        .with_valuator(input.valuator)
+        .with_stash(input.stash)
+}
+
 /// Run beam search; return the top-N first-action recommendations.
 #[must_use]
 pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
@@ -124,7 +135,8 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
 
     // Short-circuit: if the goal is already met at the root, the only
     // recommendation is to stop. The advisor's job is done.
-    if is_satisfied(&input.goal, &input.item, input.registry) {
+    let root_ctx = ctx_for_node(input, DivEquiv::ZERO);
+    if is_satisfied_with_ctx(&input.goal, &input.item, &root_ctx) {
         return vec![Recommendation {
             action: AdvisorAction::Stop,
             source: RecommendationSource::Heuristic {
@@ -148,8 +160,9 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
                 next.push((node.clone(), 0.0));
                 continue;
             }
+            let node_ctx = ctx_for_node(input, node.accumulated_cost);
             // Goal already met → terminate.
-            if is_satisfied(&input.goal, &node.item, input.registry) {
+            if is_satisfied_with_ctx(&input.goal, &node.item, &node_ctx) {
                 let mut t = node.clone();
                 t.terminated = true;
                 all_terminated.push(t.clone());
@@ -157,7 +170,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
                 continue;
             }
             // Abandon criteria → terminate but with low score.
-            if should_abandon(&input.goal, &node.item, input.registry) {
+            if should_abandon_with_ctx(&input.goal, &node.item, &node_ctx) {
                 let mut t = node.clone();
                 t.terminated = true;
                 all_terminated.push(t.clone());
@@ -167,7 +180,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
 
             let cands = generate_candidates(
                 &node.item,
-                input.registry,
+                &node_ctx,
                 input.rules,
                 input.strategies,
                 input.stash,
@@ -175,7 +188,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
             );
             for cand in cands {
                 let child = expand_with_candidate(node, &cand, depth, input);
-                let s = score_node(&child, &input.goal, input.registry, &cfg);
+                let s = score_node(&child, input, &cfg);
                 next.push((child, s));
             }
         }
@@ -196,7 +209,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
             continue;
         }
         let key = node.path[0].clone();
-        let s = score_node(node, &input.goal, input.registry, &cfg);
+        let s = score_node(node, input, &cfg);
         by_first
             .entry(key)
             .and_modify(|(existing, score)| {
@@ -258,11 +271,12 @@ fn expand_with_candidate(
 }
 
 /// Score a frontier node against the goal.
-fn score_node(node: &PlanNode, goal: &Goal, registry: &ModRegistry, cfg: &BeamConfig) -> f64 {
-    let progress = if is_satisfied(goal, &node.item, registry) {
+fn score_node(node: &PlanNode, input: &PlanInput<'_>, cfg: &BeamConfig) -> f64 {
+    let ctx = ctx_for_node(input, node.accumulated_cost);
+    let progress = if is_satisfied_with_ctx(&input.goal, &node.item, &ctx) {
         1.0
     } else {
-        partial_progress(&node.item, goal, registry)
+        partial_progress(&node.item, &input.goal, input.registry)
     };
     let success_prob = node.accumulated_prob * progress;
     score(
@@ -275,11 +289,17 @@ fn score_node(node: &PlanNode, goal: &Goal, registry: &ModRegistry, cfg: &BeamCo
 }
 
 /// Roughly: fraction of the goal's target specs that are satisfied.
+///
+/// This is intentionally registry-only (no cost / market context): partial
+/// progress is a structural property of the item's mods + the target spec,
+/// not of the planner state. Constraints that depend on cost/market are
+/// counted separately by [`is_satisfied_with_ctx`] in [`score_node`].
 fn partial_progress(item: &Item, goal: &Goal, registry: &ModRegistry) -> f64 {
     let total = goal.target.prefixes.len() + goal.target.suffixes.len();
     if total == 0 {
         return 1.0;
     }
+    let ctx = PredicateContext::new(registry);
     let mut hits = 0;
     for spec in &goal.target.prefixes {
         let g = Goal {
@@ -291,7 +311,7 @@ fn partial_progress(item: &Item, goal: &Goal, registry: &ModRegistry) -> f64 {
             abandon_criteria: vec![],
             budget: goal.budget,
         };
-        if is_satisfied(&g, item, registry) {
+        if is_satisfied_with_ctx(&g, item, &ctx) {
             hits += 1;
         }
     }
@@ -305,7 +325,7 @@ fn partial_progress(item: &Item, goal: &Goal, registry: &ModRegistry) -> f64 {
             abandon_criteria: vec![],
             budget: goal.budget,
         };
-        if is_satisfied(&g, item, registry) {
+        if is_satisfied_with_ctx(&g, item, &ctx) {
             hits += 1;
         }
     }

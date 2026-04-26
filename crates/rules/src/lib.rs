@@ -30,7 +30,7 @@ pub mod loader;
 pub mod rule;
 pub mod seed;
 
-pub use engine::{evaluate, EngineResult};
+pub use engine::{evaluate, evaluate_with_ctx, EngineResult};
 pub use loader::{load_rule_str, RuleError};
 pub use rule::{Category, Confidence, Rule, RuleId, RuleSet, Suggestion, SuggestionAction};
 pub use seed::seed_rules;

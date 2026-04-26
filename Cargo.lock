@@ -3398,6 +3398,7 @@ dependencies = [
  "insta",
  "poc2-data",
  "poc2-engine",
+ "poc2-market",
  "serde",
  "serde_json",
  "smallvec",

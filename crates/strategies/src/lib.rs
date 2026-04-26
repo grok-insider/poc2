@@ -37,13 +37,13 @@ pub mod predicate;
 pub mod registry;
 
 pub use dsl::{
-    Action, Branch, CmpOp, Confidence, ItemPredicate, RecoveryHint, Source, Step, StepId, Strategy,
-    StrategyId, Target, TargetSpec, ValuePredicate,
+    Action, Branch, CmpOp, Confidence, FloatValuePredicate, ItemPredicate, RecoveryHint, Source,
+    Step, StepId, Strategy, StrategyId, Target, TargetSpec, ValuePredicate,
 };
 pub use executor::{
     advance, dry_run, enter, next_recommendation, DryRunStep, EnterError, ExecutionResult,
     ExecutionState, TerminalKind,
 };
 pub use loader::{load_strategy_str, load_strategy_toml, StrategyError, StrategyResult};
-pub use predicate::{eval, eval_all, eval_any, is_hybrid_mod};
+pub use predicate::{eval, eval_all, eval_any, is_hybrid_mod, PredicateContext, StashView};
 pub use registry::StrategyRegistry;

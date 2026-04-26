@@ -17,7 +17,7 @@ use poc2_engine::item::AffixType;
 use poc2_engine::item::{Item, ModRoll};
 use poc2_engine::registry::ModRegistry;
 use poc2_market::DivEquiv;
-use poc2_strategies::{eval_all, ItemPredicate, Target, TargetSpec};
+use poc2_strategies::{eval_all, ItemPredicate, PredicateContext, Target, TargetSpec};
 use serde::{Deserialize, Serialize};
 
 /// A complete goal description.
@@ -57,30 +57,54 @@ impl Goal {
 /// honoring `allow_hybrid`. Tier checks are skipped when `min_tier` is
 /// `None` or no tier metadata is yet available — the M5 weights pass
 /// will refine this.
+///
+/// Convenience overload that builds a default [`PredicateContext`]
+/// from the registry alone. Use [`is_satisfied_with_ctx`] to thread
+/// through cost / valuator / stash data when target constraints
+/// reference them.
 #[must_use]
 pub fn is_satisfied(goal: &Goal, item: &Item, registry: &ModRegistry) -> bool {
+    let ctx = PredicateContext::new(registry);
+    is_satisfied_with_ctx(goal, item, &ctx)
+}
+
+/// True iff the item meets every [`TargetSpec`] in the goal's target,
+/// using the supplied [`PredicateContext`] for `target.constraints`
+/// evaluation.
+#[must_use]
+pub fn is_satisfied_with_ctx(goal: &Goal, item: &Item, ctx: &PredicateContext<'_>) -> bool {
     for spec in &goal.target.prefixes {
-        if !spec_satisfied(spec, &item.prefixes, registry) {
+        if !spec_satisfied(spec, &item.prefixes, ctx.registry) {
             return false;
         }
     }
     for spec in &goal.target.suffixes {
-        if !spec_satisfied(spec, &item.suffixes, registry) {
+        if !spec_satisfied(spec, &item.suffixes, ctx.registry) {
             return false;
         }
     }
-    if !goal.target.constraints.is_empty() && !eval_all(&goal.target.constraints, item, registry) {
+    if !goal.target.constraints.is_empty() && !eval_all(&goal.target.constraints, item, ctx) {
         return false;
     }
     true
 }
 
 /// True iff the item should be abandoned (any abandon predicate true).
+///
+/// Convenience overload that builds a default [`PredicateContext`].
 #[must_use]
 pub fn should_abandon(goal: &Goal, item: &Item, registry: &ModRegistry) -> bool {
+    let ctx = PredicateContext::new(registry);
+    should_abandon_with_ctx(goal, item, &ctx)
+}
+
+/// True iff the item should be abandoned, using the supplied
+/// [`PredicateContext`] for cost / market predicates.
+#[must_use]
+pub fn should_abandon_with_ctx(goal: &Goal, item: &Item, ctx: &PredicateContext<'_>) -> bool {
     goal.abandon_criteria
         .iter()
-        .any(|p| poc2_strategies::eval(p, item, registry))
+        .any(|p| poc2_strategies::eval(p, item, ctx))
 }
 
 /// Is a single [`TargetSpec`] satisfied by a slot's mods?

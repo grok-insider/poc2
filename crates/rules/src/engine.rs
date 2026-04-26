@@ -7,7 +7,7 @@
 
 use poc2_engine::item::Item;
 use poc2_engine::registry::ModRegistry;
-use poc2_strategies::eval;
+use poc2_strategies::{eval, PredicateContext};
 
 use crate::rule::{Rule, RuleId, RuleSet, Suggestion};
 
@@ -27,15 +27,32 @@ impl EngineResult<'_> {
 /// Evaluate every rule in `set` against `item`, returning matching
 /// suggestions in priority order (highest first, ties broken by rule
 /// insertion order).
+///
+/// Convenience overload that builds a default
+/// [`PredicateContext`] from the registry alone. Predicates that need
+/// market / cost / stash data evaluate to `false` under this entry
+/// point — use [`evaluate_with_ctx`] when those are available.
 #[must_use]
 pub fn evaluate<'a>(
     set: &'a RuleSet,
     item: &Item,
     registry: &ModRegistry,
 ) -> Vec<EngineResult<'a>> {
+    let ctx = PredicateContext::new(registry);
+    evaluate_with_ctx(set, item, &ctx)
+}
+
+/// Evaluate every rule in `set` against `item`, using the supplied
+/// [`PredicateContext`] for market / cost / stash predicates.
+#[must_use]
+pub fn evaluate_with_ctx<'a>(
+    set: &'a RuleSet,
+    item: &Item,
+    ctx: &PredicateContext<'_>,
+) -> Vec<EngineResult<'a>> {
     let mut out: Vec<EngineResult<'a>> = Vec::new();
     for rule in set.iter() {
-        if !eval(&rule.when, item, registry) {
+        if !eval(&rule.when, item, ctx) {
             continue;
         }
         for suggestion in &rule.then {

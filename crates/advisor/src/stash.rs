@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 
 use poc2_engine::ids::{CurrencyId, OmenId};
+use poc2_strategies::StashView;
 use serde::{Deserialize, Serialize};
 
 /// What the user currently owns.
@@ -93,6 +94,16 @@ impl Stash {
             return false;
         }
         omens.iter().all(|o| self.has_omen(o))
+    }
+}
+
+/// Bridge to [`poc2_strategies`]'s read-only stash view used by
+/// [`poc2_strategies::ItemPredicate::StashHas`]. The advisor stash is
+/// the canonical implementation; predicates evaluating against
+/// [`PredicateContext::with_stash(&stash)`] use this impl.
+impl StashView for Stash {
+    fn currency_count(&self, currency: &CurrencyId) -> u32 {
+        Self::currency_count(self, currency)
     }
 }
 

@@ -21,7 +21,7 @@ use poc2_engine::item::Item;
 use poc2_engine::registry::ModRegistry;
 
 use crate::dsl::{Action, ItemPredicate, Step, StepId, Strategy};
-use crate::predicate::{eval, eval_all};
+use crate::predicate::{eval, eval_all, PredicateContext};
 
 /// Minimal mutable state the executor threads through a strategy run.
 #[derive(Debug, Clone)]
@@ -76,11 +76,12 @@ pub fn enter<'a>(
     item: &Item,
     registry: &ModRegistry,
 ) -> Result<&'a Step, EnterError> {
-    if !eval_all(&strategy.preconditions, item, registry) {
+    let ctx = PredicateContext::new(registry);
+    if !eval_all(&strategy.preconditions, item, &ctx) {
         let failing: Vec<&ItemPredicate> = strategy
             .preconditions
             .iter()
-            .filter(|p| !eval(p, item, registry))
+            .filter(|p| !eval(p, item, &ctx))
             .collect();
         return Err(EnterError::PreconditionFailed {
             count: failing.len(),
@@ -126,8 +127,9 @@ pub fn next_recommendation<'a>(
     // If the step has a target_check that's already true on entry, the
     // strategy considers the goal met — surface that to the advisor so
     // it can advance to on_success without re-running the action.
+    let ctx = PredicateContext::new(registry);
     if let Some(check) = &step.target_check {
-        if eval(check, item, registry) {
+        if eval(check, item, &ctx) {
             return ExecutionResult::AlreadySatisfied { step };
         }
     }
@@ -229,10 +231,11 @@ pub fn dry_run<'a>(
             }
             _ => {}
         }
+        let ctx = PredicateContext::new(registry);
         let satisfied = step
             .target_check
             .as_ref()
-            .is_some_and(|p| eval(p, item, registry));
+            .is_some_and(|p| eval(p, item, &ctx));
         out.push(DryRunStep {
             step_id: id,
             action: Some(&step.action),

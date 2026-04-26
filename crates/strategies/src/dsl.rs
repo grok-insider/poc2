@@ -129,6 +129,35 @@ impl ValuePredicate {
     }
 }
 
+/// Numeric or comparison predicate over a single floating-point value.
+///
+/// Used for divine-equivalent cost / sale-price comparisons where integer
+/// math would lose meaningful precision (a 0.05 div threshold matters when
+/// the basic-orb prices are ~0.01-0.03 div).
+///
+/// Equality / inequality use a small absolute tolerance (1e-9) — exact
+/// `f64::PartialEq` would be brittle for values derived from real-world
+/// price feeds.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FloatValuePredicate {
+    pub op: CmpOp,
+    pub value: f64,
+}
+
+impl FloatValuePredicate {
+    pub fn matches(&self, v: f64) -> bool {
+        const TOL: f64 = 1e-9;
+        match self.op {
+            CmpOp::Eq => (v - self.value).abs() < TOL,
+            CmpOp::Ne => (v - self.value).abs() >= TOL,
+            CmpOp::Lt => v < self.value,
+            CmpOp::Lte => v <= self.value,
+            CmpOp::Gt => v > self.value,
+            CmpOp::Gte => v >= self.value,
+        }
+    }
+}
+
 /// A predicate over the [`Item`](poc2_engine::Item) state.
 ///
 /// Strategy preconditions and step `target_check` fields are expressed as
@@ -170,8 +199,32 @@ pub enum ItemPredicate {
     HasFractured(bool),
     /// True iff the item carries a hidden desecrated mod slot.
     HasHiddenDesecrated(bool),
+    /// True iff the item carries at least one revealed desecrated mod
+    /// (a [`poc2_engine::ModRoll`] of kind [`poc2_engine::ModKind::Desecrated`]).
+    HasDesecratedRevealed(bool),
     /// True iff the item is currently bound by Hinekora's Lock.
     HasHinekoraLock(bool),
+    /// Total explicit prefix + suffix count matches the predicate.
+    /// (Implicits and enchantments are not included.)
+    ModCount(ValuePredicate),
+    /// Item quality value matches the predicate (0..=30 typical).
+    /// Untagged and tagged-quality both contribute the same value.
+    Quality(ValuePredicate),
+    /// True iff the user's stash holds at least the specified count
+    /// of the named currency. Always returns false when no [`StashView`]
+    /// is attached to the [`PredicateContext`].
+    StashHas {
+        currency: poc2_engine::ids::CurrencyId,
+        count: ValuePredicate,
+    },
+    /// Cumulative cost spent on the craft so far, in divine-equivalent.
+    /// Always returns false unless the [`PredicateContext`] carries a
+    /// `cost_so_far_div` value.
+    CostSpent(FloatValuePredicate),
+    /// Estimated sale price of the current item state, in
+    /// divine-equivalent. Always returns false unless the
+    /// [`PredicateContext`] carries an `expected_sale_price_div` value.
+    ExpectedSalePrice(FloatValuePredicate),
     /// Logical conjunction of subpredicates.
     All(Vec<ItemPredicate>),
     /// Logical disjunction of subpredicates.

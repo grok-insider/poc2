@@ -23,9 +23,8 @@
 use poc2_engine::ids::CurrencyId;
 use poc2_engine::item::{Item, Rarity};
 use poc2_engine::patch::PatchVersion;
-use poc2_engine::registry::ModRegistry;
 use poc2_rules::RuleSet;
-use poc2_strategies::StrategyRegistry;
+use poc2_strategies::{eval_all, PredicateContext, StrategyRegistry};
 
 use crate::action::{from_rule_action, from_strategy_action, AdvisorAction};
 use crate::recommendation::RecommendationSource;
@@ -51,10 +50,17 @@ pub struct Candidate {
 ///
 /// Returns deduplicated candidates: if multiple sources propose the same
 /// `(currency, omens)` action, the highest-priority one wins.
+///
+/// `ctx` carries the registry plus optional cost / stash / valuator /
+/// expected-sale-price data used by [`poc2_strategies::ItemPredicate`]
+/// variants such as `CostSpent`, `StashHas`, and `ExpectedSalePrice`.
+/// `stash` is also passed separately because action-affordability is a
+/// runtime check (not a predicate) and may differ in v1.x when "buyable
+/// now" prices feed into the affordability calculus.
 #[must_use]
 pub fn generate_candidates(
     item: &Item,
-    registry: &ModRegistry,
+    ctx: &PredicateContext<'_>,
     rules: &RuleSet,
     strategies: &StrategyRegistry,
     stash: &Stash,
@@ -63,7 +69,7 @@ pub fn generate_candidates(
     let mut out: Vec<Candidate> = Vec::new();
 
     // ------- Rule-emitted candidates -------------------------------------
-    for r in poc2_rules::evaluate(rules, item, registry) {
+    for r in poc2_rules::evaluate_with_ctx(rules, item, ctx) {
         let action = from_rule_action(&r.suggestion.action);
         if !is_action_affordable(&action, stash) {
             continue;
@@ -91,7 +97,7 @@ pub fn generate_candidates(
     let class = poc2_engine::ids::ItemClassId::from(item.base.as_str());
     for strategy in strategies.for_class(&class, patch) {
         // Precondition gate — same as the executor's `enter`.
-        if !poc2_strategies::eval_all(&strategy.preconditions, item, registry) {
+        if !eval_all(&strategy.preconditions, item, ctx) {
             continue;
         }
         let Some(entry) = strategy.entry() else {
@@ -218,6 +224,7 @@ mod tests {
     use super::*;
     use poc2_engine::ids::ItemClassId;
     use poc2_engine::item::{QualityKind, Rarity};
+    use poc2_engine::registry::ModRegistry;
     use smallvec::smallvec;
 
     fn empty_item(rarity: Rarity) -> Item {
@@ -247,9 +254,10 @@ mod tests {
         let strategies = StrategyRegistry::default();
         let stash = Stash::unlimited();
         let item = empty_item(Rarity::Normal);
+        let ctx = PredicateContext::new(&reg).with_stash(&stash);
         let cands = generate_candidates(
             &item,
-            &reg,
+            &ctx,
             &rules,
             &strategies,
             &stash,
@@ -272,9 +280,10 @@ mod tests {
         let stash = Stash::unlimited();
         let mut item = empty_item(Rarity::Magic);
         item.prefixes.clear();
+        let ctx = PredicateContext::new(&reg).with_stash(&stash);
         let cands = generate_candidates(
             &item,
-            &reg,
+            &ctx,
             &rules,
             &strategies,
             &stash,
@@ -295,9 +304,10 @@ mod tests {
         // Empty stash → no affordable actions.
         let stash = Stash::new();
         let item = empty_item(Rarity::Normal);
+        let ctx = PredicateContext::new(&reg).with_stash(&stash);
         let cands = generate_candidates(
             &item,
-            &reg,
+            &ctx,
             &rules,
             &strategies,
             &stash,
@@ -313,5 +323,76 @@ mod tests {
                     )
             );
         }
+    }
+
+    #[test]
+    fn cost_spent_predicate_threads_through_ctx() {
+        // A rule that fires only when CostSpent > 5 div should fire when
+        // the ctx carries cost > 5 and not fire when it doesn't.
+        use poc2_engine::ids::CurrencyId;
+        use poc2_strategies::{CmpOp, FloatValuePredicate, ItemPredicate};
+
+        let reg = ModRegistry::from_mods(vec![]);
+        let stash = Stash::unlimited();
+        let strategies = StrategyRegistry::default();
+        let item = empty_item(Rarity::Normal);
+
+        // Build a tiny ruleset: one rule with CostSpent > 5 → Guidance.
+        let rule = poc2_rules::Rule {
+            id: poc2_rules::RuleId::from("test-cost-rule"),
+            category: poc2_rules::Category::Budget,
+            when: ItemPredicate::CostSpent(FloatValuePredicate {
+                op: CmpOp::Gt,
+                value: 5.0,
+            }),
+            then: smallvec::smallvec![poc2_rules::Suggestion {
+                action: poc2_rules::SuggestionAction::Abandon {
+                    reason: "budget exceeded".into(),
+                },
+                note: "test".into(),
+                priority: 100,
+            }],
+            explanation: "test".into(),
+            source: "test".into(),
+            confidence: poc2_rules::Confidence::Verified,
+        };
+        let _ = CurrencyId::from("ChaosOrb"); // silence unused warning
+        let rules = RuleSet::from_rules(vec![rule]);
+
+        let cheap_ctx = PredicateContext::new(&reg)
+            .with_stash(&stash)
+            .with_cost(2.0);
+        let cands_cheap = generate_candidates(
+            &item,
+            &cheap_ctx,
+            &rules,
+            &strategies,
+            &stash,
+            PatchVersion::PATCH_0_4_0,
+        );
+        assert!(
+            !cands_cheap
+                .iter()
+                .any(|c| matches!(c.action, AdvisorAction::Abandon { .. })),
+            "abandon rule should not fire below threshold"
+        );
+
+        let pricey_ctx = PredicateContext::new(&reg)
+            .with_stash(&stash)
+            .with_cost(10.0);
+        let cands_pricey = generate_candidates(
+            &item,
+            &pricey_ctx,
+            &rules,
+            &strategies,
+            &stash,
+            PatchVersion::PATCH_0_4_0,
+        );
+        assert!(
+            cands_pricey
+                .iter()
+                .any(|c| matches!(c.action, AdvisorAction::Abandon { .. })),
+            "abandon rule should fire above threshold"
+        );
     }
 }
