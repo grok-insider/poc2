@@ -839,6 +839,283 @@ fn sample_vaal_outcome(rng: &mut dyn rand::RngCore) -> VaalOutcome {
 }
 
 // =========================================================================
+// Greater / Perfect tier variants
+// =========================================================================
+//
+// Greater and Perfect variants of Transmute / Aug / Regal / Exalt / Chaos
+// behave identically to their base counterparts EXCEPT that the added mod
+// is constrained to `required_level >= min_mod_level`. This raises the
+// expected tier of the added mod (the 'rules out the lower tiers' effect
+// described in the apprentice blueprint).
+//
+// Min mod-level gates per planning research:
+// - Greater Transmute / Aug:  ~35  (Aug = 55 is also seen; we use 35 for
+//   Transmute and 55 for Aug per RePoE-fork conventions)
+// - Greater Regal / Exalt / Chaos: ~50
+// - Perfect (all variants):    ~70
+//
+// The actual numerical thresholds vary slightly across community tracking
+// of patch 0.4. We codify the conservative-floor values here; a future
+// refinement pass (M2.5+) can refine them from poe2db tier tables.
+
+const MIN_LEVEL_GREATER_TRANSMUTE: u32 = 35;
+const MIN_LEVEL_GREATER_AUGMENT: u32 = 55;
+const MIN_LEVEL_GREATER_REGAL: u32 = 50;
+const MIN_LEVEL_GREATER_EXALT: u32 = 50;
+const MIN_LEVEL_GREATER_CHAOS: u32 = 50;
+const MIN_LEVEL_PERFECT_ALL: u32 = 70;
+
+/// Generic implementation of "promote rarity, add 1 mod ≥ min_level".
+/// Shared by Transmute / Greater / Perfect Transmutation variants.
+fn add_one_mod_with_min(
+    item: &mut Item,
+    ctx: &mut ApplyContext<'_>,
+    require_rarity: Rarity,
+    promote_to: Option<Rarity>,
+    max_slots: u8,
+    min_level: u32,
+    name: &'static str,
+) -> EngineResult<()> {
+    if !item.is_modifiable() {
+        return Err(EngineError::InvalidApplication(format!(
+            "{name} requires a modifiable item"
+        )));
+    }
+    if item.rarity != require_rarity {
+        return Err(EngineError::InvalidApplication(format!(
+            "{name} requires a {require_rarity:?}-rarity item"
+        )));
+    }
+    let affix = pick_open_affix(item, ctx.rng, max_slots)
+        .ok_or(EngineError::AffixSlotFull { affix_type: name })?;
+    let m = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, min_level)
+        .ok_or_else(|| EngineError::NoEligibleMods {
+            base: item.base.to_string(),
+            ilvl: item.ilvl,
+            affix_type: affix_label(affix),
+        })?;
+    if let Some(rar) = promote_to {
+        item.rarity = rar;
+    }
+    push_mod(item, roll_mod(m, ctx.rng));
+    Ok(())
+}
+
+/// Generic Chaos-with-min-level: remove 1 random non-fractured + add 1 ≥ min.
+fn chaos_with_min(
+    item: &mut Item,
+    ctx: &mut ApplyContext<'_>,
+    min_level: u32,
+    name: &'static str,
+) -> EngineResult<()> {
+    if !item.is_modifiable() {
+        return Err(EngineError::InvalidApplication(format!(
+            "{name} requires a modifiable item"
+        )));
+    }
+    if item.rarity != Rarity::Rare {
+        return Err(EngineError::InvalidApplication(format!(
+            "{name} requires a Rare-rarity item"
+        )));
+    }
+    let removables = collect_removable(item);
+    if removables.is_empty() {
+        return Err(EngineError::InvalidApplication(format!(
+            "{name}: no non-fractured affix mod to remove"
+        )));
+    }
+    let pick = ctx.rng.gen_range(0..removables.len());
+    let (removed_affix, idx) = removables[pick];
+    remove_mod_at(item, removed_affix, idx);
+    let new_affix =
+        pick_open_affix(item, ctx.rng, 3).ok_or(EngineError::AffixSlotFull { affix_type: name })?;
+    let m = sample_eligible_mod(ctx.registry, item, new_affix, ctx.rng, ctx.patch, min_level)
+        .ok_or_else(|| EngineError::NoEligibleMods {
+            base: item.base.to_string(),
+            ilvl: item.ilvl,
+            affix_type: affix_label(new_affix),
+        })?;
+    push_mod(item, roll_mod(m, ctx.rng));
+    Ok(())
+}
+
+/// Defines a Greater/Perfect tier currency that wraps `add_one_mod_with_min`.
+macro_rules! greater_perfect_add_currency {
+    (
+        $struct:ident,
+        $id:literal,
+        $disp:literal,
+        $require:expr,
+        $promote:expr,
+        $max_slots:expr,
+        $min_level:expr
+    ) => {
+        #[derive(Debug)]
+        pub struct $struct {
+            id: CurrencyId,
+        }
+        impl $struct {
+            pub fn new() -> Self {
+                Self {
+                    id: CurrencyId::from($id),
+                }
+            }
+        }
+        impl Default for $struct {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+        impl Currency for $struct {
+            fn id(&self) -> &CurrencyId {
+                &self.id
+            }
+            fn name(&self) -> &'static str {
+                $disp
+            }
+            fn apply(
+                &self,
+                item: &mut Item,
+                ctx: &mut ApplyContext<'_>,
+            ) -> EngineResult<ApplyOutcome> {
+                add_one_mod_with_min(item, ctx, $require, $promote, $max_slots, $min_level, $disp)
+            }
+        }
+    };
+}
+
+/// Defines a Greater/Perfect tier Chaos.
+macro_rules! greater_perfect_chaos {
+    ($struct:ident, $id:literal, $disp:literal, $min_level:expr) => {
+        #[derive(Debug)]
+        pub struct $struct {
+            id: CurrencyId,
+        }
+        impl $struct {
+            pub fn new() -> Self {
+                Self {
+                    id: CurrencyId::from($id),
+                }
+            }
+        }
+        impl Default for $struct {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+        impl Currency for $struct {
+            fn id(&self) -> &CurrencyId {
+                &self.id
+            }
+            fn name(&self) -> &'static str {
+                $disp
+            }
+            fn apply(
+                &self,
+                item: &mut Item,
+                ctx: &mut ApplyContext<'_>,
+            ) -> EngineResult<ApplyOutcome> {
+                chaos_with_min(item, ctx, $min_level, $disp)
+            }
+        }
+    };
+}
+
+// Transmutation -----------------------------------------------------------
+greater_perfect_add_currency!(
+    GreaterOrbOfTransmutation,
+    "GreaterOrbOfTransmutation",
+    "Greater Orb of Transmutation",
+    Rarity::Normal,
+    Some(Rarity::Magic),
+    1,
+    MIN_LEVEL_GREATER_TRANSMUTE
+);
+greater_perfect_add_currency!(
+    PerfectOrbOfTransmutation,
+    "PerfectOrbOfTransmutation",
+    "Perfect Orb of Transmutation",
+    Rarity::Normal,
+    Some(Rarity::Magic),
+    1,
+    MIN_LEVEL_PERFECT_ALL
+);
+
+// Augmentation ------------------------------------------------------------
+greater_perfect_add_currency!(
+    GreaterOrbOfAugmentation,
+    "GreaterOrbOfAugmentation",
+    "Greater Orb of Augmentation",
+    Rarity::Magic,
+    None,
+    1,
+    MIN_LEVEL_GREATER_AUGMENT
+);
+greater_perfect_add_currency!(
+    PerfectOrbOfAugmentation,
+    "PerfectOrbOfAugmentation",
+    "Perfect Orb of Augmentation",
+    Rarity::Magic,
+    None,
+    1,
+    MIN_LEVEL_PERFECT_ALL
+);
+
+// Regal -------------------------------------------------------------------
+greater_perfect_add_currency!(
+    GreaterRegalOrb,
+    "GreaterRegalOrb",
+    "Greater Regal Orb",
+    Rarity::Magic,
+    Some(Rarity::Rare),
+    3,
+    MIN_LEVEL_GREATER_REGAL
+);
+greater_perfect_add_currency!(
+    PerfectRegalOrb,
+    "PerfectRegalOrb",
+    "Perfect Regal Orb",
+    Rarity::Magic,
+    Some(Rarity::Rare),
+    3,
+    MIN_LEVEL_PERFECT_ALL
+);
+
+// Exalted -----------------------------------------------------------------
+greater_perfect_add_currency!(
+    GreaterExaltedOrb,
+    "GreaterExaltedOrb",
+    "Greater Exalted Orb",
+    Rarity::Rare,
+    None,
+    3,
+    MIN_LEVEL_GREATER_EXALT
+);
+greater_perfect_add_currency!(
+    PerfectExaltedOrb,
+    "PerfectExaltedOrb",
+    "Perfect Exalted Orb",
+    Rarity::Rare,
+    None,
+    3,
+    MIN_LEVEL_PERFECT_ALL
+);
+
+// Chaos -------------------------------------------------------------------
+greater_perfect_chaos!(
+    GreaterChaosOrb,
+    "GreaterChaosOrb",
+    "Greater Chaos Orb",
+    MIN_LEVEL_GREATER_CHAOS
+);
+greater_perfect_chaos!(
+    PerfectChaosOrb,
+    "PerfectChaosOrb",
+    "Perfect Chaos Orb",
+    MIN_LEVEL_PERFECT_ALL
+);
+
+// =========================================================================
 // Tests
 // =========================================================================
 
@@ -1341,6 +1618,174 @@ mod tests {
         }
         assert_eq!(seen.len(), 6, "saw {} distinct outcomes", seen.len());
     }
+
+    // ---- Greater / Perfect variants ----------------------------------------
+
+    fn fixture_tiered_registry() -> ModRegistry {
+        // Multiple prefix and suffix groups, each with mods at varied
+        // required_level so we can demonstrate min-mod-level filtering
+        // regardless of which affix the orb picks.
+        ModRegistry::from_mods(vec![
+            // Prefixes - Life group
+            mk_mod_lvl("Life_T3", "Life", AffixType::Prefix, "Boots", 1),
+            mk_mod_lvl("Life_T2", "Life", AffixType::Prefix, "Boots", 40),
+            mk_mod_lvl("Life_T1", "Life", AffixType::Prefix, "Boots", 75),
+            // Prefixes - ES group
+            mk_mod_lvl("ES_T3", "ES", AffixType::Prefix, "Boots", 1),
+            mk_mod_lvl("ES_T1", "ES", AffixType::Prefix, "Boots", 75),
+            // Prefixes - Mana group
+            mk_mod_lvl("Mana_T3", "Mana", AffixType::Prefix, "Boots", 1),
+            mk_mod_lvl("Mana_T1", "Mana", AffixType::Prefix, "Boots", 75),
+            // Suffixes - FireRes group
+            mk_mod_lvl("FireRes_T3", "FireRes", AffixType::Suffix, "Boots", 1),
+            mk_mod_lvl("FireRes_T1", "FireRes", AffixType::Suffix, "Boots", 75),
+            // Suffixes - ColdRes group
+            mk_mod_lvl("ColdRes_T3", "ColdRes", AffixType::Suffix, "Boots", 1),
+            mk_mod_lvl("ColdRes_T1", "ColdRes", AffixType::Suffix, "Boots", 75),
+            // Suffixes - Stamina group (movement-speed-equivalent)
+            mk_mod_lvl("Stamina_T3", "Stamina", AffixType::Suffix, "Boots", 1),
+            mk_mod_lvl("Stamina_T1", "Stamina", AffixType::Suffix, "Boots", 75),
+        ])
+    }
+
+    fn mk_mod_lvl(
+        id: &str,
+        group: &str,
+        affix: AffixType,
+        class: &str,
+        required_level: u32,
+    ) -> ModDefinition {
+        ModDefinition {
+            id: ModId::from(id),
+            name: None,
+            mod_group: ModGroup(ModGroupId::from(group)),
+            affix_type: affix,
+            kind: ModKind::Explicit,
+            domain: ModDomain::Item,
+            tags: smallvec![],
+            concept_set: smallvec![],
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from(class),
+                weight: 1
+            }],
+            stats: smallvec![],
+            required_level,
+            allowed_item_classes: smallvec![ItemClassId::from(class)],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: None,
+        }
+    }
+
+    #[test]
+    fn perfect_transmute_only_rolls_high_required_level_mods() {
+        // Perfect demands required_level >= 70. With our fixture, the only
+        // Life mod that qualifies is Life_T1 (req 75); Life_T2 (40) and
+        // Life_T3 (1) are filtered out.
+        let reg = fixture_tiered_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9001);
+        let mut item = fixture_normal_boots();
+        PerfectOrbOfTransmutation::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .unwrap();
+        // The single rolled mod must be one of the T1 (req >= 70) candidates.
+        let roll = item
+            .prefixes
+            .first()
+            .or_else(|| item.suffixes.first())
+            .unwrap();
+        assert!(roll.mod_id.as_str().ends_with("_T1"), "got {}", roll.mod_id);
+    }
+
+    #[test]
+    fn greater_regal_filters_below_min_level() {
+        // Greater Regal: min level 50. Life_T1 (75) and FireRes_T1 (75)
+        // qualify; nothing else does. With the seed below, we should still
+        // land on a high-tier mod.
+        let reg = fixture_tiered_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9002);
+        let mut item = fixture_normal_boots();
+        OrbOfTransmutation::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .unwrap();
+        GreaterRegalOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .unwrap();
+        assert_eq!(item.rarity, Rarity::Rare);
+        // Among the up-to-3 mods on the Rare, the Regal-added one must be a
+        // _T1. Since the Transmute step had no min-level constraint we can
+        // only assert *at least one* mod is a T1.
+        let any_t1 = item
+            .prefixes
+            .iter()
+            .chain(item.suffixes.iter())
+            .any(|m| m.mod_id.as_str().ends_with("_T1"));
+        assert!(any_t1, "expected at least one T1 mod after Greater Regal");
+    }
+
+    #[test]
+    fn perfect_exalt_filters_below_70() {
+        // Set up a Rare with one mod, then Perfect Exalt — the new mod
+        // must be required_level >= 70.
+        let reg = fixture_tiered_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9003);
+        let mut item = fixture_normal_boots();
+        item.rarity = Rarity::Rare;
+        item.prefixes.push(ModRoll {
+            mod_id: ModId::from("Life_T3"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![],
+            is_fractured: false,
+        });
+        PerfectExaltedOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .unwrap();
+        // The newly added mod (the LAST one in either prefixes or suffixes)
+        // must end with _T1 since that's the only required_level>=70 mod
+        // available given mod-group exclusivity (Life is occupied by T3).
+        let last = item
+            .suffixes
+            .last()
+            .or_else(|| item.prefixes.last())
+            .unwrap();
+        assert!(last.mod_id.as_str().ends_with("_T1"), "got {}", last.mod_id);
+    }
+
+    #[test]
+    fn perfect_chaos_replacement_is_high_tier() {
+        // Build a Rare with a T3 mod, then Perfect Chaos: the replacement
+        // mod must be required_level >= 70.
+        let reg = fixture_tiered_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9004);
+        let mut item = fixture_normal_boots();
+        item.rarity = Rarity::Rare;
+        item.prefixes.push(ModRoll {
+            mod_id: ModId::from("Life_T3"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![],
+            is_fractured: false,
+        });
+        PerfectChaosOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .unwrap();
+        // After Chaos, the T3 mod is removed and a new high-level mod is added.
+        let any_t3 = item
+            .prefixes
+            .iter()
+            .chain(item.suffixes.iter())
+            .any(|m| m.mod_id.as_str().ends_with("_T3"));
+        let any_t1 = item
+            .prefixes
+            .iter()
+            .chain(item.suffixes.iter())
+            .any(|m| m.mod_id.as_str().ends_with("_T1"));
+        assert!(!any_t3, "Perfect Chaos should not leave a T3 mod");
+        assert!(any_t1, "Perfect Chaos should add a T1");
+    }
+
+    // ---- Original tests ----------------------------------------------------
 
     #[test]
     fn chaos_rejects_non_rare() {
