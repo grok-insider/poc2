@@ -127,6 +127,8 @@ export interface RecommendResponse {
   patch: string;
   rule_count: number;
   strategy_count: number;
+  mod_count: number;
+  bundle_path: string | null;
 }
 
 export interface ModLine {

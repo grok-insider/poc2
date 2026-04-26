@@ -17,9 +17,13 @@
   let { item, goal }: Props = $props();
 
   let recommendations = $state<Recommendation[]>([]);
-  let meta = $state<{ patch: string; rule_count: number; strategy_count: number } | null>(
-    null,
-  );
+  let meta = $state<{
+    patch: string;
+    rule_count: number;
+    strategy_count: number;
+    mod_count: number;
+    bundle_path: string | null;
+  } | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
   let risk = $state(0.5);
@@ -43,6 +47,8 @@
         patch: response.patch,
         rule_count: response.rule_count,
         strategy_count: response.strategy_count,
+        mod_count: response.mod_count,
+        bundle_path: response.bundle_path,
       };
     } catch (err) {
       error = String(err);
@@ -116,7 +122,13 @@
 
   {#if meta}
     <p class="meta">
-      patch {meta.patch} · {meta.rule_count} rules · {meta.strategy_count} strategies
+      patch {meta.patch} · {meta.rule_count} rules · {meta.strategy_count} strategies ·
+      {meta.mod_count} mods
+      {#if meta.bundle_path}
+        · bundle: {meta.bundle_path}
+      {:else}
+        · <span class="warn">no bundle loaded</span>
+      {/if}
     </p>
   {/if}
 
@@ -174,6 +186,11 @@
     font-size: 0.8rem;
     color: var(--fg-muted);
     margin: 0 0 0.75rem;
+    word-break: break-all;
+  }
+
+  .warn {
+    color: var(--accent);
   }
 
   .error {

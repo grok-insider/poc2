@@ -8,9 +8,11 @@
 //! `poc2-advisor`, etc.). The Tauri layer only adapts those crates to
 //! IPC commands and lifecycle events.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use poc2_advisor::{plan, BeamConfig, Goal, PlanInput, Recommendation, Stash};
+use poc2_data::Bundle;
 use poc2_engine::currency::DefaultCurrencyResolver;
 use poc2_engine::item::Item;
 use poc2_engine::patch::PatchVersion;
@@ -38,15 +40,37 @@ struct AdvisorState {
     strategies: Arc<StrategyRegistry>,
     resolver: Arc<DefaultCurrencyResolver>,
     valuator: Arc<Valuator>,
+    /// Path of the bundle that was loaded (for the UI's "About" / debug view).
+    bundle_path: Option<PathBuf>,
+    /// Patch version the bundle declares.
+    bundle_patch: Option<PatchVersion>,
 }
 
 impl AdvisorState {
     fn build() -> Self {
-        // Empty mod registry until the data bundle is loaded (M6 polish).
-        // The advisor's rule + strategy paths still work because the
-        // seed rules don't query mod content; they only inspect Item
-        // state.
-        let registry = ModRegistry::from_mods(Vec::new());
+        let bundle_loaded = load_bundle_from_known_paths();
+        let (registry, bundle_path, bundle_patch) = match bundle_loaded {
+            Some((bundle, path)) => {
+                let patch = bundle.game_patch();
+                tracing::info!(
+                    path = %path.display(),
+                    patch = %patch,
+                    mods = bundle.mods.len(),
+                    bases = bundle.base_items.len(),
+                    "loaded data bundle"
+                );
+                (ModRegistry::from_mods(bundle.mods), Some(path), Some(patch))
+            }
+            None => {
+                tracing::warn!(
+                    "no data bundle found; running with empty mod registry. \
+                     Build a bundle via the pipeline (`cargo run -p poc2-pipeline -- build`) \
+                     and place it in `~/.config/poc2/bundles/` or set POC2_BUNDLE."
+                );
+                (ModRegistry::from_mods(Vec::new()), None, None)
+            }
+        };
+
         let rules = RuleSet::from_rules(poc2_rules::seed_rules());
         let strategies = match poc2_strategies::load_strategy_str(CANONICAL_STRATEGY_TOML) {
             Ok(s) => StrategyRegistry::from_strategies(vec![s]),
@@ -63,6 +87,92 @@ impl AdvisorState {
             strategies: Arc::new(strategies),
             resolver: Arc::new(resolver),
             valuator: Arc::new(valuator),
+            bundle_path,
+            bundle_patch,
+        }
+    }
+}
+
+/// Search the conventional locations for a `*.bundle.json[.gz]` and load
+/// the first one that parses cleanly.
+///
+/// Search order (highest priority first):
+/// 1. `$POC2_BUNDLE` (if set, must be an absolute file path)
+/// 2. `$XDG_CONFIG_HOME/poc2/bundles/*.bundle.json{,.gz}`
+///    or `~/.config/poc2/bundles/...`
+/// 3. `$XDG_DATA_HOME/poc2/bundles/...` or `~/.local/share/poc2/bundles/...`
+///
+/// Within each directory, the most recently modified file wins.
+fn load_bundle_from_known_paths() -> Option<(Bundle, PathBuf)> {
+    if let Ok(env_path) = std::env::var("POC2_BUNDLE") {
+        let p = PathBuf::from(env_path);
+        if p.is_file() {
+            if let Some((b, _)) = try_load_bundle(&p) {
+                return Some((b, p));
+            }
+        }
+    }
+    let mut search_dirs: Vec<PathBuf> = Vec::new();
+    if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
+        search_dirs.push(Path::new(&xdg_config).join("poc2/bundles"));
+    } else if let Some(home) = std::env::var_os("HOME") {
+        search_dirs.push(Path::new(&home).join(".config/poc2/bundles"));
+    }
+    if let Some(xdg_data) = std::env::var_os("XDG_DATA_HOME") {
+        search_dirs.push(Path::new(&xdg_data).join("poc2/bundles"));
+    } else if let Some(home) = std::env::var_os("HOME") {
+        search_dirs.push(Path::new(&home).join(".local/share/poc2/bundles"));
+    }
+    for dir in search_dirs {
+        if let Some((bundle, path)) = newest_bundle_in_dir(&dir) {
+            return Some((bundle, path));
+        }
+    }
+    None
+}
+
+/// Find the most recently modified `*.bundle.json{,.gz}` in `dir` and load
+/// it. Returns `None` if the directory doesn't exist or no candidate
+/// parses cleanly.
+fn newest_bundle_in_dir(dir: &Path) -> Option<(Bundle, PathBuf)> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_file() {
+            continue;
+        }
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !(name.ends_with(".bundle.json") || name.ends_with(".bundle.json.gz")) {
+            continue;
+        }
+        let mtime = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        candidates.push((p, mtime));
+    }
+    candidates.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
+    for (path, _) in candidates {
+        if let Some((b, p)) = try_load_bundle(&path) {
+            return Some((b, p));
+        }
+    }
+    None
+}
+
+fn try_load_bundle(path: &Path) -> Option<(Bundle, PathBuf)> {
+    match poc2_data::io::read_bundle(path) {
+        Ok(b) => match b.validate() {
+            Ok(()) => Some((b, path.to_path_buf())),
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "bundle failed validation");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "bundle read failed");
+            None
         }
     }
 }
@@ -101,6 +211,10 @@ struct RecommendResponse {
     rule_count: usize,
     /// Number of strategies in scope.
     strategy_count: usize,
+    /// Number of mods in the loaded registry.
+    mod_count: usize,
+    /// Path of the loaded bundle, when applicable.
+    bundle_path: Option<String>,
 }
 
 #[tauri::command]
@@ -161,7 +275,10 @@ fn recommend(
     args: RecommendArgs,
     state: tauri::State<'_, AdvisorState>,
 ) -> Result<RecommendResponse, String> {
-    let patch = PatchVersion::PATCH_0_4_0;
+    // Use the loaded bundle's patch when available; otherwise default to
+    // the project's baseline (0.4.0). Falling back to a baseline keeps
+    // the rules + strategies in scope when no bundle is loaded.
+    let patch = state.bundle_patch.unwrap_or(PatchVersion::PATCH_0_4_0);
     let input = PlanInput {
         item: args.item,
         goal: args.goal,
@@ -187,6 +304,8 @@ fn recommend(
         patch: format!("{patch}"),
         rule_count: state.rules.len(),
         strategy_count: state.strategies.len(),
+        mod_count: state.registry.len(),
+        bundle_path: state.bundle_path.as_ref().map(|p| p.display().to_string()),
     })
 }
 
