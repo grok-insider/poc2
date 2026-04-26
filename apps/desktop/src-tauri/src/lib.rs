@@ -526,6 +526,65 @@ fn recommend(
     Ok(response)
 }
 
+// ---------------------------------------------------------------------
+// State persistence (Phase B.1) — Goal + risk slider live in
+// $XDG_CONFIG_HOME/poc2/state.toml.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct PersistedState {
+    /// Last goal the user had configured. Stored as JSON so the
+    /// Goal serde shape is preserved across schema bumps.
+    #[serde(default)]
+    goal_json: Option<String>,
+    /// Last risk slider value, clamped to [0, 1].
+    #[serde(default)]
+    risk: Option<f64>,
+    /// Last beam-search depth slider value (1..=5).
+    #[serde(default)]
+    depth: Option<u32>,
+    /// Last top-N value (1..=10).
+    #[serde(default)]
+    top_n: Option<u32>,
+}
+
+fn state_file_path() -> Option<PathBuf> {
+    if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
+        Some(Path::new(&xdg_config).join("poc2/state.toml"))
+    } else {
+        std::env::var_os("HOME").map(|home| Path::new(&home).join(".config/poc2/state.toml"))
+    }
+}
+
+#[tauri::command]
+fn load_state() -> Result<PersistedState, String> {
+    let Some(path) = state_file_path() else {
+        return Ok(PersistedState::default());
+    };
+    if !path.exists() {
+        return Ok(PersistedState::default());
+    }
+    let contents = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    toml::from_str(&contents).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_state(state: PersistedState) -> Result<(), String> {
+    let Some(path) = state_file_path() else {
+        return Err("no $XDG_CONFIG_HOME or $HOME — cannot persist state".into());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let serialized = toml::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serialized).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------
+// Bundle hot-swap (Phase A.6)
+// ---------------------------------------------------------------------
+
 #[derive(Debug, Deserialize)]
 struct ReloadBundleArgs {
     /// Optional explicit path. `None` re-runs the XDG-aware bundle
@@ -658,6 +717,8 @@ pub fn run() {
             read_clipboard_item,
             refresh_prices,
             reload_bundle,
+            load_state,
+            save_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

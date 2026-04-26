@@ -196,3 +196,15 @@ export interface ReloadBundleResponse {
   mod_count: number;
   strategy_count: number;
 }
+
+/// State persisted to ~/.config/poc2/state.toml (Phase B.1).
+export interface PersistedState {
+  /// JSON-encoded Goal — opaque to the client; the backend reads/writes it.
+  goal_json?: string | null;
+  /// Last risk slider value (0..1).
+  risk?: number | null;
+  /// Last beam-search depth slider (1..5).
+  depth?: number | null;
+  /// Last top_n recommendations to fetch (1..10).
+  top_n?: number | null;
+}

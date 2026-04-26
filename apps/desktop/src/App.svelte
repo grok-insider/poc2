@@ -3,12 +3,52 @@
   import AdvisorPanel from './lib/AdvisorPanel.svelte';
   import ClipboardImport from './lib/ClipboardImport.svelte';
   import ItemBuilder from './lib/ItemBuilder.svelte';
+  import TargetPanel from './lib/TargetPanel.svelte';
   import { FRESH_BODY_ARMOUR, WORKED_EXAMPLE_GOAL } from './lib/fixtures';
-  import type { Item } from './lib/types';
+  import type { Goal, Item, PersistedState } from './lib/types';
 
   let pingResponse = $state<string>('');
   let item = $state<Item>(structuredClone(FRESH_BODY_ARMOUR));
-  let goal = $state(structuredClone(WORKED_EXAMPLE_GOAL));
+  let goal = $state<Goal>(structuredClone(WORKED_EXAMPLE_GOAL));
+  let stateLoaded = $state(false);
+
+  // Load persisted state on mount.
+  $effect.pre(() => {
+    if (stateLoaded) return;
+    invoke<PersistedState>('load_state')
+      .then((s) => {
+        if (s.goal_json) {
+          try {
+            const parsed = JSON.parse(s.goal_json) as Goal;
+            // Sanity-check the shape — fall back to default on malformed.
+            if (parsed?.target && parsed.budget) {
+              goal = parsed;
+            }
+          } catch {
+            /* ignore — keep default */
+          }
+        }
+      })
+      .catch(() => {
+        /* nothing persisted yet — keep defaults */
+      })
+      .finally(() => {
+        stateLoaded = true;
+      });
+  });
+
+  // Auto-save Goal on change (after initial load).
+  $effect(() => {
+    if (!stateLoaded) return;
+    const goalSnapshot = JSON.stringify(goal);
+    invoke('save_state', {
+      state: {
+        goal_json: goalSnapshot,
+      } satisfies PersistedState,
+    }).catch(() => {
+      /* swallow — persistence is best-effort */
+    });
+  });
 
   async function ping() {
     try {
@@ -20,6 +60,10 @@
 
   function resetItem() {
     item = structuredClone(FRESH_BODY_ARMOUR);
+  }
+
+  function resetGoal() {
+    goal = structuredClone(WORKED_EXAMPLE_GOAL);
   }
 </script>
 
@@ -34,6 +78,8 @@
       <ClipboardImport onItem={(next) => (item = next)} />
       <ItemBuilder {item} onUpdate={(next) => (item = next)} />
       <button class="reset" onclick={resetItem}>Reset to fresh BodyArmour</button>
+      <TargetPanel {goal} onUpdate={(next) => (goal = next)} />
+      <button class="reset" onclick={resetGoal}>Reset goal to worked example</button>
     </div>
     <div class="right">
       <AdvisorPanel {item} {goal} />
