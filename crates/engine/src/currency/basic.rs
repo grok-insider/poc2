@@ -652,6 +652,193 @@ impl Currency for ChaosOrb {
 }
 
 // =========================================================================
+// Divine Orb
+// =========================================================================
+
+/// Divine Orb: reroll the numeric values of all explicit mods within their
+/// existing tier ranges.
+///
+/// - Works on Magic, Rare, or Unique items.
+/// - Skips fractured mods (their values are locked).
+/// - Does NOT touch implicits or enchantments by default; with the
+///   Omen of the Blessed (M2.6), Divine instead targets *only* implicits.
+/// - Ranges come from the underlying [`ModDefinition::stats`]; we look up
+///   each `ModRoll`'s `mod_id` in the registry and reroll uniformly within
+///   `[min, max]` for every stat in the mod.
+#[derive(Debug)]
+pub struct DivineOrb {
+    id: CurrencyId,
+}
+
+impl DivineOrb {
+    pub fn new() -> Self {
+        Self {
+            id: CurrencyId::from("DivineOrb"),
+        }
+    }
+}
+
+impl Default for DivineOrb {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Currency for DivineOrb {
+    fn id(&self) -> &CurrencyId {
+        &self.id
+    }
+    fn name(&self) -> &'static str {
+        "Divine Orb"
+    }
+
+    fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
+        if !item.is_modifiable() {
+            return Err(EngineError::InvalidApplication(
+                "Divine Orb requires a modifiable item".into(),
+            ));
+        }
+        if item.rarity == Rarity::Normal {
+            return Err(EngineError::InvalidApplication(
+                "Divine Orb has no effect on a Normal-rarity item".into(),
+            ));
+        }
+        reroll_explicit_values(item, ctx);
+        Ok(())
+    }
+}
+
+fn reroll_explicit_values(item: &mut Item, ctx: &mut ApplyContext<'_>) {
+    for m in item.prefixes.iter_mut().chain(item.suffixes.iter_mut()) {
+        if m.is_fractured {
+            continue;
+        }
+        if let Some(def) = ctx.registry.get(&m.mod_id) {
+            m.values = def
+                .stats
+                .iter()
+                .map(|s| s.roll(ctx.rng.gen::<f64>()))
+                .collect();
+        }
+    }
+}
+
+// =========================================================================
+// Vaal Orb
+// =========================================================================
+
+/// What kind of corruption outcome did Vaal produce?
+///
+/// Reported by the engine for diagnostics / advisor explanation. Mirrors
+/// the outcomes documented in `/docs/11-game-mechanics.md` (lands in M2.10):
+///
+/// - `NoChange` — item is corrupted but otherwise unchanged. Removable by
+///   Omen of Corruption (M2.6).
+/// - `RerollValues` — divine-like reroll across explicit mods.
+/// - `BrickMods` — strips all explicit mods and replaces them with a
+///   simulated brick (here: just rerolls one prefix to a "useless" state;
+///   real brick semantics land when desecrated mod data is integrated).
+/// - `AddEnchantment` — adds a corrupted enchantment (placeholder for now).
+/// - `AddSocket` — adds a socket beyond the normal cap.
+/// - `AddQuality` — bumps quality past the cap (caps at +30).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaalOutcome {
+    NoChange,
+    RerollValues,
+    BrickMods,
+    AddEnchantment,
+    AddSocket,
+    AddQuality,
+}
+
+/// Vaal Orb: corrupt the item with one of several random outcomes.
+///
+/// Once corrupted, the item is locked from most further crafting (only
+/// Architect's Orb double-corrupt, Vaal Cultivation Orb on uniques, and a
+/// handful of omens still apply).
+///
+/// The outcome distribution is approximated for M2.4 — refined in M2.5
+/// when omen-conditioning lands. For now we use uniform 1/6 across the
+/// six outcomes; Omen of Corruption (M2.6) will remove `NoChange`.
+#[derive(Debug)]
+pub struct VaalOrb {
+    id: CurrencyId,
+}
+
+impl VaalOrb {
+    pub fn new() -> Self {
+        Self {
+            id: CurrencyId::from("VaalOrb"),
+        }
+    }
+}
+
+impl Default for VaalOrb {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Currency for VaalOrb {
+    fn id(&self) -> &CurrencyId {
+        &self.id
+    }
+    fn name(&self) -> &'static str {
+        "Vaal Orb"
+    }
+
+    fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
+        if item.corrupted {
+            return Err(EngineError::ItemCorrupted);
+        }
+        if item.sanctified {
+            return Err(EngineError::ItemSanctified);
+        }
+        if item.mirrored {
+            return Err(EngineError::InvalidApplication(
+                "Vaal Orb cannot be applied to a mirrored item".into(),
+            ));
+        }
+
+        let outcome = sample_vaal_outcome(ctx.rng);
+        item.corrupted = true;
+        match outcome {
+            // No-change AND placeholder-enchantment both leave the rolled
+            // mods alone. Real enchantment list comes via the corrupted
+            // mod-domain data in M2.6; until then they're identical.
+            VaalOutcome::NoChange | VaalOutcome::AddEnchantment => {}
+            VaalOutcome::RerollValues => reroll_explicit_values(item, ctx),
+            VaalOutcome::BrickMods => {
+                // Approximation: clear non-fractured mods and add no replacement.
+                // Full "brick" semantics (replace with corrupted-only mods)
+                // lands when corrupted mod-domain data is integrated.
+                item.prefixes.retain(|m| m.is_fractured);
+                item.suffixes.retain(|m| m.is_fractured);
+            }
+            VaalOutcome::AddSocket => {
+                // Vaal can add a socket beyond the cap; we just push an empty one.
+                item.sockets.push(crate::item::Socket { augment: None });
+            }
+            VaalOutcome::AddQuality => {
+                item.quality = item.quality.saturating_add(5).min(30);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn sample_vaal_outcome(rng: &mut dyn rand::RngCore) -> VaalOutcome {
+    match rng.gen_range(0u8..6u8) {
+        0 => VaalOutcome::NoChange,
+        1 => VaalOutcome::RerollValues,
+        2 => VaalOutcome::BrickMods,
+        3 => VaalOutcome::AddEnchantment,
+        4 => VaalOutcome::AddSocket,
+        _ => VaalOutcome::AddQuality,
+    }
+}
+
+// =========================================================================
 // Tests
 // =========================================================================
 
@@ -994,6 +1181,165 @@ mod tests {
         let after = item.prefixes.len() + item.suffixes.len();
         // Chaos = -1 + 1 = same count
         assert_eq!(after, before);
+    }
+
+    // ---- Divine ------------------------------------------------------------
+
+    #[test]
+    fn divine_rerolls_non_fractured_values() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xd1);
+        // Build a Rare with one mod whose stats have a wide range.
+        let mut item = fixture_normal_boots();
+        item.rarity = Rarity::Rare;
+        item.prefixes.push(ModRoll {
+            mod_id: ModId::from("Life1"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![0.0],
+            is_fractured: false,
+        });
+
+        // Stub the registry mod with a non-trivial range so reroll is observable.
+        let reg = ModRegistry::from_mods(vec![ModDefinition {
+            id: ModId::from("Life1"),
+            name: None,
+            mod_group: crate::mods::ModGroup(ModGroupId::from("Life")),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            domain: ModDomain::Item,
+            tags: smallvec![],
+            concept_set: smallvec![],
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from("Boots"),
+                weight: 1
+            }],
+            stats: smallvec![crate::mods::ModStat {
+                stat_id: "base_maximum_life".into(),
+                min: 100.0,
+                max: 200.0
+            }],
+            required_level: 1,
+            allowed_item_classes: smallvec![ItemClassId::from("Boots")],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: None,
+        }]);
+
+        DivineOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .unwrap();
+        let v = item.prefixes[0].values[0];
+        assert!((100.0..=200.0).contains(&v), "got {v}");
+    }
+
+    #[test]
+    fn divine_skips_fractured_mods() {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xd2);
+        let reg = ModRegistry::from_mods(vec![ModDefinition {
+            id: ModId::from("Life1"),
+            name: None,
+            mod_group: crate::mods::ModGroup(ModGroupId::from("Life")),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            domain: ModDomain::Item,
+            tags: smallvec![],
+            concept_set: smallvec![],
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from("Boots"),
+                weight: 1
+            }],
+            stats: smallvec![crate::mods::ModStat {
+                stat_id: "base_maximum_life".into(),
+                min: 100.0,
+                max: 200.0
+            }],
+            required_level: 1,
+            allowed_item_classes: smallvec![ItemClassId::from("Boots")],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: None,
+        }]);
+
+        let mut item = fixture_normal_boots();
+        item.rarity = Rarity::Rare;
+        item.prefixes.push(ModRoll {
+            mod_id: ModId::from("Life1"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![123.0],
+            is_fractured: true,
+        });
+        DivineOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .unwrap();
+        // Fractured value is unchanged.
+        assert!((item.prefixes[0].values[0] - 123.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn divine_rejects_normal_or_corrupted() {
+        let reg = fixture_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xd3);
+        let mut item = fixture_normal_boots();
+        let r = DivineOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
+
+        item.rarity = Rarity::Rare;
+        item.corrupted = true;
+        let r = DivineOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
+    }
+
+    // ---- Vaal --------------------------------------------------------------
+
+    #[test]
+    fn vaal_marks_item_corrupted() {
+        let reg = fixture_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x1);
+        let mut item = fixture_normal_boots();
+        item.rarity = Rarity::Rare;
+        VaalOrb::new()
+            .apply(&mut item, &mut ctx(&reg, &mut rng))
+            .unwrap();
+        assert!(item.corrupted);
+    }
+
+    #[test]
+    fn vaal_rejects_already_corrupted() {
+        let reg = fixture_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x2);
+        let mut item = fixture_normal_boots();
+        item.corrupted = true;
+        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        assert!(matches!(r, Err(EngineError::ItemCorrupted)));
+    }
+
+    #[test]
+    fn vaal_rejects_sanctified_or_mirrored() {
+        let reg = fixture_registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x3);
+        let mut item = fixture_normal_boots();
+        item.sanctified = true;
+        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        assert!(matches!(r, Err(EngineError::ItemSanctified)));
+
+        let mut item = fixture_normal_boots();
+        item.mirrored = true;
+        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng));
+        assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
+    }
+
+    #[test]
+    fn vaal_outcome_distribution_covers_all_six_branches() {
+        // Statistical: across 600 trials, every outcome variant should appear.
+        use std::collections::HashSet;
+        let mut seen: HashSet<u8> = HashSet::new();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x600);
+        for _ in 0..600 {
+            let outcome = sample_vaal_outcome(&mut rng);
+            seen.insert(outcome as u8);
+        }
+        assert_eq!(seen.len(), 6, "saw {} distinct outcomes", seen.len());
     }
 
     #[test]
