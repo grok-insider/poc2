@@ -11,18 +11,22 @@
 - ✅ All 9 reference repos cloned to `example-repos/`
 - ✅ Foundation docs (overview, architecture, ADRs 0001-0008)
 
-## M2 — Engine core + data pipeline ✅ (mostly)
+## M2 — Engine core + data pipeline ✅
 
 ### Pipeline
 - ✅ Bundle schema design → `crates/data/src/bundle.rs`
 - ✅ RePoE-fork JSON pull (mods, base_items, mods_by_base, tags)
+- ✅ Craft of Exile `poec_data.json` pull (essences, catalysts, weights)
+- ✅ poe2db.tw scrape (44 omens; 10 bones from engine matrix)
 - ✅ Normalizer with cross-validation + concept classification
-- ✅ Pipeline CLI: `cargo run -p poc2-pipeline -- build --out *.bundle.json.gz`
-- ✅ First end-to-end bundle for 0.4 (2740 bases, 2123 mods, 168KB gz)
-- [ ] Craft of Exile `poec_data.json` pull (weights) — **deferred to M5**
-- [ ] poe2db.tw scrape (omens, essences, bones, catalysts) — **deferred** until upstream RePoE-fork exposes the JSON or we add a static catalogue
+- ✅ Pipeline CLI: `cargo run -p poc2-pipeline -- build [--skip-coe] [--skip-poe2db]`
+- ✅ End-to-end bundle for 0.4: 2740 bases, 2123 mods, 81 essences,
+  44 omens, 12 catalysts, 10 bones, 2951 weights, 211KB gz
+- ✅ Optional sources fail soft (network errors don't abort the build)
 - [ ] GGG `/trade/data/stats` cached pull (post-OAuth approval)
 - [ ] Bundle hot-swap mechanism in app
+- [ ] Refine CoE→engine mod-id join (45% match rate currently;
+  add explicit name aliases or use stat_id when available)
 
 ### Engine
 - ✅ Domain types (`Item`, `ModRoll`, `ModDefinition`, `BaseType`)
@@ -47,15 +51,19 @@
 ### Strategies
 - ✅ Strategy DSL design (TOML schema)
 - ✅ Strategy loader + registry + executor + predicate evaluator
-- ✅ 3 seed strategies (3xT1 ES Body Armour, Apprentice Blueprint, Whittling Cleanup)
-- [ ] Encode the remaining 20 strategies from `docs/33-strategy-library.md` as TOML
+- ✅ 8 seed strategies (3xT1 ES, Apprentice Blueprint, Whittling Cleanup,
+  Fracture-then-Chaos-Spam, Annul-Augment Spam, Greater Essence
+  Regal Lock-In, Sinistral Erasure, Catalysing Exaltation)
+- [ ] Encode the remaining ~15 strategies from `docs/33-strategy-library.md` as TOML
 - [ ] Author `docs/37-recovery-flows.md` (3-deep recovery encoding)
 
 ### Rules
 - ✅ Rule DSL design + forward-chain engine
-- ✅ 25 seed rules covering rarity progression, fracture, recovery,
-  Vaal, bones, catalysts, erasure, sanctification
-- [ ] Encode the remaining ~95 rules from `docs/34-heuristics-rulebook.md` as TOML
+- ✅ 45 seed rules covering rarity progression, fracture timing,
+  recovery, Vaal corruption, bones+necromancy, catalysts, erasure,
+  sanctification, base selection (ilvl gating), Hinekora's Lock
+  policies, Whittle nuance, pricing exits
+- [ ] Encode the remaining ~75 rules from `docs/34-heuristics-rulebook.md` as TOML
 - [ ] Editorial pass on community-attributed rules
 
 ## M4 — Advisor / Planner ✅
@@ -73,13 +81,18 @@
 - [ ] Streaming results to UI via Tokio channels (M6+ polish)
 - [ ] Author `docs/35-advisor-architecture.md`, `docs/36-decision-engine.md`
 
-## M5 — Probability + Market ✅ (probability primitives + valuator)
+## M5 — Probability + Market ✅
 
 - ✅ Monte Carlo lib (`run_n_trials`, `run_until_success`)
 - ✅ Geometric distribution cost calculator
 - ✅ Currency valuator (`DivEquiv(min, expected, max)` triples)
 - ✅ Conservative default prices (1div=50-180ex, 1div=3-30chaos, 1mirror=1500-6000div)
-- [ ] poe2scout / poe.ninja PoE2 price pollers (M5.3 — network)
+- ✅ poe2scout poller (`poc2_market::prices`) — fetches the live
+  `Currencies/ByCategory` snapshot for the active league, converts
+  exalt-denominated CurrentPrice to DivEquiv triples via the
+  league's DivinePrice ratio, applies ±30%/±50% volatility margins
+- ✅ Live price refresh exposed via Tauri `refresh_prices` command
+  + frontend "Refresh prices" button
 - [ ] Meta-build aggregator (poe.ninja PoE2 builds) (M5.4)
 - [ ] Off-meta niche finder
 - [ ] Author `docs/32-probability-math.md`, `docs/51-market-meta.md`
