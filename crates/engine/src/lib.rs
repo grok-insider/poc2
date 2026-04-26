@@ -35,6 +35,7 @@
 #![allow(clippy::doc_markdown)] // PoE2 / POE / RNG / UI etc. show up everywhere
 #![allow(missing_docs)] // TODO(M2): require doc comments on all public items
 
+pub mod analyzer;
 pub mod base;
 pub mod currency;
 pub mod engine;
@@ -48,6 +49,7 @@ pub mod patch;
 pub mod registry;
 pub mod tag;
 
+pub use analyzer::{analyze, BuiltInClassifier, Classifier, CompositeClassifier};
 pub use base::{BaseType, InventorySize, ReleaseState};
 pub use error::{EngineError, EngineResult};
 pub use ids::{

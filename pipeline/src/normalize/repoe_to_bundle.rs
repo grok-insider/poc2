@@ -8,12 +8,14 @@
 //! - Translates `generation_type` strings into [`AffixType`] + [`ModKind`].
 //! - Computes attribute pool from base tags.
 //! - Builds [`ItemClass`] entries from the union of `item_class` strings
-//!   appearing on bases. Class slot caps are assigned heuristically based on
-//!   the class name; refinements (e.g. quivers having no sockets) come in
-//!   later passes.
+//!   appearing on bases. Class slot caps are assigned heuristically based
+//!   on the class name; refinements (e.g. quivers having no sockets) come
+//!   in later passes.
+//! - Runs the [`poc2_engine::analyzer`] over every mod to populate its
+//!   `concept_set` and `ModFlags::HYBRID` flag.
 //!
-//! Concept-set classification, weight numerical values, and synergy graph
-//! construction are deferred to later sub-phases (M2.7 mod analyzer).
+//! Weight numerical values and the synergy graph are deferred to later
+//! pipeline passes (Craft of Exile + poe2db scrape).
 
 use ahash::AHashSet;
 use indexmap::IndexMap;
@@ -211,6 +213,25 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
         "derived mods_by_base ({} entries)",
         bundle.mods_by_base.len()
     );
+
+    // 5b. Concept classification (M2.7) — populate concept_set on each
+    //     mod and toggle the HYBRID flag for multi-concept mods.
+    let classifier = poc2_engine::analyzer::BuiltInClassifier;
+    poc2_engine::analyzer::analyze(&mut bundle.mods, &classifier);
+    let hybrid_count = bundle
+        .mods
+        .iter()
+        .filter(|m| m.flags.contains(poc2_engine::ModFlags::HYBRID))
+        .count();
+    info!(
+        "classified concepts on {} mods ({hybrid_count} hybrid)",
+        bundle.mods.len()
+    );
+
+    // 5c. Synthesize concept definitions for the concepts that actually
+    //     appear in the bundle.
+    bundle.concepts = collect_concepts(&bundle.mods);
+    info!("collected {} distinct concepts", bundle.concepts.len());
 
     // 6. Provenance
     bundle.header.sources.0.extend(snapshot.revisions.0.clone());
@@ -435,6 +456,62 @@ fn lookup_class_tags(_tags: &[String]) -> std::collections::HashMap<String, Smal
     // the class-name itself as a tag if it's also present in the tag list.
     // This is refined when poe2db scrape lands.
     std::collections::HashMap::new()
+}
+
+/// Synthesize a [`ConceptDefinition`] entry per distinct concept that
+/// shows up in the analyzed mod list. Family classification is heuristic;
+/// downstream UI consumers can refine via overrides.
+fn collect_concepts(mods: &[ModDefinition]) -> Vec<poc2_data::ConceptDefinition> {
+    let mut seen: AHashSet<String> = AHashSet::new();
+    let mut out: Vec<poc2_data::ConceptDefinition> = Vec::new();
+    for m in mods {
+        for c in &m.concept_set {
+            let id_str = c.as_str();
+            if seen.insert(id_str.to_string()) {
+                out.push(poc2_data::ConceptDefinition {
+                    id: c.clone(),
+                    display_name: humanize_concept(id_str),
+                    family: concept_family(id_str).to_string(),
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+    out
+}
+
+fn humanize_concept(id: &str) -> String {
+    // CamelCase -> "Camel Case".
+    let mut s = String::with_capacity(id.len() + 2);
+    for (i, c) in id.chars().enumerate() {
+        if i > 0 && c.is_ascii_uppercase() {
+            s.push(' ');
+        }
+        s.push(c);
+    }
+    s
+}
+
+fn concept_family(id: &str) -> &'static str {
+    match id {
+        "Life" | "Mana" | "EnergyShield" => "Resource",
+        "FireResistance"
+        | "ColdResistance"
+        | "LightningResistance"
+        | "ChaosResistance"
+        | "AllResistances"
+        | "Armour"
+        | "Evasion"
+        | "Block" => "Defence",
+        "Strength" | "Dexterity" | "Intelligence" | "AllAttributes" => "Attribute",
+        "AttackSpeed" | "CastSpeed" | "MovementSpeed" | "ProjectileSpeed" => "Speed",
+        "CritChance" | "CritDamage" => "Critical",
+        "ItemRarity" | "ItemQuantity" => "Find",
+        s if s.starts_with("Added") || s.starts_with("Increased") => "Damage",
+        s if s.ends_with("SkillLevel") => "Skill",
+        s if s.ends_with("Charges") => "Charges",
+        _ => "Other",
+    }
 }
 
 /// Derive `base_id → [mod_id]` by intersecting each base's tag set with each
