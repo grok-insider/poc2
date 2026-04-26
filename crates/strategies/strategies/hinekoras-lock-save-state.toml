@@ -1,0 +1,87 @@
+# Hinekora's Lock Save-State (Preview)
+#
+# Source: PoE wiki Hinekora's Lock entry; introduced to PoE2 in patch
+# 0.3 per Mobalytics.
+# See /docs/33-strategy-library.md sec. 10.
+#
+# Hinekora's Lock binds the item to a "foreseeing" state: hovering any
+# currency over the item shows the deterministic outcome of applying
+# it. Same-name currencies all show the same preview. Use to avoid
+# bricks on high-stakes Annul / Chaos / Vaal / Divine clicks.
+
+id = "hinekoras-lock-save-state"
+name = "Hinekora's Lock Save-State (Preview)"
+patch_min = "0.4.0"
+expected_cost_div = [5, 20]
+expected_success_prob = [1.0, 1.0]
+confidence = "verified"
+note = """
+Lock CANNOT preview crafting bench, recombinator, beastcrafting, or
+the Corruption Altar. Treat as a single-use insurance policy. If a
+preview is bad and you have a "harmless" currency available (Tailoring
+Orb, anointing tools), apply that to clear the lock without losing
+the item state, then re-Lock and try again.
+
+EV math: only worth it when item value > ~3× Lock cost. Below that
+threshold, just take the gamble.
+"""
+
+[source]
+kind = "community"
+credit = "PoE wiki Hinekora's Lock entry; Mobalytics 0.3 patch notes"
+reference = "https://www.poewiki.net/wiki/Hinekora%27s_Lock"
+
+# ---- Preconditions ----
+preconditions = [
+    { corrupted = false },
+    { sanctified = false },
+    { mirrored = false },
+    # Don't waste a Lock on an item that already has one bound.
+    { has_hinekora_lock = false },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-apply-lock"
+action = { kind = "apply_currency", currency = "HinekorasLock" }
+target_check = { has_hinekora_lock = true }
+note = """
+Bind the Lock. Item shows the foreseeing icon; hover any currency to
+preview its deterministic outcome. Same-name currencies all preview
+the same — but Awakener's Orb varies by donor item.
+"""
+on_success = "S2-preview-decide"
+on_failure = "S1b-abort"
+
+[[steps]]
+id = "S1b-abort"
+action = { kind = "abandon", reason = "Hinekora's Lock could not be applied (probably already corrupted/mirrored). Remove the protective state first." }
+
+[[steps]]
+id = "S2-preview-decide"
+action = { kind = "noop" }
+note = """
+Decision point. Hover each candidate currency over the item:
+- If a preview is acceptable: commit it (consumes both lock + currency).
+- If all previews are bad: apply a harmless currency (Tailoring Orb,
+  anointing) to clear the lock state without modifying explicits, then
+  re-Lock and re-evaluate.
+"""
+on_success = "S3-done"
+on_failure = "S3-done"
+
+[[steps]]
+id = "S3-done"
+action = { kind = "done" }
+note = "Lock workflow complete. The previewed currency was committed (or the lock was cleared without commitment). Continue your craft."

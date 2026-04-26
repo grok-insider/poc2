@@ -1,0 +1,110 @@
+# Bones with Abyssal Echoes — Reroll Reveal Options
+#
+# Source: Mobalytics abyss-crafting (Lolcohol); central to Belton's
+# four-T1 rubric (#19).
+# See /docs/33-strategy-library.md sec. 14.
+#
+# The Echoes omen lets you re-roll the 3 reveal options once at the
+# Well of Souls, giving you up to 6 distinct options to pick from.
+# Pair with Sinistral / Dextral Necromancy to bias prefix vs suffix.
+
+id = "bones-with-abyssal-echoes"
+name = "Bones with Abyssal Echoes (6-option Reveal)"
+patch_min = "0.4.0"
+expected_cost_div = [5, 20]
+expected_success_prob = [0.70, 0.85]
+confidence = "verified"
+note = """
+Bone tier matters:
+  - Gnawed: ≤ ilvl 64 only (campaign tier).
+  - Preserved: any ilvl, random tier.
+  - Ancient: any ilvl + guarantees min mod-level 40 (≈T3+).
+
+If item already has 6 mods, the bone removes 1 random mod first
+(matching the affix-side it adds) — risky. Prefer using on items
+with at least one open slot.
+"""
+
+[source]
+kind = "community"
+credit = "Mobalytics abyss-crafting (Lolcohol); Belton four-T1 rubric"
+reference = "https://mobalytics.gg/poe-2/guides/abyss-crafting"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    # No existing hidden desecrated slot.
+    { has_hidden_desecrated = false },
+    # Avoid the 6-mod overwrite trap: at least one open slot.
+    { mod_count = { op = "lte", value = 5 } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-activate-echoes"
+action = { kind = "activate_omen", omen = "OmenOfAbyssalEchoes" }
+note = "Next reveal at the Well of Souls will offer 3 + 3 reroll = 6 options."
+on_success = "S2-activate-necromancy"
+on_failure = "S2-activate-necromancy"
+
+[[steps]]
+id = "S2-activate-necromancy"
+action = { kind = "activate_omen", omen = "OmenOfDextralNecromancy" }
+note = """
+Optional side-bias. Default Dextral (suffix-only) shown; switch to
+Sinistral if you specifically need a prefix. Skip this step if the
+desecrated mod can land on either side.
+"""
+on_success = "S3-apply-bone"
+on_failure = "S3-apply-bone"
+
+[[steps]]
+id = "S3-apply-bone"
+action = { kind = "apply_currency", currency = "AncientRib" }
+target_check = { has_hidden_desecrated = true }
+note = """
+Apply Ancient Rib (armour) for the min-mod-level 40 guarantee, OR
+Preserved Rib for cheaper but variable tiers. Replace the currency
+id with the bone matching your item class (Jawbone-weapon,
+Collarbone-jewelry, Cranium-jewel, Vertebrae-waystone).
+"""
+on_success = "S4-reveal"
+on_failure = "S3b-recover"
+
+[[steps]]
+id = "S3b-recover"
+action = { kind = "abandon", reason = "Bone application failed (probably wrong bone-class for item). Verify class match before retrying." }
+
+[[steps]]
+id = "S4-reveal"
+action = { kind = "reveal", prefer = ["EnergyShield", "AllResistances", "FireResistance", "ColdResistance", "LightningResistance", "Life"], use_abyssal_echoes = true, min_acceptable = "EnergyShield", abandon_if_no_match = false }
+note = """
+Reveal at the Well of Souls. Up to 6 options total. Pick the best
+match. If none match the floor concept, Echoes lets you re-pick from
+the 3+3 set — accept the least-bad and clean up later via Omen of
+Light + Annul (#9).
+"""
+on_success = "S5-done"
+on_failure = "S5-done"
+recovery = [
+    { message = "All 6 options bad: pick the least-junky, then strip via Omen of Light + Annul.", goto = "S5-done", added_cost_div = 4 },
+    { message = "Out of Echoes omens: switch to an Abyss Lord omen (#15) for a Lord-pool guarantee.", added_cost_div = 8 },
+]
+
+[[steps]]
+id = "S5-done"
+action = { kind = "done" }
+note = "Reveal complete. Continue with Exalt / Whittle / Sanctify per your overall craft plan."

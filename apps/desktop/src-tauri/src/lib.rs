@@ -78,6 +78,22 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
         "sanctification-finish",
         include_str!("../../../../crates/strategies/strategies/sanctification-finish.toml"),
     ),
+    (
+        "omen-of-light-cleanup",
+        include_str!("../../../../crates/strategies/strategies/omen-of-light-cleanup.toml"),
+    ),
+    (
+        "hinekoras-lock-save-state",
+        include_str!("../../../../crates/strategies/strategies/hinekoras-lock-save-state.toml"),
+    ),
+    (
+        "bones-with-abyssal-echoes",
+        include_str!("../../../../crates/strategies/strategies/bones-with-abyssal-echoes.toml"),
+    ),
+    (
+        "abyss-lord-omens",
+        include_str!("../../../../crates/strategies/strategies/abyss-lord-omens.toml"),
+    ),
 ];
 
 /// Shared, read-only application state. Built once at startup; cloned

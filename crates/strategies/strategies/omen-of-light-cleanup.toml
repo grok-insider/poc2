@@ -1,0 +1,84 @@
+# Omen of Light Desecration Cleanup
+#
+# Source: Mobalytics abyss-crafting; Belton 0.4 video identifies this as
+# the keystone "flex-mod removal" mechanic.
+# See /docs/33-strategy-library.md sec. 9.
+#
+# Omen of Light + Annul = guaranteed removal of ONLY desecrated mods.
+# When you have exactly one revealed desecrated mod, this is fully
+# deterministic. Turns desecrated mods into a "flex multi-tool" — use
+# them as temporary blockers, tag-feeders, or chaos targets, then strip
+# them risk-free with this combo.
+
+id = "omen-of-light-cleanup"
+name = "Omen of Light Desecration Cleanup"
+patch_min = "0.4.0"
+expected_cost_div = [1, 4]
+expected_success_prob = [0.95, 1.0]
+confidence = "verified"
+note = """
+Always-correct removal path for unwanted desecrated mods. With a
+single desecrated mod on the item, the Annul outcome is deterministic.
+With multiple revealed desecrated mods, picks one at random among
+them — still safer than a raw Annul.
+"""
+
+[source]
+kind = "community"
+credit = "Mobalytics abyss-crafting (Lolcohol), Belton 0.4 video"
+reference = "https://mobalytics.gg/poe-2/guides/abyss-crafting"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    # Must have at least one revealed desecrated mod.
+    { has_desecrated_revealed = true },
+    # And no fractured mods conflicting (Annul can't target fractured).
+    # Fractured mods are immune anyway, so this isn't strictly needed,
+    # but keeping the check explicit for the user's mental model.
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-activate-omen-of-light"
+action = { kind = "activate_omen", omen = "OmenOfLight" }
+note = "Next Annul will remove ONLY desecrated mods."
+on_success = "S2-annul"
+on_failure = "S2-annul"
+
+[[steps]]
+id = "S2-annul"
+action = { kind = "apply_currency", currency = "OrbOfAnnulment" }
+target_check = { has_desecrated_revealed = false }
+note = "Annul commit. With exactly one desecrated mod, this is deterministic."
+on_success = "S3-done"
+on_failure = "S2b-cycle"
+recovery = [
+    { message = "If multiple desecrated mods existed and the wrong one was hit: re-bone + re-reveal then re-strip.", added_cost_div = 8 },
+    { message = "If you ran out of Omens of Light: switch to a fresh base (no isolation cleanup possible).", added_cost_div = 0 },
+]
+
+[[steps]]
+id = "S2b-cycle"
+action = { kind = "activate_omen", omen = "OmenOfLight" }
+note = "Cycle: re-activate Omen of Light to strip a different desecrated mod."
+on_success = "S2-annul"
+on_failure = "S3-done"
+
+[[steps]]
+id = "S3-done"
+action = { kind = "done" }
+note = "Desecrated mod removed without touching organic mods. Continue your craft."

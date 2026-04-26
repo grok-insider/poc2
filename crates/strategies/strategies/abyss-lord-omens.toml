@@ -1,0 +1,127 @@
+# Liege / Blackblooded / Sovereign Omens — Abyss Lord-Specific Reveals
+#
+# Source: Mobalytics abyss crafting; PoE2DB modifier list.
+# See /docs/33-strategy-library.md sec. 15.
+#
+# Each Abyss Lord omen forces the next desecration to draw from that
+# Lord's exclusive mod pool:
+#   - Liege       (Amanamu) — summoner mods
+#   - Sovereign   (Ulaman)  — defensive endgame mods
+#   - Blackblooded(Kurgal)  — offensive scaling mods
+#
+# Weapons / jewelry only — armor compatibility was bug-fixed in 0.3.x
+# and Lord omens are now restricted to weapons + jewelry.
+
+id = "abyss-lord-omens"
+name = "Liege / Blackblooded / Sovereign Lord Omens (Pool-locked Reveals)"
+patch_min = "0.4.0"
+expected_cost_div = [8, 25]
+expected_success_prob = [0.30, 0.60]
+confidence = "community"
+note = """
+Default omen shown is Liege (Amanamu's summoner pool). Edit the
+activate_omen step to switch to Sovereign (Ulaman, defensive) or
+Blackblooded (Kurgal, offensive). Stack with Echoes for the 6-option
+reveal pool. Use only on weapons or jewelry.
+"""
+
+[source]
+kind = "community"
+credit = "Mobalytics abyss crafting; PoE2DB Desecrated Modifiers list"
+reference = "https://mobalytics.gg/poe-2/guides/abyss-crafting"
+
+# ---- Preconditions ----
+# Item-class restriction enforced by the executor's class scoping plus
+# this preconditions check.
+item_classes = [
+    "Sceptre", "Wand", "Staff",
+    "OneHandSword", "OneHandMace", "OneHandAxe",
+    "TwoHandSword", "TwoHandMace", "TwoHandAxe",
+    "Bow", "Crossbow", "Quiver",
+    "Ring", "Amulet", "Belt",
+]
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { has_hidden_desecrated = false },
+    { mod_count = { op = "lte", value = 5 } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-activate-lord-omen"
+action = { kind = "activate_omen", omen = "OmenOfTheLiege" }
+note = """
+Activate the Lord omen for the pool you want.
+  Default Liege   (Amanamu).
+  Switch to Sovereign     for Ulaman's defensive pool.
+  Switch to Blackblooded  for Kurgal's offensive pool.
+"""
+on_success = "S2-stack-echoes"
+on_failure = "S2-stack-echoes"
+
+[[steps]]
+id = "S2-stack-echoes"
+action = { kind = "activate_omen", omen = "OmenOfAbyssalEchoes" }
+note = "Stack Echoes for 6 reveal options instead of 3."
+on_success = "S3-optional-side-bias"
+on_failure = "S3-optional-side-bias"
+
+[[steps]]
+id = "S3-optional-side-bias"
+action = { kind = "activate_omen", omen = "OmenOfSinistralNecromancy" }
+note = """
+Optional side-bias. Default Sinistral (prefix-only) shown; switch to
+Dextral if you need the desecrated mod on the suffix side. Skip if
+either side is acceptable.
+"""
+on_success = "S4-apply-bone"
+on_failure = "S4-apply-bone"
+
+[[steps]]
+id = "S4-apply-bone"
+action = { kind = "apply_currency", currency = "AncientJawbone" }
+target_check = { has_hidden_desecrated = true }
+note = """
+Apply Jawbone (weapons) or Collarbone (jewelry) — Ancient tier
+preferred for the min-mod-level 40 guarantee. The Lord omen
+guarantees the resulting desecrated mod is from the chosen Lord pool.
+"""
+on_success = "S5-reveal"
+on_failure = "S4b-recover"
+
+[[steps]]
+id = "S4b-recover"
+action = { kind = "abandon", reason = "Bone application failed (verify item-class / bone-class match)." }
+
+[[steps]]
+id = "S5-reveal"
+action = { kind = "reveal", prefer = [], use_abyssal_echoes = true }
+note = """
+Reveal at Well of Souls. All offered options come from the chosen
+Lord's exclusive pool. Echoes is already active so you get up to 6
+options total.
+"""
+on_success = "S6-done"
+on_failure = "S6-done"
+recovery = [
+    { message = "If all 6 are bad: pick least-junky and strip via Omen of Light + Annul (#9), then re-attempt with a different Lord pool.", added_cost_div = 12 },
+    { message = "Avoid burning a 3rd Lord omen on the same item — pool-targeting fatigue. Sell the partial state.", added_cost_div = 0 },
+]
+
+[[steps]]
+id = "S6-done"
+action = { kind = "done" }
+note = "Lord-pool reveal complete. Continue your finishing pipeline."
