@@ -1,0 +1,23 @@
+[package]
+name = "poc2-market"
+description = "Path of Crafting 2 — currency valuator, live prices, meta-build awareness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+poc2-data.workspace = true
+poc2-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ahash.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -1,0 +1,22 @@
+[package]
+name = "poc2-probability"
+description = "Path of Crafting 2 — Monte Carlo simulation, geometric distribution cost calc, EV math"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+poc2-engine.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+rand_xoshiro.workspace = true
+statrs.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+insta.workspace = true

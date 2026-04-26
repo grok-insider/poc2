@@ -1,0 +1,28 @@
+[package]
+name = "poc2-advisor"
+description = "Path of Crafting 2 — beam-search optimal-path advisor with full re-plan on state change"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+poc2-engine.workspace = true
+poc2-data.workspace = true
+poc2-strategies.workspace = true
+poc2-rules.workspace = true
+poc2-probability.workspace = true
+poc2-market.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "rt"] }
+tracing.workspace = true
+ahash.workspace = true
+indexmap.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true

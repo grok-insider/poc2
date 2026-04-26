@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.task }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [fmt, clippy, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            apps/desktop/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ matrix.task }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ matrix.task }}-
+            cargo-${{ runner.os }}-
+
+      - name: rustfmt
+        if: matrix.task == 'fmt'
+        run: nix develop --command cargo fmt --all -- --check
+
+      - name: clippy
+        if: matrix.task == 'clippy'
+        run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test
+        if: matrix.task == 'test'
+        run: nix develop --command cargo test --workspace --all-targets
+
+  flake:
+    name: Flake check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Flake check
+        run: nix flake check --no-build
+
+  frontend:
+    name: Frontend (${{ matrix.task }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [check, build]
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: install
+        run: pnpm install --frozen-lockfile=false
+
+      - name: svelte-check
+        if: matrix.task == 'check'
+        run: pnpm check
+
+      - name: build
+        if: matrix.task == 'build'
+        run: pnpm build

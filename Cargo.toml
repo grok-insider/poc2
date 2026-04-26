@@ -1,0 +1,93 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/engine",
+    "crates/data",
+    "crates/strategies",
+    "crates/rules",
+    "crates/probability",
+    "crates/market",
+    "crates/advisor",
+    "pipeline",
+    "apps/desktop/src-tauri",
+]
+default-members = [
+    "crates/engine",
+    "crates/data",
+    "crates/strategies",
+    "crates/rules",
+    "crates/probability",
+    "crates/market",
+    "crates/advisor",
+    "pipeline",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+authors = ["Path of Crafting 2 contributors"]
+repository = "https://github.com/anomalyco/poc2"
+homepage = "https://github.com/anomalyco/poc2"
+readme = "README.md"
+
+[workspace.dependencies]
+# Core
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async / runtime (advisor, market, pipeline)
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "time", "sync", "fs", "io-util"] }
+futures = "0.3"
+
+# HTTP (pipeline + market)
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "gzip"], default-features = false }
+
+# Tracing / logs
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Probability / math
+rand = "0.8"
+rand_xoshiro = "0.6"          # fast deterministic PRNG for seeded sims (Hinekora's Lock)
+statrs = "0.17"                # geometric distribution
+
+# Data structures
+indexmap = { version = "2.5", features = ["serde"] }
+smallvec = { version = "1.13", features = ["serde"] }
+ahash = "0.8"
+once_cell = "1.20"
+
+# Versioning
+semver = { version = "1.0", features = ["serde"] }
+
+# Testing
+proptest = "1.5"
+insta = { version = "1.40", features = ["yaml", "json"] }
+
+# Internal crates
+poc2-engine      = { path = "crates/engine",      version = "0.1.0" }
+poc2-data        = { path = "crates/data",        version = "0.1.0" }
+poc2-strategies  = { path = "crates/strategies",  version = "0.1.0" }
+poc2-rules       = { path = "crates/rules",       version = "0.1.0" }
+poc2-probability = { path = "crates/probability", version = "0.1.0" }
+poc2-market      = { path = "crates/market",      version = "0.1.0" }
+poc2-advisor     = { path = "crates/advisor",     version = "0.1.0" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.dev.package."*"]
+# Optimize deps in dev to keep our hot-loop perf reasonable in tests
+opt-level = 1

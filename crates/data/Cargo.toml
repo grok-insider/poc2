@@ -1,0 +1,23 @@
+[package]
+name = "poc2-data"
+description = "Path of Crafting 2 — bundle loader, schema types, patch-versioned data access"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+poc2-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+indexmap.workspace = true
+ahash.workspace = true
+semver.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

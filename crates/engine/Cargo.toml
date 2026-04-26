@@ -1,0 +1,29 @@
+[package]
+name = "poc2-engine"
+description = "Path of Crafting 2 — core domain model and crafting engine (currencies, omens, essences, bones)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "poc2_engine"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+indexmap.workspace = true
+smallvec.workspace = true
+ahash.workspace = true
+rand.workspace = true
+rand_xoshiro.workspace = true
+semver.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+insta.workspace = true

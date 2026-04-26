@@ -1,0 +1,27 @@
+[package]
+name = "poc2-pipeline"
+description = "Path of Crafting 2 — data bundle build pipeline (RePoE-fork + Craft of Exile + poe2db scrape + GGG trade-stat)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "poc2-pipeline"
+path = "src/main.rs"
+
+[dependencies]
+poc2-engine.workspace = true
+poc2-data.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tokio = { workspace = true, features = ["full"] }
+reqwest.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+indexmap.workspace = true

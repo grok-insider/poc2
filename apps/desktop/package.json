@@ -1,0 +1,36 @@
+{
+  "name": "poc2-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Path of Crafting 2 — desktop app frontend (Svelte 5 + Vite, served by Tauri 2)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "lint": "eslint src --ext .ts,.svelte",
+    "format": "prettier --write src/"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@tauri-apps/cli": "^2.1.0",
+    "@tsconfig/svelte": "^5.0.4",
+    "@types/node": "^22.9.0",
+    "svelte": "^5.1.16",
+    "svelte-check": "^4.0.9",
+    "tslib": "^2.8.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.0.1",
+    "@tauri-apps/plugin-fs": "^2.0.3",
+    "@tauri-apps/plugin-http": "^2.0.4",
+    "@tauri-apps/plugin-shell": "^2.0.1"
+  }
+}

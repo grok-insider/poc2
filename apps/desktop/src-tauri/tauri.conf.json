@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Path of Crafting 2",
+  "version": "0.1.0",
+  "identifier": "ai.anomaly.poc2",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "Path of Crafting 2",
+        "label": "main",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "shadow": true,
+        "center": true,
+        "fullscreen": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: https://asset.localhost data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://poe2scout.com https://poe.ninja https://www.pathofexile.com https://api.pathofexile.com https://repoe-fork.github.io"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Utility",
+    "shortDescription": "PoE2 crafting advisor",
+    "longDescription": "Path of Crafting 2 is a desktop crafting advisor for Path of Exile 2. It uses a beam-search planner over a strategy library and heuristic rule engine to recommend optimal next actions during a craft, with full re-plan on every state change.",
+    "linux": {
+      "deb": {
+        "depends": ["wl-clipboard"]
+      }
+    }
+  },
+  "plugins": {}
+}

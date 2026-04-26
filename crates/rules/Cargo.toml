@@ -1,0 +1,22 @@
+[package]
+name = "poc2-rules"
+description = "Path of Crafting 2 — heuristic rule engine (forward-chained production rules)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+poc2-engine.workspace = true
+poc2-data.workspace = true
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+indexmap.workspace = true
+ahash.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
