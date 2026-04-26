@@ -31,6 +31,7 @@ poc2-rules.workspace = true
 poc2-probability.workspace = true
 poc2-market.workspace = true
 poc2-advisor.workspace = true
+poc2-parser.workspace = true
 
 # Common
 serde.workspace = true

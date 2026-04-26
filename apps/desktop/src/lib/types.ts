@@ -128,3 +128,36 @@ export interface RecommendResponse {
   rule_count: number;
   strategy_count: number;
 }
+
+export interface ModLine {
+  text: string;
+  fractured: boolean;
+  crafted: boolean;
+  implicit_tag: boolean;
+}
+
+export interface ParsedItem {
+  item_class: string;
+  rarity: Rarity;
+  name: string | null;
+  base: string;
+  ilvl: number;
+  quality: number;
+  requirements: {
+    level: number | null;
+    str_req: number | null;
+    dex_req: number | null;
+    int_req: number | null;
+  };
+  implicits: ModLine[];
+  explicits: ModLine[];
+  corrupted: boolean;
+  mirrored: boolean;
+  sanctified: boolean;
+}
+
+export interface ParseClipboardResponse {
+  parsed: ParsedItem;
+  item: Item;
+  unresolved: string[];
+}

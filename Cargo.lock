@@ -3033,6 +3033,7 @@ dependencies = [
  "poc2-data",
  "poc2-engine",
  "poc2-market",
+ "poc2-parser",
  "poc2-probability",
  "poc2-rules",
  "poc2-strategies",
@@ -3083,6 +3084,19 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "poc2-parser"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "poc2-engine",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 1.0.69",
  "tracing",
 ]
 

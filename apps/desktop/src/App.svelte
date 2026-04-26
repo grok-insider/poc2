@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import AdvisorPanel from './lib/AdvisorPanel.svelte';
+  import ClipboardImport from './lib/ClipboardImport.svelte';
   import ItemBuilder from './lib/ItemBuilder.svelte';
   import { FRESH_BODY_ARMOUR, WORKED_EXAMPLE_GOAL } from './lib/fixtures';
   import type { Item } from './lib/types';
@@ -30,6 +31,7 @@
 
   <div class="layout">
     <div class="left">
+      <ClipboardImport onItem={(next) => (item = next)} />
       <ItemBuilder {item} onUpdate={(next) => (item = next)} />
       <button class="reset" onclick={resetItem}>Reset to fresh BodyArmour</button>
     </div>

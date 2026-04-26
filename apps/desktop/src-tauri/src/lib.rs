@@ -16,18 +16,19 @@ use poc2_engine::item::Item;
 use poc2_engine::patch::PatchVersion;
 use poc2_engine::registry::ModRegistry;
 use poc2_market::Valuator;
+use poc2_parser::{lower_to_item, parse_clipboard_text, ParsedItem};
 use poc2_rules::RuleSet;
 use poc2_strategies::StrategyRegistry;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tracing_subscriber::EnvFilter;
 
 /// Inlined canonical strategy fixture. Bundled into the binary so the
 /// app is self-contained at M6; user-provided strategies will load from
 /// `$XDG_CONFIG_HOME/poc2/strategies/` in M6 polish.
-const CANONICAL_STRATEGY_TOML: &str = include_str!(
-    "../../../../crates/strategies/strategies/3xt1-es-body-armour.toml"
-);
+const CANONICAL_STRATEGY_TOML: &str =
+    include_str!("../../../../crates/strategies/strategies/3xt1-es-body-armour.toml");
 
 /// Shared, read-only application state. Built once at startup; cloned
 /// (Arc-wise) into each command invocation.
@@ -111,6 +112,50 @@ fn ping() -> String {
     )
 }
 
+#[derive(Debug, Serialize)]
+struct ParseClipboardResponse {
+    /// Phase-1 parse output (text fields).
+    parsed: ParsedItem,
+    /// Phase-2 lower output (engine `Item`).
+    item: Item,
+    /// Mod text lines that did not resolve to any registered mod.
+    unresolved: Vec<String>,
+}
+
+#[tauri::command]
+fn parse_item_text(
+    text: String,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<ParseClipboardResponse, String> {
+    let parsed = parse_clipboard_text(&text).map_err(|e| e.to_string())?;
+    let (item, unresolved) =
+        lower_to_item(&parsed, state.registry.as_ref()).map_err(|e| e.to_string())?;
+    Ok(ParseClipboardResponse {
+        parsed,
+        item,
+        unresolved,
+    })
+}
+
+#[tauri::command]
+fn read_clipboard_item(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<ParseClipboardResponse, String> {
+    let text = app
+        .clipboard()
+        .read_text()
+        .map_err(|e| format!("clipboard read failed: {e}"))?;
+    let parsed = parse_clipboard_text(&text).map_err(|e| e.to_string())?;
+    let (item, unresolved) =
+        lower_to_item(&parsed, state.registry.as_ref()).map_err(|e| e.to_string())?;
+    Ok(ParseClipboardResponse {
+        parsed,
+        item,
+        unresolved,
+    })
+}
+
 #[tauri::command]
 fn recommend(
     args: RecommendArgs,
@@ -162,7 +207,12 @@ pub fn run() {
             app.manage(AdvisorState::build());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![ping, recommend])
+        .invoke_handler(tauri::generate_handler![
+            ping,
+            recommend,
+            parse_item_text,
+            read_clipboard_item
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

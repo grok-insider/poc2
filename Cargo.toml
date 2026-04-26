@@ -8,6 +8,7 @@ members = [
     "crates/probability",
     "crates/market",
     "crates/advisor",
+    "crates/parser",
     "pipeline",
     "apps/desktop/src-tauri",
 ]
@@ -19,6 +20,7 @@ default-members = [
     "crates/probability",
     "crates/market",
     "crates/advisor",
+    "crates/parser",
     "pipeline",
 ]
 
@@ -79,6 +81,7 @@ poc2-rules       = { path = "crates/rules",       version = "0.1.0" }
 poc2-probability = { path = "crates/probability", version = "0.1.0" }
 poc2-market      = { path = "crates/market",      version = "0.1.0" }
 poc2-advisor     = { path = "crates/advisor",     version = "0.1.0" }
+poc2-parser      = { path = "crates/parser",      version = "0.1.0" }
 poc2-pipeline    = { path = "pipeline",           version = "0.1.0" }
 
 [profile.release]
