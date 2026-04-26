@@ -1,0 +1,96 @@
+# Magic Base Exit Strategy (Sell at Magic)
+#
+# Source: Belton 0.4 video; MMOJUGG 0.4 crafting guide.
+# See /docs/33-strategy-library.md sec. 17.
+#
+# In 0.4 specifically: the loss of Homogenising Coronation makes good
+# 2-mod magics MORE valuable to downstream crafters. Don't Regal a
+# 2-mod magic with both mods chase-tier — list it as a fracture seed.
+
+id = "magic-base-exit"
+name = "Magic Base Exit (Sell at Magic — 0.4 fracture-seed market)"
+patch_min = "0.4.0"
+expected_cost_div = [1, 5]
+expected_success_prob = [0.05, 0.15]
+confidence = "community"
+note = """
+Use on high-ilvl bases (especially ilvl 82 weapons, body armour,
+jewelry) where the magic-stage 2-mod combo is itself valuable to
+downstream crafters as a fracture seed. Don't Regal — sell.
+
+In 0.4 the loss of Homogenising Coronation makes good 2-mod magics
+MORE valuable, since downstream crafters can no longer use Regal +
+Homogenising for guaranteed third-mod tag matching.
+"""
+
+[source]
+kind = "community"
+credit = "Belton 0.4 video; MMOJUGG 0.4 crafting guide"
+reference = "https://www.mmojugg.com/news/poe-2-homogenising-remove-and-patch-040-crafting-guide.html"
+
+# ---- Preconditions ----
+preconditions = [
+    { ilvl = { op = "gte", value = 80 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+target_check = { affix_count = { affix = "prefix", count = { op = "eq", value = 1 } } }
+note = "Perfect Transmute → magic with 1 high-tier mod (min mod-level 70)."
+on_success = "S2-perfect-augment"
+on_failure = "S1b-restart"
+
+[[steps]]
+id = "S1b-restart"
+action = { kind = "abandon", reason = "Transmute missed; cheaper to start over on a new white." }
+
+[[steps]]
+id = "S2-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+target_check = { mod_count = { op = "eq", value = 2 } }
+note = "Perfect Augment fills the second slot. Both mods should now be chase-tier."
+on_success = "S3-evaluate"
+on_failure = "S3-evaluate"
+
+[[steps]]
+id = "S3-evaluate"
+action = { kind = "noop" }
+note = """
+Decision gate: are BOTH mods chase-tier (T1 + T1, or T1 + T2 chase)?
+  - YES: list at 5–30 div on trade. Stop here. Do NOT Regal.
+  - NO:  the 2-mod magic isn't sellable; either Annul-Aug recover
+         (#3) or scrap.
+"""
+on_success = "S4-done"
+on_failure = "S3b-recover"
+
+[[steps]]
+id = "S3b-recover"
+action = { kind = "apply_currency", currency = "OrbOfAnnulment" }
+note = "Annul-Aug recover: Annul one, Aug refill — 50/50 to remove the junk mod."
+on_success = "S2-perfect-augment"
+on_failure = "S4-done"
+recovery = [
+    { message = "After 5+ Annul-Aug cycles still junk: scrap and start over on a new ilvl 82 white.", added_cost_div = 0 },
+]
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = "Magic-stage exit complete. List on trade or use as a fracture seed yourself."

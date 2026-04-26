@@ -1,0 +1,113 @@
+# The Mark of the Abyss Swap (Essence of the Abyss Combo)
+#
+# Source: PaintMaster Mobalytics essence guide; Mobalytics abyss-
+# crafting; Belton's example flow for tier-up swaps.
+# See /docs/33-strategy-library.md sec. 20.
+#
+# Replaces a low-tier organic mod with a guaranteed higher-mod-level
+# desecrated mod. The Essence of the Abyss adds a "Mark of the Abyssal
+# Lord" placeholder that the next bone application replaces with a
+# desecrated mod of mod-level higher than the originally-removed mod.
+
+id = "mark-of-the-abyss-swap"
+name = "Mark of the Abyss Swap (organic → high-tier desecrated)"
+patch_min = "0.4.0"
+expected_cost_div = [10, 30]
+expected_success_prob = [0.70, 0.85]
+confidence = "community"
+note = """
+The "higher mod-level" guarantee is what makes this powerful: lets
+you upgrade a low-tier organic into a guaranteed high-tier desecrated.
+
+The Mark itself is item-level 1, so a Whittle-spam afterward removes
+it deterministically — useful trick when bone access is unavailable.
+"""
+
+[source]
+kind = "community"
+credit = "PaintMaster Mobalytics essence guide; Mobalytics abyss-crafting"
+reference = "https://mobalytics.gg/poe-2/guides/paintmasters-essence-farm"
+
+# ---- Preconditions ----
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    # Item must already be at 6 mods so the essence has something to remove.
+    { mod_count = { op = "gte", value = 6 } },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-activate-crystallisation"
+action = { kind = "activate_omen", omen = "OmenOfDextralCrystallisation" }
+note = """
+Activate Sinistral (prefix-only) or Dextral (suffix-only)
+Crystallisation. The essence will remove a mod of the targeted side.
+Default Dextral shown; switch based on which side carries the junk
+mod you want to swap out.
+"""
+on_success = "S2-essence-of-the-abyss"
+on_failure = "S2-essence-of-the-abyss"
+
+[[steps]]
+id = "S2-essence-of-the-abyss"
+action = { kind = "apply_currency", currency = "EssenceOfTheAbyss" }
+note = """
+Apply Essence of the Abyss. Removes a mod from the targeted side and
+adds the Mark of the Abyssal Lord placeholder mod on that side.
+"""
+on_success = "S3-activate-necromancy"
+on_failure = "S3-activate-necromancy"
+
+[[steps]]
+id = "S3-activate-necromancy"
+action = { kind = "activate_omen", omen = "OmenOfDextralNecromancy" }
+note = "Side-bias for the bone — match the side where the Mark sits."
+on_success = "S4-activate-echoes"
+on_failure = "S4-activate-echoes"
+
+[[steps]]
+id = "S4-activate-echoes"
+action = { kind = "activate_omen", omen = "OmenOfAbyssalEchoes" }
+note = "Echoes for the 6-option reveal pool."
+on_success = "S5-apply-bone"
+on_failure = "S5-apply-bone"
+
+[[steps]]
+id = "S5-apply-bone"
+action = { kind = "apply_currency", currency = "AncientRib" }
+note = """
+Bone application. Guaranteed to remove the Mark and add a desecrated
+mod of mod-level higher than the originally-Essence-removed mod.
+Replace the bone id with the type matching your item class.
+"""
+on_success = "S6-reveal"
+on_failure = "S6-reveal"
+
+[[steps]]
+id = "S6-reveal"
+action = { kind = "reveal", prefer = ["EnergyShield", "AllResistances", "Life"], use_abyssal_echoes = true }
+note = "Reveal at the Well of Souls. Pick the highest-impact desecrated mod from the 6 options."
+on_success = "S7-done"
+on_failure = "S7-done"
+recovery = [
+    { message = "Mark stuck without bone access: Whittle removes it cheaply (Mark is item-level 1, always the lowest-mod-level mod).", added_cost_div = 5 },
+    { message = "All 6 options bad: pick least-junky and follow up with Omen of Light + Annul (#9).", added_cost_div = 4 },
+]
+
+[[steps]]
+id = "S7-done"
+action = { kind = "done" }
+note = "Tier-up swap complete. The replaced slot now carries a guaranteed-higher-mod-level desecrated mod."

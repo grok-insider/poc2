@@ -1,0 +1,108 @@
+# Recombinator (Omen of Recombination)
+#
+# Source: sirgog (Mobalytics omen-of-recombination guide with the full
+# math); IGN recombination guide; Belton's quiver crafts.
+# See /docs/33-strategy-library.md sec. 16.
+#
+# Combines two same-class items at the Recombinator. Each desired mod
+# has a transparent probability shown. Omen of Recombination makes the
+# next recombine "Lucky" (rolls twice, takes the better outcome).
+#
+# Decision rule (sirgog math):
+#   use the Omen iff (failure_chance × cost-to-replace-inputs) ≥ omen_cost
+#   - At ~5% base success: refunds 95% of input cost. Almost always worth.
+#   - At ~40% base success: refunds 60%. Borderline.
+#   - At ~80% base success: refunds 20%. Skip on cheap inputs.
+
+id = "recombinator"
+name = "Recombinator (with optional Omen of Recombination)"
+patch_min = "0.4.0"
+expected_cost_div = [10, 500]
+expected_success_prob = [0.20, 0.50]
+confidence = "community"
+note = """
+Two-input combine. Activation of Omen of Recombination converts the
+next recombine to Lucky (best of two rolls). Skip the omen on cheap
+input pairs (combined value < 5 div).
+
+The advisor surfaces this as Action::Recombine; v1's
+candidate-generator currently emits a placeholder other_item_id —
+plug your own second item into the live craft. Phase F's plugin SDK
+will let plugins do the stash search themselves.
+"""
+
+[source]
+kind = "community"
+credit = "sirgog (Mobalytics omen-of-recombination math); IGN recombination guide"
+reference = "https://mobalytics.gg/poe-2/guides/omen-of-recombination"
+
+# ---- Preconditions ----
+# Recombinator accepts both rares and magics, but in practice you
+# almost always want rares to consolidate good-mod payloads.
+preconditions = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { sanctified = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+# =========================================================================
+# Steps
+# =========================================================================
+
+[[steps]]
+id = "S1-decision-gate"
+action = { kind = "noop" }
+note = """
+Decision gate: confirm
+  (a) you own a second same-class item with desirable complementary
+      mods, AND
+  (b) the projected combined value justifies the cost.
+Skip to S3 to perform a raw recombine without the Lucky omen.
+"""
+on_success = "S2-activate-omen"
+on_failure = "S3-recombine"
+
+[[steps]]
+id = "S2-activate-omen"
+action = { kind = "activate_omen", omen = "OmenOfRecombination" }
+note = """
+Apply only when (failure_chance × cost-to-replace-inputs) ≥ omen
+cost. At low base success the omen pays for itself; at high base
+success it's borderline.
+"""
+on_success = "S3-recombine"
+on_failure = "S3-recombine"
+
+[[steps]]
+id = "S3-recombine"
+action = { kind = "recombine", other_item = { rarity = "rare" }, omens = ["OmenOfRecombination"] }
+note = """
+Recombine. The candidate generator (Phase F plugin SDK extends this)
+selects the second item from your stash matching the predicate; v1
+surfaces a placeholder id, you provide the concrete second item in
+the live craft.
+"""
+on_success = "S4-done"
+on_failure = "S3b-recover"
+recovery = [
+    { message = "Failed recombine produced a magic or worse: sell as base material; both inputs consumed.", added_cost_div = 0 },
+    { message = "Won't reach Lucky outcome: re-stockpile inputs and retry.", added_cost_div = 0 },
+]
+
+[[steps]]
+id = "S3b-recover"
+action = { kind = "abandon", reason = "Recombination missed; inputs consumed. Retry with fresh sources." }
+
+[[steps]]
+id = "S4-done"
+action = { kind = "done" }
+note = "Consolidated item produced. Continue with finishing pipeline (Whittle, Sanctify, Vaal)."

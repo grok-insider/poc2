@@ -102,6 +102,18 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
         "double-corruption",
         include_str!("../../../../crates/strategies/strategies/double-corruption.toml"),
     ),
+    (
+        "recombinator",
+        include_str!("../../../../crates/strategies/strategies/recombinator.toml"),
+    ),
+    (
+        "magic-base-exit",
+        include_str!("../../../../crates/strategies/strategies/magic-base-exit.toml"),
+    ),
+    (
+        "mark-of-the-abyss-swap",
+        include_str!("../../../../crates/strategies/strategies/mark-of-the-abyss-swap.toml"),
+    ),
 ];
 
 /// Shared, read-only application state. Built once at startup; cloned
