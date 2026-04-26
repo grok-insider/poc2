@@ -32,5 +32,5 @@ pub mod seed;
 
 pub use engine::{evaluate, EngineResult};
 pub use loader::{load_rule_str, RuleError};
-pub use rule::{Rule, RuleId, RuleSet, Suggestion, SuggestionAction};
+pub use rule::{Category, Confidence, Rule, RuleId, RuleSet, Suggestion, SuggestionAction};
 pub use seed::seed_rules;

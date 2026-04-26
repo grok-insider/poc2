@@ -37,8 +37,8 @@ pub mod predicate;
 pub mod registry;
 
 pub use dsl::{
-    Action, Branch, CmpOp, ItemPredicate, RecoveryHint, Step, StepId, Strategy, StrategyId, Target,
-    TargetSpec, ValuePredicate,
+    Action, Branch, CmpOp, Confidence, ItemPredicate, RecoveryHint, Source, Step, StepId, Strategy,
+    StrategyId, Target, TargetSpec, ValuePredicate,
 };
 pub use executor::{
     advance, dry_run, enter, next_recommendation, DryRunStep, EnterError, ExecutionResult,

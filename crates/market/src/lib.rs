@@ -24,3 +24,5 @@
 pub mod meta;
 pub mod prices;
 pub mod valuator;
+
+pub use valuator::{DivEquiv, Valuator};

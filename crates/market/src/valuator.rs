@@ -14,11 +14,12 @@
 //! Live price pollers (M6+) will overwrite these defaults when online.
 
 use ahash::AHashMap;
+use serde::{Deserialize, Serialize};
 
 use poc2_engine::ids::CurrencyId;
 
 /// Three-bound divine-equivalent cost: low / mid / high.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct DivEquiv {
     pub min: f64,
     pub expected: f64,

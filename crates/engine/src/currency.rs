@@ -21,11 +21,13 @@ pub mod bone;
 pub mod essence;
 pub mod fracturing;
 pub mod hinekora;
+pub mod resolver;
 
 pub use bone::{reveal_at_well_of_souls, sample_reveal_options, Bone, RevealOptions};
 pub use essence::{Essence, EssenceQuality};
 pub use fracturing::FracturingOrb;
 pub use hinekora::HinekorasLock;
+pub use resolver::{CurrencyResolver, DefaultCurrencyResolver};
 
 use rand::RngCore;
 

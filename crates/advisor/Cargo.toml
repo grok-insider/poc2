@@ -22,6 +22,9 @@ tokio = { workspace = true, features = ["sync", "macros", "rt"] }
 tracing.workspace = true
 ahash.workspace = true
 indexmap.workspace = true
+rand.workspace = true
+rand_xoshiro.workspace = true
+smallvec.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
