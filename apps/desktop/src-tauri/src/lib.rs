@@ -527,6 +527,96 @@ fn recommend(
 }
 
 // ---------------------------------------------------------------------
+// Recovery hints (Phase B.2)
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct RecoveryHintView {
+    /// Human-readable explanation of the recovery option.
+    message: String,
+    /// Step id the user would jump to if they accept this hint
+    /// (None when the hint is purely advisory).
+    goto_step_id: Option<String>,
+    /// Estimated additional cost in divines (None when not estimated).
+    added_cost_div: Option<u32>,
+    /// Strategy + step ids the hint came from, for display.
+    strategy_id: String,
+    step_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RecoveryStepView {
+    step_id: String,
+    /// Action description for the goto step (when goto_step_id is set).
+    /// Helps the user understand what they'd be applying next.
+    next_action_summary: Option<String>,
+    /// All hints attached to the step.
+    hints: Vec<RecoveryHintView>,
+}
+
+#[tauri::command]
+fn recovery_hints(
+    strategy_id: String,
+    step_id: String,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<RecoveryStepView, String> {
+    use poc2_strategies::{Action, StepId, StrategyId};
+    let bundle = state.bundle.read().expect("bundle rwlock poisoned");
+    let strategy = bundle
+        .strategies
+        .get(&StrategyId(strategy_id.clone()))
+        .ok_or_else(|| format!("unknown strategy: {strategy_id}"))?;
+    let target_step_id = StepId(step_id.clone());
+    let step = strategy
+        .step(&target_step_id)
+        .ok_or_else(|| format!("strategy {strategy_id} has no step {step_id}"))?;
+    let mut hints = Vec::with_capacity(step.recovery.len());
+    for hint in &step.recovery {
+        hints.push(RecoveryHintView {
+            message: hint.message.clone(),
+            goto_step_id: hint.goto.as_ref().map(|s| s.0.clone()),
+            added_cost_div: hint.added_cost_div,
+            strategy_id: strategy_id.clone(),
+            step_id: step_id.clone(),
+        });
+    }
+    let next_action_summary = step.on_failure.as_ref().and_then(|sid| {
+        strategy.step(sid).map(|next| match &next.action {
+            Action::ApplyCurrency { currency, omens } => {
+                if omens.is_empty() {
+                    format!("Apply {currency}")
+                } else {
+                    format!(
+                        "Apply {currency} with omens [{}]",
+                        omens
+                            .iter()
+                            .map(poc2_engine::ids::OmenId::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            }
+            Action::ActivateOmen { omen } => format!("Activate omen {omen}"),
+            Action::HinekorasLock => "Apply Hinekora's Lock".into(),
+            Action::Reveal { .. } => "Reveal at Well of Souls".into(),
+            Action::Recombine { .. } => "Recombine with second item".into(),
+            Action::Done => "Done".into(),
+            Action::Abandon { reason } => format!("Abandon: {reason}"),
+            Action::Noop => "(no-op)".into(),
+            Action::LoopUntil { .. } | Action::Sequence(_) | Action::Branch(_) => {
+                "(control-flow)".into()
+            }
+        })
+    });
+    drop(bundle);
+    Ok(RecoveryStepView {
+        step_id,
+        next_action_summary,
+        hints,
+    })
+}
+
+// ---------------------------------------------------------------------
 // State persistence (Phase B.1) — Goal + risk slider live in
 // $XDG_CONFIG_HOME/poc2/state.toml.
 // ---------------------------------------------------------------------
@@ -719,6 +809,7 @@ pub fn run() {
             reload_bundle,
             load_state,
             save_state,
+            recovery_hints,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

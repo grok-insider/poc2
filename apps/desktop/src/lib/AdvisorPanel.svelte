@@ -14,9 +14,13 @@
   type Props = {
     item: Item;
     goal: Goal;
+    /** Optional callback so the App.svelte parent can lift the latest
+     * recommendation list (used by the RecoveryPanel to display the
+     * current top recommendation's step recovery hints). */
+    onRecommendations?: (recs: Recommendation[]) => void;
   };
 
-  let { item, goal }: Props = $props();
+  let { item, goal, onRecommendations }: Props = $props();
 
   let recommendations = $state<Recommendation[]>([]);
   let meta = $state<{
@@ -67,6 +71,7 @@
       };
       const response = await invoke<RecommendResponse>('recommend', { args });
       recommendations = response.recommendations;
+      onRecommendations?.(recommendations);
       meta = {
         patch: response.patch,
         rule_count: response.rule_count,

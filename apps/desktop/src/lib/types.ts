@@ -197,6 +197,24 @@ export interface ReloadBundleResponse {
   strategy_count: number;
 }
 
+/// Recovery hint surface (Phase B.2).
+export interface RecoveryHintView {
+  message: string;
+  goto_step_id: string | null;
+  added_cost_div: number | null;
+  strategy_id: string;
+  step_id: string;
+}
+
+export interface RecoveryStepView {
+  step_id: string;
+  /// Summary of the action that the strategy's on_failure step would
+  /// take. Helps the user understand the default-failure flow before
+  /// considering the alternative recovery hints.
+  next_action_summary: string | null;
+  hints: RecoveryHintView[];
+}
+
 /// State persisted to ~/.config/poc2/state.toml (Phase B.1).
 export interface PersistedState {
   /// JSON-encoded Goal — opaque to the client; the backend reads/writes it.

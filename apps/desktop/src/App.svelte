@@ -3,14 +3,17 @@
   import AdvisorPanel from './lib/AdvisorPanel.svelte';
   import ClipboardImport from './lib/ClipboardImport.svelte';
   import ItemBuilder from './lib/ItemBuilder.svelte';
+  import RecoveryPanel from './lib/RecoveryPanel.svelte';
   import TargetPanel from './lib/TargetPanel.svelte';
   import { FRESH_BODY_ARMOUR, WORKED_EXAMPLE_GOAL } from './lib/fixtures';
-  import type { Goal, Item, PersistedState } from './lib/types';
+  import type { Goal, Item, PersistedState, Recommendation } from './lib/types';
 
   let pingResponse = $state<string>('');
   let item = $state<Item>(structuredClone(FRESH_BODY_ARMOUR));
   let goal = $state<Goal>(structuredClone(WORKED_EXAMPLE_GOAL));
   let stateLoaded = $state(false);
+  let recommendations = $state<Recommendation[]>([]);
+  let lastFailed = $state(false);
 
   // Load persisted state on mount.
   $effect.pre(() => {
@@ -82,7 +85,21 @@
       <button class="reset" onclick={resetGoal}>Reset goal to worked example</button>
     </div>
     <div class="right">
-      <AdvisorPanel {item} {goal} />
+      <AdvisorPanel
+        {item}
+        {goal}
+        onRecommendations={(recs) => {
+          recommendations = recs;
+        }}
+      />
+      <label class="last-failed-toggle">
+        <input type="checkbox" bind:checked={lastFailed} />
+        Last action failed (highlights the recovery panel)
+      </label>
+      <RecoveryPanel
+        recommendation={recommendations[0] ?? null}
+        {lastFailed}
+      />
     </div>
   </div>
 
@@ -115,6 +132,15 @@
     color: var(--fg-muted);
     border: 1px solid var(--border);
     font-weight: 400;
+  }
+
+  .last-failed-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--fg-muted);
+    padding: 0.25rem 0;
   }
 
   @media (max-width: 720px) {
