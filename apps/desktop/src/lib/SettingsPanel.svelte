@@ -6,6 +6,7 @@
     type ClientLogEvent,
     type ClientLogStatus,
     type LeagueInfo,
+    type MetaResponse,
     type ReloadBundleResponse,
     type RefreshPricesResponse,
   } from './types';
@@ -43,6 +44,25 @@
   let pricesRefreshing = $state(false);
   let pricesError = $state<string | null>(null);
   let lastRefreshAt = $state<string | null>(null);
+
+  // ---- Phase E — meta builds + off-meta finder ----
+  let metaResult = $state<MetaResponse | null>(null);
+  let metaLoading = $state(false);
+  let metaError = $state<string | null>(null);
+
+  async function fetchMeta() {
+    metaLoading = true;
+    metaError = null;
+    try {
+      metaResult = await invoke<MetaResponse>('fetch_meta_builds', {
+        args: { league },
+      });
+    } catch (e) {
+      metaError = String(e);
+    } finally {
+      metaLoading = false;
+    }
+  }
 
   // ---- Phase D.1 Client.txt watcher ----
   let clientLogPath = $state('');
@@ -266,6 +286,42 @@
     {/if}
   </div>
 
+  <!-- ============== What to craft right now (Phase E) ============== -->
+  <div class="block">
+    <h3>What to craft right now</h3>
+    <button onclick={fetchMeta} disabled={metaLoading} class="secondary">
+      {metaLoading ? 'fetching…' : 'Fetch meta builds'}
+    </button>
+    {#if metaError}
+      <pre class="error">{metaError}</pre>
+    {/if}
+    {#if metaResult}
+      {#if metaResult.n_builds === 0}
+        <p class="muted">
+          poe.ninja PoE2 builds endpoint returned no data for league
+          <code>{metaResult.league}</code>. The endpoint may not be
+          live yet for this patch (Phase E.1 ships with a permissive
+          deserializer).
+        </p>
+      {:else}
+        <p class="muted">
+          {metaResult.n_builds} builds sampled from
+          <code>{metaResult.league}</code> @ {metaResult.fetched_at}
+        </p>
+        <ul class="niche-list">
+          {#each metaResult.niches as n, i (i)}
+            <li>
+              <span class="niche-concept"><code>{n.concept}</code></span>
+              <span class="niche-meta">
+                demand {n.demand} · {n.competition} crafters · score {n.score.toFixed(2)}
+              </span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+  </div>
+
   <!-- ============== Client.txt watcher (Phase D.1) ============== -->
   <div class="block">
     <h3>Client.txt watcher</h3>
@@ -399,7 +455,8 @@
     font-weight: 400;
   }
 
-  .log-feed {
+  .log-feed,
+  .niche-list {
     list-style: none;
     padding: 0;
     margin: 0.4rem 0 0;
@@ -408,7 +465,8 @@
     gap: 0.2rem;
   }
 
-  .log-feed li {
+  .log-feed li,
+  .niche-list li {
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 2px;
@@ -416,5 +474,15 @@
     font-size: 0.75rem;
     color: var(--fg);
     font-family: ui-monospace, 'Fira Code', monospace;
+  }
+
+  .niche-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .niche-meta {
+    color: var(--fg-muted);
   }
 </style>

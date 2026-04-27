@@ -25,6 +25,10 @@ pub mod meta;
 pub mod prices;
 pub mod valuator;
 
+pub use meta::{
+    fetch_meta_snapshot, off_meta, MetaBuild, MetaError, MetaSnapshot, NicheTarget,
+    POE_NINJA_BUILDS_BASE_URL, POE_NINJA_DEFAULT_LEAGUE,
+};
 pub use prices::{
     apply_feed_to_valuator, default_id_mapping, fetch_snapshot, PoeScoutCurrencyEntry,
     PoeScoutLeague, PoeScoutSnapshot, PriceError, POE2SCOUT_BASE_URL, POE2SCOUT_DEFAULT_CATEGORIES,

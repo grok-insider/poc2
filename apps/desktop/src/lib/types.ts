@@ -153,6 +153,23 @@ export interface StreamingProgressEvent {
 /// Topic the streaming planner emits to.
 export const ADVISOR_PROGRESS_EVENT = 'advisor://progress';
 
+/// Phase E — meta builds aggregator.
+export interface NicheTarget {
+  concept: string;
+  demand: number;
+  demand_share: number;
+  competition: number;
+  score: number;
+  rationale: string;
+}
+
+export interface MetaResponse {
+  league: string;
+  fetched_at: string;
+  n_builds: number;
+  niches: NicheTarget[];
+}
+
 /// Phase D.3 — trade search URL adapter.
 export interface TradeModLine {
   mod_id: string;

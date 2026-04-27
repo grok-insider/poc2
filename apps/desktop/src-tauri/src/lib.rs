@@ -863,6 +863,50 @@ async fn list_leagues() -> Result<Vec<LeagueInfo>, String> {
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
+// Meta-build aggregator + off-meta finder (Phase E.1 + E.2)
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct FetchMetaArgs {
+    /// Optional league override; defaults to "Fate of the Vaal".
+    #[serde(default)]
+    league: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MetaResponse {
+    league: String,
+    fetched_at: String,
+    n_builds: usize,
+    /// Top-N off-meta niche targets (capped at 12 for UI compactness).
+    niches: Vec<poc2_market::NicheTarget>,
+}
+
+#[tauri::command]
+async fn fetch_meta_builds(args: FetchMetaArgs) -> Result<MetaResponse, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(concat!(
+            "poc2-desktop/",
+            env!("CARGO_PKG_VERSION"),
+            " (+contact: github issues)"
+        ))
+        .gzip(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let snap = poc2_market::fetch_meta_snapshot(&client, args.league.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut niches = poc2_market::off_meta(&snap, None);
+    niches.truncate(12);
+    Ok(MetaResponse {
+        league: snap.league,
+        fetched_at: snap.fetched_at,
+        n_builds: snap.builds.len(),
+        niches,
+    })
+}
+
+// ---------------------------------------------------------------------
 // Trade-search URL adapter (Phase D.3)
 // ---------------------------------------------------------------------
 
@@ -1310,6 +1354,7 @@ pub fn run() {
             stop_client_log,
             client_log_status,
             trade_search,
+            fetch_meta_builds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
