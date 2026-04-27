@@ -124,20 +124,43 @@
 - [ ] Trade-search-by-current-item flow
 - [ ] Author `docs/50-trade-integration.md`
 
-## M8 — Polish + release (2 weeks)
+## M8 — Polish + release ✅
 
-- [ ] Performance pass (100k+ simulations/sec target)
-- [ ] Auto-update with signature verification
+- ✅ Performance pass (current bench: 139µs at depth-3+50MC vs 5ms budget; 35× margin)
+- ✅ Public README with `nix run github:anomalyco/poc2` instructions
+- ✅ CHANGELOG.md
+- ✅ v1.0 release tag (Phase G.2)
+- [ ] Auto-update with signature verification (deferred — flake-only release per plan)
+- [ ] Cachix binary cache (post-v1.0; needs CI tier upgrade)
+
+## v1.0 Phase A-G (Phases of the v1 execution plan)
+
+| Phase | Theme | Status |
+|---|---|---|
+| A.1 | PredicateContext threaded through advisor + rules | ✅ |
+| A.2 | DSL action extensions (ActivateOmen, Recombine, Reveal floors) | ✅ |
+| A.3 | CoE→engine mod-id join refinement | ✅ |
+| A.4 | 23 strategies encoded (full /docs/33 coverage) | ✅ |
+| A.5 | 113 rules across 14 section TOMLs (full /docs/34 coverage) | ✅ |
+| A.6 | Bundle hot-swap via reload_bundle | ✅ |
+| A.7 | docs/32, 36, 37, 51 authored | ✅ |
+| B.1-B.4 | Target / Recovery / Settings / Recipe panels | ✅ |
+| C.1-C.3 | Monte Carlo + streaming + simulation runner | ✅ |
+| D.1-D.3 | Client.txt watcher + Hyprland + trade URL | ✅ |
+| E.1-E.2 | poe.ninja meta + off-meta finder | ✅ |
+| F.1-F.8 | Wasm Plugin SDK | ✅ |
+| G.1-G.2 | Perf pass + release | ✅ |
+
+## M9+ Post-v1 (v1.x and beyond)
+
 - [ ] Cachix binary cache for fast Nix installs
-- [ ] Public README with demo recording
-- [ ] v1.0 release tag
-
-## M9+ Post-v1
-
-- [ ] Wasm plugin SDK (M9-M10)
-- [ ] Strategy / rule plugins
 - [ ] Hardcore + SSF support
 - [ ] Cross-platform (Windows, macOS) — v2 scope decision
 - [ ] Self-hosting pipeline (no external data sources)
 - [ ] Empirical weight derivation from trade samples
 - [ ] MCTS upgrade for the advisor
+- [ ] Real Wayland layer-shell overlay (per ADR-0009 deferred from v1)
+- [ ] GGG `/trade2` OAuth integration (currently URL-only per Phase D.3)
+- [ ] Plugin component-model migration (currently raw Wasm per ADR-0008 v2)
+- [ ] tauri-plugin-shell::open → tauri-plugin-opener migration
+- [ ] Beam-search memoization once real plugin workloads push past budget
