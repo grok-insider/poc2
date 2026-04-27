@@ -160,19 +160,35 @@ distinct first move rather than `width` near-identical recs.
 
 ## Performance
 
-Per-bench (i7-class laptop):
+Per-bench (i7-class laptop, post-Phase G.1 verification):
 
-| Operation | Time |
-|-----------|------|
-| Single `apply_currency` (basic orb) | 244-563 ns |
-| Single `apply_currency` via trait object | 293 ns |
-| `plan_depth_1_top_3` (rules-only fast path) | 1.35 µs |
-| `plan_depth_3_top_3` (full beam) | 3.08 µs |
-| `plan_depth_5_width_8` (stress) | 4.95 µs |
+| Operation | Time | Budget | Margin |
+|-----------|------|--------|--------|
+| Single `apply_currency` (basic orb) | 244-563 ns | — | — |
+| `plan_depth_1_top_3` (rules-only) | 46 µs | 1 ms | 21× |
+| `plan_depth_3_top_3` (full beam, mc=1) | 46 µs | 50 ms | 1086× |
+| `plan_depth_3_top_3_mc50` (full MC) | 139 µs | 5 ms | 35× |
+| `plan_depth_5_width_8` (stress, mc=1) | 151 µs | 500 ms | 3311× |
 
-These are 4-5 orders of magnitude under the ADR-0007 budget of 2s for
-streaming first results. Even at depth=8 width=5 with 200 MC samples
-per candidate, the math says we're well inside the budget.
+Pre-Phase-A.5 the depth-3 baseline was ~3 µs. The 113-rule catalogue
+expansion (Phase A.5) added ~43 µs of per-node rule eval; this is
+the dominant cost in the post-Phase-A planner, not the MC layer
+(which adds only ~93 µs / 50 samples ≈ 1.8 µs per sample).
+
+### Memoization assessment (Phase G.1)
+
+The original Phase G.1 plan called for beam-search memoization
+(canonicalize `Item` by tier-set, drop Divine values) to share
+simulator results across beam siblings. Measured numbers show this
+is unnecessary at v1 scale:
+
+- depth-3 with 50 MC samples is **35× under** its 5 ms budget
+- depth-5 width-8 stress is **3311× under** its 500 ms budget
+
+Memoization would add cache-invalidation complexity (per-bundle
+canonical-form changes when the seed_rules / strategies change) for
+no measurable benefit. Deferred to v1.x as a "if needed" optimization
+once real plugin workloads land.
 
 ## Critical Test: Canonical Rediscovery
 
