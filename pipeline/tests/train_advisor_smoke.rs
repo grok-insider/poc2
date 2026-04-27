@@ -101,6 +101,23 @@ allow_hybrid = true
         "output should include training metrics"
     );
 
+    // Round-trip the artefact through the desktop loader's deserializer
+    // to guard against schema drift between the binary's output and the
+    // `TrainedModelArtefact` type the loader expects.
+    let dir = std::env::temp_dir().join("poc2_train_advisor_smoke_dir");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let dest = dir.join("models.json");
+    std::fs::copy(&tmp_out, &dest).unwrap();
+    let (cache, loaded, skipped) = poc2_advisor::training::load_cache_from_dir(&dir);
+    assert_eq!(skipped, 0, "loader should accept binary output");
+    assert_eq!(
+        loaded, 1,
+        "loader should ingest the single artefact written by the binary"
+    );
+    assert_eq!(cache.len(), 1, "cache should hold one (goal × class) entry");
+
+    std::fs::remove_dir_all(&dir).ok();
     std::fs::remove_file(&tmp_corpus).ok();
     std::fs::remove_file(&tmp_out).ok();
 }

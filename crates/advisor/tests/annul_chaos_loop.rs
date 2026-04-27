@@ -177,6 +177,8 @@ fn b4_loop_recurring_recommendation_carries_loop_estimate() {
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
         plugin_dispatch: None,
+        base_registry: None,
+        trained_models: None,
         config: BeamConfig {
             width: 6,
             depth: 2,
@@ -185,6 +187,7 @@ fn b4_loop_recurring_recommendation_carries_loop_estimate() {
             seed: 0,
             mc_samples: 1,
             weights: ScoringWeights::default(),
+            trained_uplift_weight: 1000.0,
         },
     };
     let recs = plan(&input);

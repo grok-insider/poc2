@@ -158,6 +158,8 @@ fn run_plan(item: Item, registry: ModRegistry, risk: f64) -> Vec<poc2_advisor::R
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
         plugin_dispatch: None,
+        base_registry: None,
+        trained_models: None,
         config: BeamConfig {
             width: 6,
             depth: 2,
@@ -166,6 +168,7 @@ fn run_plan(item: Item, registry: ModRegistry, risk: f64) -> Vec<poc2_advisor::R
             seed: 0,
             mc_samples: 1,
             weights: ScoringWeights::default(),
+            trained_uplift_weight: 1000.0,
         },
     };
     plan(&input)

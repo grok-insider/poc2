@@ -89,6 +89,8 @@ fn run_plan(item: Item) -> Vec<poc2_advisor::Recommendation> {
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
         plugin_dispatch: None,
+        base_registry: None,
+        trained_models: None,
         config: BeamConfig {
             width: 5,
             depth: 3,
@@ -97,6 +99,7 @@ fn run_plan(item: Item) -> Vec<poc2_advisor::Recommendation> {
             seed: 0,
             mc_samples: 1,
             weights: ScoringWeights::default(),
+            trained_uplift_weight: 1000.0,
         },
     };
     plan(&input)

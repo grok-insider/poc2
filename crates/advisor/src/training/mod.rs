@@ -18,12 +18,17 @@
 //! state shape and the v3 plan's afterstate-aliasing policy
 //! (`docs/81-engine-training-and-rule-encoding-plan.md` §6).
 
+pub mod artefact;
 pub mod hybrid;
 pub mod imitation;
 pub mod metrics;
 pub mod model_learner;
 pub mod value_iteration;
 
+pub use artefact::{
+    load_artefact_file, load_cache_from_dir, ArtefactLoadOutcome, TrainedModelArtefact,
+    TrainingArtefactMetrics,
+};
 pub use hybrid::{
     goal_hash, score_with_trained_policy, sim_to_real_gap, trained_model_from, QEntry, RewardKind,
     SimToRealVerdict, TrainedModel, TrainedModelCache,

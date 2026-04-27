@@ -90,6 +90,9 @@
 - Build frontend: `cd apps/desktop && pnpm build`.
 - Run desktop dev app: `cd apps/desktop && pnpm tauri:dev`.
 - Build data bundle: `cargo run --release -p poc2-pipeline -- build --out ~/.config/poc2/bundles/poc2.bundle.json.gz --patch 0.4.0`.
+- Train advisor models (smoke ~1 min): `cargo run --release --bin train-advisor -- --corpus pipeline/data/training_goals.toml --out ~/.config/poc2/cache/trained_models/poc2-trained-models-0.4.0.json --samples 1000`.
+- Train advisor models (production ~hours): same command with `--samples 100000`. The desktop loader picks up artefacts from `~/.config/poc2/cache/trained_models/` on the next bundle reload; the planner consults them via `PlanInput.trained_models`.
+- Inspect trained-model cache status: call the `trained_model_status` Tauri command from the desktop UI (or via `cargo run --bin poc2-desktop` then DevTools).
 
 ## Verification Expectations
 

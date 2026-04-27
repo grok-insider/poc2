@@ -31,7 +31,7 @@ use clap::Parser;
 use poc2_advisor::action::AdvisorAction;
 use poc2_advisor::training::{
     learn_transition_model, trained_model_from, value_iteration, CraftingTask, LearnConfig,
-    RewardKind, TrainedModel, ValueIterationConfig,
+    RewardKind, TrainedModelArtefact, TrainingArtefactMetrics, ValueIterationConfig,
 };
 use poc2_advisor::{featurize, Goal};
 use poc2_engine::base_registry::BaseRegistry;
@@ -44,7 +44,7 @@ use poc2_engine::registry::ModRegistry;
 use poc2_engine::ENGINE_SCHEMA_VERSION;
 use poc2_market::DivEquiv;
 use poc2_strategies::{Target, TargetSpec};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use smallvec::smallvec;
 
 /// Top-level CLI shape.
@@ -137,26 +137,9 @@ struct CorpusFile {
     goal: Vec<CorpusGoal>,
 }
 
-/// Output artefact: list of trained models keyed by goal id.
-#[derive(Debug, Clone, Serialize)]
-struct TrainedModelArtefact {
-    goal_id: String,
-    display_name: String,
-    item_class: String,
-    model_path_length: TrainedModel,
-    model_cost: TrainedModel,
-    metrics: TrainingArtefactMetrics,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct TrainingArtefactMetrics {
-    states_visited: usize,
-    transitions_learned: usize,
-    value_iteration_iters_path: u32,
-    value_iteration_iters_cost: u32,
-    initial_state_v_path: f64,
-    initial_state_v_cost: f64,
-}
+// Output artefact and metrics structs are re-exported from
+// `poc2_advisor::training::artefact` so the desktop loader can
+// rehydrate the JSON without duplicating the schema.
 
 fn lift_target(spec: &CorpusTargetSpec) -> TargetSpec {
     TargetSpec {

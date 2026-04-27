@@ -148,14 +148,10 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
 /// `recommend` invocation) dominate writes (manual reloads).
 struct BundleState {
     registry: Arc<ModRegistry>,
-    /// Indexed `bundle.base_items` (M14.2). Currently held but not yet
-    /// consumed by Tauri commands; M14.5 (Catalyst class gate) and M14.6
-    /// (Bone subtype gate) thread it through `apply_currency_with_bases`
-    /// so the engine can resolve real `BaseTypeId → ItemClassId` for
-    /// pipeline-built items. Until then, advisor commands run against
-    /// fixture-shaped items whose `Item.base` is a class-id placeholder
-    /// and falls through `class_for_item`'s back-compat path.
-    #[allow(dead_code)]
+    /// Indexed `bundle.base_items` (M14.2). Threaded through to
+    /// `PlanInput.base_registry` so the trained-policy uplift can
+    /// resolve real `BaseTypeId → ItemClassId` for pipeline-built
+    /// items rather than relying on the v3 placeholder convention.
     base_registry: Arc<poc2_engine::BaseRegistry>,
     strategies: Arc<StrategyRegistry>,
     resolver: Arc<DefaultCurrencyResolver>,
@@ -168,6 +164,14 @@ struct BundleState {
     /// needed". The frontend reads this via `bundle_migration_status`
     /// to render the rebuild dialog.
     migration_warning: Option<BundleMigrationWarning>,
+    /// M16.4 — pre-trained Q-table cache, loaded from
+    /// `~/.config/poc2/cache/trained_models/` on bundle reload.
+    /// Empty when the user hasn't run `train-advisor` yet; the planner
+    /// silently falls back to v2 heuristic ranking in that case.
+    trained_models: Arc<poc2_advisor::training::TrainedModelCache>,
+    /// Diagnostic counts surfaced via `trained_model_status`.
+    trained_models_loaded: usize,
+    trained_models_skipped: usize,
 }
 
 /// Structured payload for the v1 → v2 (or future schema bumps)
@@ -459,6 +463,38 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
         .with_essences(essences)
         .with_catalysts(catalysts);
 
+    // M16.4 — load trained-model artefacts from
+    // `~/.config/poc2/cache/trained_models/`. The cache stays empty
+    // when no `train-advisor` output has been written yet, when the
+    // state directory can't be resolved (no $HOME / $XDG_CONFIG_HOME),
+    // or when every artefact failed to parse. The planner silently
+    // falls back to v2 heuristic ranking in any of those cases.
+    let (trained_models, trained_models_loaded, trained_models_skipped) = match trained_models_dir()
+    {
+        Some(dir) => {
+            let (cache, loaded, skipped) = poc2_advisor::training::load_cache_from_dir(&dir);
+            if loaded > 0 {
+                tracing::info!(
+                    dir = %dir.display(),
+                    loaded,
+                    skipped,
+                    "trained-model cache populated"
+                );
+            } else if dir.exists() {
+                tracing::info!(
+                    dir = %dir.display(),
+                    skipped,
+                    "trained-model cache directory present but empty / all skipped"
+                );
+            }
+            (cache, loaded, skipped)
+        }
+        None => {
+            tracing::debug!("no $HOME / $XDG_CONFIG_HOME — trained-model cache disabled");
+            (poc2_advisor::training::TrainedModelCache::new(), 0, 0)
+        }
+    };
+
     BundleState {
         registry: Arc::new(registry),
         base_registry: Arc::new(base_registry),
@@ -468,6 +504,9 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
         bundle_patch,
         asset_seeds: Arc::new(asset_seeds),
         migration_warning,
+        trained_models: Arc::new(trained_models),
+        trained_models_loaded,
+        trained_models_skipped,
     }
 }
 
@@ -539,6 +578,13 @@ fn poc2_state_dir() -> Option<PathBuf> {
         return Some(Path::new(&xdg).join("poc2"));
     }
     std::env::var_os("HOME").map(|home| Path::new(&home).join(".config/poc2"))
+}
+
+/// Resolve the trained-model cache directory
+/// (`~/.config/poc2/cache/trained_models/`). Returns `None` when the
+/// state directory itself can't be resolved.
+fn trained_models_dir() -> Option<PathBuf> {
+    poc2_state_dir().map(|dir| dir.join("cache").join("trained_models"))
 }
 
 fn build_asset_seeds(bundle: &Bundle) -> Vec<AssetEntry> {
@@ -823,6 +869,12 @@ fn essence_suffix(name: &str) -> String {
 /// Search outcome variant of [`try_load_bundle`] for the bundle-search
 /// helpers. Distinguishes a successful load from "I found a bundle but
 /// it's the wrong schema (rebuild needed)" vs "no bundle at all".
+///
+/// `large_enum_variant` is allowed because each instance is a
+/// short-lived stack value: loader returns it, the caller pattern-
+/// matches once and moves the `Bundle` into `BundleState`. Boxing
+/// would force a heap alloc on every load with no other benefit.
+#[allow(clippy::large_enum_variant)]
 enum BundleSearchOutcome {
     Loaded(Bundle, PathBuf),
     SchemaMismatch {
@@ -981,6 +1033,10 @@ fn load_user_strategies(out: &mut Vec<poc2_strategies::Strategy>) {
 /// it was built against an older schema (rebuild needed)", and "other
 /// failure (read/parse/validation)". The desktop UI surfaces the first
 /// two via dedicated dialogs; "other" stays as a tracing warning.
+///
+/// `large_enum_variant` is allowed for the same reason as
+/// [`BundleSearchOutcome`].
+#[allow(clippy::large_enum_variant)]
 enum BundleLoadOutcome {
     Loaded(Bundle, PathBuf),
     /// Bundle parsed but its `schema_version` doesn't match
@@ -1089,6 +1145,41 @@ fn bundle_migration_status(
 ) -> Result<Option<BundleMigrationWarning>, String> {
     let bundle = state.bundle.read().map_err(|e| e.to_string())?;
     Ok(bundle.migration_warning.clone())
+}
+
+/// M16.4 — surface the trained-model cache status for the UI.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+struct TrainedModelStatus {
+    /// How many `(goal × class)` models are loaded into the cache.
+    /// Each model represents one trained goal under one item class.
+    models_loaded: usize,
+    /// How many artefact files were skipped on load (parse errors,
+    /// schema mismatches, etc.).
+    files_skipped: usize,
+    /// Directory the cache was loaded from.
+    cache_dir: String,
+    /// True iff the cache directory exists on disk.
+    cache_dir_exists: bool,
+}
+
+#[tauri::command]
+fn trained_model_status(
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<TrainedModelStatus, String> {
+    let bundle = state.bundle.read().map_err(|e| e.to_string())?;
+    let cache_dir = trained_models_dir();
+    let exists = cache_dir.as_ref().is_some_and(|p| p.exists());
+    let path_str = cache_dir
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<no $HOME / $XDG_CONFIG_HOME>".into());
+    Ok(TrainedModelStatus {
+        models_loaded: bundle.trained_models_loaded,
+        files_skipped: bundle.trained_models_skipped,
+        cache_dir: path_str,
+        cache_dir_exists: exists,
+    })
 }
 
 #[tauri::command]
@@ -1487,6 +1578,8 @@ fn recommend(
         stash: &args.stash,
         patch,
         plugin_dispatch: Some(&*plugin_guard as &dyn poc2_strategies::PluginPredicateDispatch),
+        base_registry: Some(bundle_guard.base_registry.as_ref()),
+        trained_models: Some(bundle_guard.trained_models.as_ref()),
         config: BeamConfig {
             width: args.top_n.max(3),
             depth: args.depth.max(1),
@@ -1495,6 +1588,7 @@ fn recommend(
             seed: 0,
             mc_samples: 50,
             weights: poc2_advisor::ScoringWeights::default(),
+            trained_uplift_weight: 1000.0,
         },
     };
     let recommendations = plan(&input);
@@ -2908,6 +3002,8 @@ async fn recommend_streaming(
             stash: &stash,
             patch,
             plugin_dispatch: Some(&*plugin_guard as &dyn poc2_strategies::PluginPredicateDispatch),
+            base_registry: Some(bundle_guard.base_registry.as_ref()),
+            trained_models: Some(bundle_guard.trained_models.as_ref()),
             config: BeamConfig {
                 width: top_n.max(3),
                 depth: depth.max(1),
@@ -2916,6 +3012,7 @@ async fn recommend_streaming(
                 seed: 0,
                 mc_samples: 50,
                 weights: poc2_advisor::ScoringWeights::default(),
+                trained_uplift_weight: 1000.0,
             },
         };
         // Run depth-1 → depth-3 → final-depth, with the final being
@@ -3077,6 +3174,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ping,
             bundle_migration_status,
+            trained_model_status,
             asset_manifest,
             asset_status,
             cache_all_assets,

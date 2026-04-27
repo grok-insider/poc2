@@ -30,6 +30,7 @@ smallvec.workspace = true
 insta.workspace = true
 proptest.workspace = true
 criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.13"
 
 [[bench]]
 name = "advisor_plan"

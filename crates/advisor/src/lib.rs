@@ -99,6 +99,8 @@ pub fn recommend_quick(
         stash,
         patch,
         plugin_dispatch: None,
+        base_registry: None,
+        trained_models: None,
         config: BeamConfig {
             width: top_n.max(3),
             depth: 1,
@@ -107,6 +109,7 @@ pub fn recommend_quick(
             seed: 0,
             mc_samples: 1, // quick path skips MC
             weights: ScoringWeights::default(),
+            trained_uplift_weight: 1000.0,
         },
     };
     plan(&input)
@@ -158,6 +161,8 @@ pub fn plan_streaming(
             stash: input.stash,
             patch: input.patch,
             plugin_dispatch: input.plugin_dispatch,
+            base_registry: input.base_registry,
+            trained_models: input.trained_models,
             config: input.config,
         };
         local_input.config.depth = d;

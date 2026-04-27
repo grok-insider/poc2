@@ -103,6 +103,8 @@ fn bench_plan(c: &mut Criterion) {
                 stash: &stash,
                 patch: PatchVersion::PATCH_0_4_0,
                 plugin_dispatch: None,
+                base_registry: None,
+                trained_models: None,
                 config: BeamConfig {
                     width: 5,
                     depth: 1,
@@ -111,6 +113,7 @@ fn bench_plan(c: &mut Criterion) {
                     seed: 0,
                     mc_samples: 1,
                     weights: ScoringWeights::default(),
+                    trained_uplift_weight: 1000.0,
                 },
             };
             black_box(plan(&input));
@@ -131,6 +134,8 @@ fn bench_plan(c: &mut Criterion) {
                 stash: &stash,
                 patch: PatchVersion::PATCH_0_4_0,
                 plugin_dispatch: None,
+                base_registry: None,
+                trained_models: None,
                 config: BeamConfig {
                     width: 5,
                     depth: 3,
@@ -139,6 +144,7 @@ fn bench_plan(c: &mut Criterion) {
                     seed: 0,
                     mc_samples: 1,
                     weights: ScoringWeights::default(),
+                    trained_uplift_weight: 1000.0,
                 },
             };
             black_box(plan(&input));
@@ -160,6 +166,8 @@ fn bench_plan(c: &mut Criterion) {
                 stash: &stash,
                 patch: PatchVersion::PATCH_0_4_0,
                 plugin_dispatch: None,
+                base_registry: None,
+                trained_models: None,
                 config: BeamConfig {
                     width: 5,
                     depth: 3,
@@ -168,6 +176,7 @@ fn bench_plan(c: &mut Criterion) {
                     seed: 0,
                     mc_samples: 50,
                     weights: ScoringWeights::default(),
+                    trained_uplift_weight: 1000.0,
                 },
             };
             black_box(plan(&input));
@@ -188,6 +197,8 @@ fn bench_plan(c: &mut Criterion) {
                 stash: &stash,
                 patch: PatchVersion::PATCH_0_4_0,
                 plugin_dispatch: None,
+                base_registry: None,
+                trained_models: None,
                 config: BeamConfig {
                     width: 8,
                     depth: 5,
@@ -196,6 +207,7 @@ fn bench_plan(c: &mut Criterion) {
                     seed: 0,
                     mc_samples: 1,
                     weights: ScoringWeights::default(),
+                    trained_uplift_weight: 1000.0,
                 },
             };
             black_box(plan(&input));

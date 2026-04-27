@@ -17,7 +17,9 @@
 //! `1.0 if the engine returned Ok else 0.0`. M5+ extends to true Monte
 //! Carlo with `mc_samples` per candidate.
 
+use poc2_engine::base_registry::BaseRegistry;
 use poc2_engine::currency::CurrencyResolver;
+use poc2_engine::ids::ItemClassId;
 use poc2_engine::item::Item;
 use poc2_engine::omen::OmenSet;
 use poc2_engine::patch::PatchVersion;
@@ -28,11 +30,13 @@ use poc2_strategies::{PluginPredicateDispatch, PredicateContext, StrategyRegistr
 
 use crate::action::AdvisorAction;
 use crate::candidate::{generate_candidates_with_goal, Candidate};
+use crate::featurize::featurize;
 use crate::goal::{is_satisfied_with_ctx, should_abandon_with_ctx, Goal};
 use crate::recommendation::{LoopEstimate, Recommendation, RecommendationSource};
 use crate::scorer::{action_cost, occupancy_adjustment, score, ScoringWeights};
 use crate::simulator::simulate_n;
 use crate::stash::Stash;
+use crate::training::{goal_hash, score_with_trained_policy, TrainedModelCache};
 
 /// Beam-search configuration.
 #[derive(Debug, Clone, Copy)]
@@ -54,6 +58,13 @@ pub struct BeamConfig {
     pub mc_samples: u32,
     /// Scoring weights.
     pub weights: ScoringWeights,
+    /// M16.4 — trained-policy uplift weight. When a [`TrainedModelCache`]
+    /// hit lookup returns `Q(s, a)` for a candidate's first action, the
+    /// node score becomes `q * trained_uplift_weight + base_score`. The
+    /// default `1000.0` is large enough that any trained-policy decision
+    /// dominates the v2 heuristic score (which lives in `~[-100, 100]`),
+    /// while letting the heuristic rank the within-Q-tier ties.
+    pub trained_uplift_weight: f64,
 }
 
 impl Default for BeamConfig {
@@ -66,6 +77,7 @@ impl Default for BeamConfig {
             seed: 0,
             mc_samples: 50,
             weights: ScoringWeights::default(),
+            trained_uplift_weight: 1000.0,
         }
     }
 }
@@ -135,6 +147,18 @@ pub struct PlanInput<'a> {
     /// means the planner runs without plugin custom predicates;
     /// every `ItemPredicate::Custom` evaluates to false.
     pub plugin_dispatch: Option<&'a dyn PluginPredicateDispatch>,
+    /// M14.5/M14.6 — base-id → item-class registry for currency gates
+    /// that need to know an item's class without consulting `Item.base`'s
+    /// placeholder convention. `None` falls back to the back-compat path
+    /// where `ItemClassId::from(item.base.as_str())` is treated as the
+    /// class id directly. Tests typically pass `None`.
+    pub base_registry: Option<&'a BaseRegistry>,
+    /// M16.4 — pre-trained Q-table cache. When supplied and the cache
+    /// has a model matching `(goal_hash(&goal), item_class)`, the
+    /// planner uses [`score_with_trained_policy`] to assign Q-values to
+    /// candidate first-actions; Q dominates and the v2 heuristic score
+    /// becomes a tiebreaker. `None` means the planner runs unchanged.
+    pub trained_models: Option<&'a TrainedModelCache>,
 }
 
 /// Build a [`PredicateContext`] for `item` against the planner inputs +
@@ -340,7 +364,51 @@ fn score_node(node: &PlanNode, input: &PlanInput<'_>, cfg: &BeamConfig) -> f64 {
     // (low risk) feels the protection bonus more strongly than a
     // greedy user; this keeps the variance/protection signals aligned.
     let risk_factor = 1.0 - cfg.risk.clamp(0.0, 1.0).powi(2);
-    base + node.occupancy_score_delta * risk_factor
+    let heuristic = base + node.occupancy_score_delta * risk_factor;
+
+    // M16.4 — trained-policy uplift. When a model exists for this
+    // (goal, item-class) and the lookup hits the (state, first-action)
+    // pair, blend the Q-value into the score. Q dominates the
+    // heuristic; the heuristic stays as a tiebreaker. Lookup miss →
+    // pure heuristic ranking.
+    if let Some(q) = trained_policy_q(node, input) {
+        return q * cfg.trained_uplift_weight + heuristic;
+    }
+    heuristic
+}
+
+/// Look up `Q(featurize(node.item, goal), node.path[0])` in the trained
+/// model cache, when one exists for the current `(goal, item-class)`.
+/// Returns `None` when:
+///
+/// - no cache supplied
+/// - node is the root (no first action yet)
+/// - cache miss for the goal hash + class
+/// - the trained model doesn't have an entry for this `(state, action)`
+///
+/// The advisor uses `None` as the signal to fall back to v2 heuristic
+/// scoring.
+fn trained_policy_q(node: &PlanNode, input: &PlanInput<'_>) -> Option<f64> {
+    let cache = input.trained_models?;
+    let first_action = node.path.first()?;
+    let item_class = item_class_for(&node.item, input.base_registry);
+    let goal_h = goal_hash(&input.goal);
+    let model = cache.lookup(goal_h, &item_class)?;
+    let fv = featurize(&node.item, &input.goal, input.registry);
+    score_with_trained_policy(model, fv, first_action)
+}
+
+/// Resolve `Item.base` → `ItemClassId`, honouring [`BaseRegistry`]
+/// when supplied and falling back to the v3 placeholder convention
+/// (`Item.base` *is* the class id) otherwise. Mirrors the engine's
+/// `class_for_item` helper which is `pub(crate)`.
+fn item_class_for(item: &Item, base_registry: Option<&BaseRegistry>) -> ItemClassId {
+    if let Some(reg) = base_registry {
+        if let Some(class) = reg.class_of(&item.base) {
+            return class.clone();
+        }
+    }
+    ItemClassId::from(item.base.as_str())
 }
 
 /// Roughly: fraction of the goal's target specs that are satisfied.
@@ -523,6 +591,8 @@ mod tests {
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
             plugin_dispatch: None,
+            base_registry: None,
+            trained_models: None,
             config: BeamConfig {
                 width: 3,
                 depth: 1,
@@ -579,6 +649,8 @@ mod tests {
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
             plugin_dispatch: None,
+            base_registry: None,
+            trained_models: None,
             config: BeamConfig::default(),
         };
         let recs = plan(&input);
@@ -605,6 +677,8 @@ mod tests {
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
             plugin_dispatch: None,
+            base_registry: None,
+            trained_models: None,
             config: BeamConfig::default(),
         };
         let recs = plan(&input);
@@ -619,5 +693,148 @@ mod tests {
                     )
             );
         }
+    }
+
+    // ---------------------------------------------------------------
+    // M16.4 — trained-policy uplift wiring
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn trained_policy_q_returns_none_without_cache() {
+        // No cache supplied → trained_policy_q must return None and the
+        // planner falls back to v2 heuristic ranking (already tested
+        // above). This is the regression guard against accidentally
+        // forcing the trained-policy path when callers omit the field.
+        let registry = ModRegistry::from_mods(vec![], vec![]);
+        let resolver = DefaultCurrencyResolver::new();
+        let rules = RuleSet::default();
+        let strategies = StrategyRegistry::default();
+        let valuator = Valuator::default();
+        let stash = Stash::unlimited();
+        let input = PlanInput {
+            item: empty_item(Rarity::Normal),
+            goal: three_es_prefix_goal(),
+            rules: &rules,
+            strategies: &strategies,
+            registry: &registry,
+            resolver: &resolver,
+            valuator: &valuator,
+            stash: &stash,
+            patch: PatchVersion::PATCH_0_4_0,
+            plugin_dispatch: None,
+            base_registry: None,
+            trained_models: None,
+            config: BeamConfig::default(),
+        };
+        let dummy_node = PlanNode::root(input.item.clone());
+        // Empty path → no first action → None even if a cache had one.
+        assert!(trained_policy_q(&dummy_node, &input).is_none());
+    }
+
+    /// Score a fresh `Normal`-rarity body armour through the planner
+    /// twice — once without a cache (baseline heuristic), once with a
+    /// cache that assigns an enormous Q to a *non-default* candidate.
+    /// Verify the trained policy successfully reorders the
+    /// recommendations.
+    #[test]
+    fn trained_policy_uplift_reorders_recommendations_for_in_set_action() {
+        use crate::training::value_iteration::ValueIterationResult;
+        use crate::training::{trained_model_from, RewardKind, TrainedModelCache};
+        use ahash::AHashMap;
+
+        let registry = ModRegistry::from_mods(vec![], vec![]);
+        let resolver = DefaultCurrencyResolver::new();
+        let rules = RuleSet::from_rules(poc2_rules::seed_rules());
+        let strategies = StrategyRegistry::default();
+        let valuator = Valuator::default();
+        let stash = Stash::unlimited();
+        let item = empty_item(Rarity::Normal);
+        let goal = three_es_prefix_goal();
+        let goal_h = goal_hash(&goal);
+
+        // Baseline run with no cache to discover what the planner
+        // generated as candidates and what the heuristic ranked them.
+        let baseline_input = PlanInput {
+            item: item.clone(),
+            goal: goal.clone(),
+            rules: &rules,
+            strategies: &strategies,
+            registry: &registry,
+            resolver: &resolver,
+            valuator: &valuator,
+            stash: &stash,
+            patch: PatchVersion::PATCH_0_4_0,
+            plugin_dispatch: None,
+            base_registry: None,
+            trained_models: None,
+            config: BeamConfig {
+                width: 8,
+                depth: 1,
+                top_n: 8,
+                ..BeamConfig::default()
+            },
+        };
+        let baseline = plan(&baseline_input);
+        assert!(baseline.len() >= 2, "need at least 2 recs for the test");
+        let baseline_top = baseline[0].action.clone();
+        // Pick the second-place action as the trained-policy
+        // pet-favourite; we want to verify the uplift can flip it to
+        // first place.
+        let underdog = baseline[1].action.clone();
+        assert_ne!(baseline_top, underdog);
+
+        // Build a model that assigns a huge Q value to `underdog` from
+        // the root state's featurization.
+        let root_fv = featurize(&item, &goal, &registry);
+        let mut q: AHashMap<(crate::featurize::FeatureVec, AdvisorAction), f64> = AHashMap::new();
+        q.insert((root_fv, underdog.clone()), 999.0);
+        let result = ValueIterationResult {
+            value: AHashMap::new(),
+            q,
+            iterations: 0,
+            final_delta: 0.0,
+        };
+        let model = trained_model_from(
+            goal_h,
+            ItemClassId::from("BodyArmour"),
+            poc2_data::BUNDLE_SCHEMA_VERSION,
+            poc2_engine::ENGINE_SCHEMA_VERSION,
+            RewardKind::PathLength,
+            &result,
+            None,
+        );
+        let mut cache = TrainedModelCache::new();
+        cache.insert(model);
+
+        let trained_input = PlanInput {
+            trained_models: Some(&cache),
+            item: item.clone(),
+            goal: goal.clone(),
+            rules: &rules,
+            strategies: &strategies,
+            registry: &registry,
+            resolver: &resolver,
+            valuator: &valuator,
+            stash: &stash,
+            patch: PatchVersion::PATCH_0_4_0,
+            plugin_dispatch: None,
+            base_registry: None,
+            config: BeamConfig {
+                width: 8,
+                depth: 1,
+                top_n: 8,
+                ..BeamConfig::default()
+            },
+        };
+        let trained = plan(&trained_input);
+        let trained_top = trained
+            .first()
+            .map(|r| r.action.clone())
+            .expect("cache-augmented run must produce a recommendation");
+        assert_eq!(
+            trained_top, underdog,
+            "trained-policy uplift should force the underdog to top: \
+             baseline={baseline:#?}, trained={trained:#?}"
+        );
     }
 }
