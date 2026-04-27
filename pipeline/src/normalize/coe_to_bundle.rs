@@ -428,6 +428,266 @@ pub fn unmatched_coe_mods(snapshot: &CoeSnapshot, bundle: &Bundle) -> Vec<String
     out
 }
 
+// ---------------------------------------------------------------------------
+// M14.7e: alias suggester
+// ---------------------------------------------------------------------------
+
+/// Where in the engine mod the suggestion's similarity score came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuggestionSource {
+    /// Score derived from `ModDefinition::name`.
+    Name,
+    /// Score derived from `ModDefinition::text_template` (placeholders stripped).
+    Template,
+}
+
+impl SuggestionSource {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Template => "template",
+        }
+    }
+}
+
+/// Single ranked candidate for an unmatched CoE mod.
+#[derive(Debug, Clone)]
+pub struct AliasCandidate {
+    pub engine_mod_id: String,
+    /// Token-Jaccard similarity in `[0.0, 1.0]`. Higher is better.
+    pub score: f64,
+    pub source: SuggestionSource,
+}
+
+/// Top-K alias suggestions for a single unmatched CoE mod display name.
+#[derive(Debug, Clone)]
+pub struct AliasSuggestion {
+    pub coe_name: String,
+    /// Sorted high → low score. Empty when no engine mod yielded a
+    /// non-zero overlap.
+    pub candidates: Vec<AliasCandidate>,
+}
+
+/// Tokenise a string into lowercased ASCII alphabetic words of length
+/// ≥ 3, dropping placeholder characters and digits. Used as the basic
+/// unit for the Jaccard similarity score below.
+fn tokens_for_similarity(s: &str) -> Vec<String> {
+    s.to_lowercase()
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|w| w.len() >= 3)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Token-Jaccard score: `|A ∩ B| / |A ∪ B|`. Returns `0.0` when
+/// either side is empty.
+fn token_jaccard(left: &[String], right: &[String]) -> f64 {
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let set_l: std::collections::HashSet<&String> = left.iter().collect();
+    let set_r: std::collections::HashSet<&String> = right.iter().collect();
+    let inter = set_l.intersection(&set_r).count();
+    let union = set_l.union(&set_r).count();
+    if union == 0 {
+        0.0
+    } else {
+        // usize→f64 precision loss is irrelevant for token-set
+        // cardinalities (always small, well under 2^52).
+        #[allow(clippy::cast_precision_loss)]
+        let score = inter as f64 / union as f64;
+        score
+    }
+}
+
+/// Score one engine mod against the lowercased CoE display name and
+/// return the best `(score, source)` pair across both `name` and
+/// `text_template`. A score of `0.0` means no overlap; the suggester
+/// drops zero-score candidates.
+fn best_score_for_mod(coe_tokens: &[String], em: &ModDefinition) -> (f64, SuggestionSource) {
+    let mut best = (0.0_f64, SuggestionSource::Name);
+    if let Some(name) = em.name.as_deref() {
+        let s = token_jaccard(coe_tokens, &tokens_for_similarity(name));
+        if s > best.0 {
+            best = (s, SuggestionSource::Name);
+        }
+    }
+    if let Some(template) = em.text_template.as_deref() {
+        // Strip `{0}`-style placeholders before tokenising.
+        let cleaned: String = template
+            .chars()
+            .filter(|c| !matches!(*c, '{' | '}'))
+            .collect();
+        let s = token_jaccard(coe_tokens, &tokens_for_similarity(&cleaned));
+        if s > best.0 {
+            best = (s, SuggestionSource::Template);
+        }
+    }
+    best
+}
+
+/// For every CoE mod that the four-tier resolver could not match,
+/// score every engine mod by token-Jaccard similarity and return the
+/// top `top_k` candidates per name. `top_k` of `0` is treated as `1`.
+///
+/// Suggestions are sorted high → low score, ties broken by engine mod
+/// id ascending so the output is deterministic.
+#[must_use]
+pub fn suggest_aliases_for_unmatched(
+    snapshot: &CoeSnapshot,
+    bundle: &Bundle,
+    top_k: usize,
+) -> Vec<AliasSuggestion> {
+    let alias_table = load_coe_aliases();
+    let alias_idx = alias_table.build_index();
+    let essence_xref = build_essence_xref(snapshot);
+    let top_k = top_k.max(1);
+
+    let mut out = Vec::new();
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for coe_mod_id in snapshot.data.tiers.keys() {
+        let Some(coe_mod) = snapshot
+            .data
+            .modifiers
+            .seq
+            .iter()
+            .find(|m| &m.id_modifier == coe_mod_id)
+        else {
+            continue;
+        };
+        if resolve_engine_mod(coe_mod, &bundle.mods, &alias_idx, &essence_xref).is_some() {
+            continue;
+        }
+        // De-duplicate by display name so each unique unmatched name
+        // is suggested for only once even when CoE has multiple ids
+        // sharing it.
+        if !seen_names.insert(coe_mod.name_modifier.to_lowercase()) {
+            continue;
+        }
+
+        let coe_tokens = tokens_for_similarity(&coe_mod.name_modifier);
+        if coe_tokens.is_empty() {
+            continue;
+        }
+        let mut scored: Vec<AliasCandidate> = bundle
+            .mods
+            .iter()
+            .filter_map(|em| {
+                let (score, source) = best_score_for_mod(&coe_tokens, em);
+                if score <= 0.0 {
+                    return None;
+                }
+                Some(AliasCandidate {
+                    engine_mod_id: em.id.as_str().to_string(),
+                    score,
+                    source,
+                })
+            })
+            .collect();
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.engine_mod_id.cmp(&b.engine_mod_id))
+        });
+        scored.truncate(top_k);
+
+        out.push(AliasSuggestion {
+            coe_name: coe_mod.name_modifier.clone(),
+            candidates: scored,
+        });
+    }
+    // Stable order: sort by coe_name to make the rendered output
+    // diff-friendly.
+    out.sort_by(|a, b| a.coe_name.cmp(&b.coe_name));
+    out
+}
+
+/// Render `suggestions` as a TOML fragment that an operator can paste
+/// into `pipeline/data/coe_aliases.toml`. For each unmatched name we
+/// emit a commented header listing the top candidates, then a single
+/// `[[alias]]` block pre-filled with the highest-scoring candidate. A
+/// reviewer is expected to delete obviously-wrong blocks before
+/// committing.
+#[must_use]
+pub fn render_alias_suggestions_toml(suggestions: &[AliasSuggestion]) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    out.push_str(
+        "# === auto-suggested CoE→engine aliases ====================================\n",
+    );
+    out.push_str("# Generated by `cargo run -p poc2-pipeline -- coe-aliases-suggest`.\n");
+    out.push_str(
+        "# Review each block, delete wrong ones, then merge into coe_aliases.toml.\n",
+    );
+    out.push_str(
+        "# ===========================================================================\n\n",
+    );
+
+    for suggestion in suggestions {
+        let _ = writeln!(out, "# UNMATCHED: {}", suggestion.coe_name);
+        if suggestion.candidates.is_empty() {
+            out.push_str("# (no engine mod scored above zero — manual lookup needed)\n\n");
+            continue;
+        }
+        out.push_str("# top suggestions:\n");
+        for (idx, cand) in suggestion.candidates.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                "#   {}. {} (score={:.2}, via={})",
+                idx + 1,
+                cand.engine_mod_id,
+                cand.score,
+                cand.source.as_str()
+            );
+        }
+        let top = &suggestion.candidates[0];
+        out.push_str("[[alias]]\n");
+        let _ = writeln!(
+            out,
+            "coe_name = \"{}\"",
+            escape_toml_string(&suggestion.coe_name)
+        );
+        let _ = writeln!(
+            out,
+            "engine_mod_id = \"{}\"",
+            escape_toml_string(&top.engine_mod_id)
+        );
+        let _ = writeln!(
+            out,
+            "note = \"auto-suggested (score={:.2}, via {}); review before commit\"\n",
+            top.score,
+            top.source.as_str()
+        );
+    }
+    out
+}
+
+/// Minimal TOML basic-string escape: backslash, quote, and ASCII
+/// control characters. Sufficient for CoE display strings (no embedded
+/// quotes expected, but defensive escaping keeps the output valid).
+fn escape_toml_string(input: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04X}", ch as u32);
+            }
+            ch => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Convert a CoE base-group name like `"Body Armours"` to our
 /// internal `ItemClassId` (`"BodyArmour"`).
 fn item_class_id_from_bgroup_name(name: &str) -> ItemClassId {
@@ -640,5 +900,206 @@ mod tests {
         assert_eq!(r.total_matched(), 90);
         assert_eq!(r.total_seen(), 100);
         assert!((r.match_rate() - 0.9).abs() < 1e-9);
+    }
+
+    // ----------------------------------------------------------------
+    // M14.7e — alias suggester
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn token_jaccard_basic_overlap() {
+        let life_a = vec!["maximum".to_string(), "life".to_string()];
+        let life_b = vec!["maximum".to_string(), "life".to_string()];
+        assert!((token_jaccard(&life_a, &life_b) - 1.0).abs() < 1e-9);
+        let mana = vec!["maximum".to_string(), "mana".to_string()];
+        // |{maximum}| / |{maximum, life, mana}| = 1/3
+        let partial = token_jaccard(&life_a, &mana);
+        assert!((partial - 1.0 / 3.0).abs() < 1e-9, "got {partial}");
+        let empty: Vec<String> = vec![];
+        assert!(token_jaccard(&life_a, &empty).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tokens_for_similarity_drops_short_and_digits() {
+        let toks = tokens_for_similarity("+# to maximum Life {0}");
+        assert_eq!(toks, vec!["maximum".to_string(), "life".to_string()]);
+    }
+
+    #[test]
+    fn best_score_for_mod_prefers_higher_overlap_template_over_name() {
+        let coe_tokens = tokens_for_similarity("+# to maximum life");
+        // Name has zero overlap, template fully covers the CoE tokens.
+        let em = mk_engine_mod("MaxLife1", Some("Vitality"), Some("+{0} to Maximum Life"));
+        let (score, source) = best_score_for_mod(&coe_tokens, &em);
+        assert!(score > 0.5, "expected high overlap, got {score}");
+        assert_eq!(source, SuggestionSource::Template);
+    }
+
+    fn mk_snapshot_with_one_unmatched() -> CoeSnapshot {
+        // Snapshot with a single CoE mod that the resolver can't match
+        // against the engine mods we'll supply in the bundle below.
+        // CoeData has no Default derive (it's deserialise-driven), so
+        // construct each section explicitly with empty `seq`s.
+        use crate::sources::coe::{CoeData, Section};
+        let coe_data = CoeData {
+            bitems: Section { seq: vec![] },
+            bases: Section { seq: vec![] },
+            bgroups: Section { seq: vec![] },
+            modifiers: Section {
+                seq: vec![mk_coe_mod("9001", "+# to maximum Life")],
+            },
+            mgroups: Section { seq: vec![] },
+            mtypes: Section { seq: vec![] },
+            catalysts: Section { seq: vec![] },
+            essences: Section { seq: vec![] },
+            basemods: std::collections::BTreeMap::new(),
+            modbases: std::collections::BTreeMap::new(),
+            tiers: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert("9001".to_string(), std::collections::BTreeMap::new());
+                m
+            },
+        };
+        CoeSnapshot {
+            data: coe_data,
+            revisions: poc2_data::SourceRevisions::default(),
+        }
+    }
+
+    fn empty_bundle_for_test() -> Bundle {
+        Bundle::empty(poc2_engine::patch::PatchVersion::PATCH_0_4_0, "test")
+    }
+
+    #[test]
+    fn suggest_picks_top_candidate_by_token_overlap() {
+        let snapshot = mk_snapshot_with_one_unmatched();
+        let mut bundle = empty_bundle_for_test();
+        // Both engine mods are deliberately constructed so that the
+        // four-tier resolver fails:
+        //   - name has no substring overlap with "+# to maximum life"
+        //   - template includes at least one extra word that is NOT in
+        //     the needle, so `templates_compatible` (which requires
+        //     subset) returns false
+        // …but token-Jaccard still picks the more relevant candidate.
+        bundle.mods.push(mk_engine_mod(
+            "VitalityRoll",
+            Some("VitalityRoll"),
+            // tokens: {bonus, maximum, life, increase}; needle tokens
+            // {maximum, life} ⇒ intersection = 2, union = 4 ⇒ J=0.5
+            Some("+{0} bonus Maximum Life increase"),
+        ));
+        bundle.mods.push(mk_engine_mod(
+            "ManaRoll",
+            Some("ManaRoll"),
+            // tokens: {bonus, maximum, mana, increase}; needle tokens
+            // {maximum, life} ⇒ intersection = 1, union = 5 ⇒ J=0.2
+            Some("+{0} bonus Maximum Mana increase"),
+        ));
+
+        let suggestions = suggest_aliases_for_unmatched(&snapshot, &bundle, 2);
+        assert_eq!(suggestions.len(), 1, "expected one unmatched suggestion");
+        let s = &suggestions[0];
+        assert_eq!(s.coe_name, "+# to maximum Life");
+        assert!(!s.candidates.is_empty(), "expected at least one candidate");
+        assert_eq!(
+            s.candidates[0].engine_mod_id, "VitalityRoll",
+            "highest token-overlap should win"
+        );
+        assert!(
+            s.candidates[0].score > s.candidates[1].score,
+            "first candidate should outscore second"
+        );
+    }
+
+    #[test]
+    fn suggest_skips_already_matched_via_resolver() {
+        let snapshot = mk_snapshot_with_one_unmatched();
+        let mut bundle = empty_bundle_for_test();
+        // This engine mod's name substring-matches the CoE name, so the
+        // four-tier resolver succeeds and the suggester should skip it.
+        bundle
+            .mods
+            .push(mk_engine_mod("MaxLife", Some("+# to maximum Life"), None));
+        let suggestions = suggest_aliases_for_unmatched(&snapshot, &bundle, 3);
+        assert!(
+            suggestions.is_empty(),
+            "resolver-matched names should be skipped by suggester"
+        );
+    }
+
+    #[test]
+    fn suggest_de_duplicates_by_lowercased_name() {
+        let mut snapshot = mk_snapshot_with_one_unmatched();
+        // Add a second CoE mod with the same display name (different case)
+        // — only one suggestion should come out.
+        snapshot
+            .data
+            .modifiers
+            .seq
+            .push(mk_coe_mod("9002", "+# TO MAXIMUM LIFE"));
+        snapshot
+            .data
+            .tiers
+            .insert("9002".to_string(), std::collections::BTreeMap::new());
+        let mut bundle = empty_bundle_for_test();
+        // Engine mod constructed so resolver misses (template has an
+        // extra word) but suggester still scores it.
+        bundle.mods.push(mk_engine_mod(
+            "VitalityRoll",
+            Some("VitalityRoll"),
+            Some("+{0} bonus Maximum Life increase"),
+        ));
+        let suggestions = suggest_aliases_for_unmatched(&snapshot, &bundle, 1);
+        assert_eq!(suggestions.len(), 1, "expected de-duplication by name");
+    }
+
+    #[test]
+    fn render_emits_alias_block_with_top_candidate() {
+        let suggestions = vec![AliasSuggestion {
+            coe_name: "+# to maximum Life".into(),
+            candidates: vec![
+                AliasCandidate {
+                    engine_mod_id: "MaximumLife4".into(),
+                    score: 0.83,
+                    source: SuggestionSource::Template,
+                },
+                AliasCandidate {
+                    engine_mod_id: "VitalityLite".into(),
+                    score: 0.40,
+                    source: SuggestionSource::Name,
+                },
+            ],
+        }];
+        let toml_out = render_alias_suggestions_toml(&suggestions);
+        assert!(toml_out.contains("[[alias]]"));
+        assert!(toml_out.contains("coe_name = \"+# to maximum Life\""));
+        assert!(toml_out.contains("engine_mod_id = \"MaximumLife4\""));
+        assert!(toml_out.contains("via template"));
+        assert!(toml_out.contains("UNMATCHED: +# to maximum Life"));
+        assert!(
+            toml_out.contains("VitalityLite"),
+            "alternate candidate should appear in the comment block"
+        );
+    }
+
+    #[test]
+    fn render_handles_no_candidates_gracefully() {
+        let suggestions = vec![AliasSuggestion {
+            coe_name: "Some Wholly Unique CoE Mod".into(),
+            candidates: vec![],
+        }];
+        let toml_out = render_alias_suggestions_toml(&suggestions);
+        assert!(toml_out.contains("UNMATCHED: Some Wholly Unique CoE Mod"));
+        assert!(toml_out.contains("manual lookup needed"));
+        assert!(
+            !toml_out.contains("[[alias]]"),
+            "no [[alias]] block should be emitted when there are no candidates"
+        );
+    }
+
+    #[test]
+    fn escape_toml_string_handles_quotes_and_backslashes() {
+        assert_eq!(escape_toml_string(r#"a"b\c"#), r#"a\"b\\c"#);
+        assert_eq!(escape_toml_string("plain"), "plain");
     }
 }

@@ -68,6 +68,22 @@ enum Command {
         #[arg(long)]
         coe_file: Option<PathBuf>,
     },
+    /// Score every unmatched CoE mod against engine mods and emit a
+    /// TOML fragment of suggested `[[alias]]` blocks. Operators paste
+    /// the reviewed output into `pipeline/data/coe_aliases.toml`.
+    CoeAliasesSuggest {
+        /// Bundle path to load engine mods from. `.gz` auto-detected.
+        bundle: PathBuf,
+        /// Optional local CoE JSON file (skips the network fetch).
+        #[arg(long)]
+        coe_file: Option<PathBuf>,
+        /// How many candidates to print per unmatched name.
+        #[arg(long, default_value = "3")]
+        top_k: usize,
+        /// Write the rendered TOML to this file. Defaults to stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -128,8 +144,36 @@ async fn main() -> Result<()> {
         } => {
             run_diagnose_coe(&bundle, limit, coe_file.as_deref()).await?;
         }
+        Command::CoeAliasesSuggest {
+            bundle,
+            coe_file,
+            top_k,
+            out,
+        } => {
+            run_coe_aliases_suggest(&bundle, coe_file.as_deref(), top_k, out.as_deref()).await?;
+        }
     }
     Ok(())
+}
+
+/// Load a CoE snapshot from `--coe-file` (offline) or by fetching live
+/// from craftofexile.com. Shared by `diagnose-coe` and `coe-aliases-suggest`.
+async fn load_coe_snapshot_for_subcommand(
+    coe_file: Option<&std::path::Path>,
+) -> Result<poc2_pipeline::sources::coe::CoeSnapshot> {
+    use poc2_pipeline::sources::coe;
+    if let Some(path) = coe_file {
+        let raw = std::fs::read_to_string(path)?;
+        let json_part = raw.trim().strip_prefix("poecd=").unwrap_or(raw.trim());
+        let data: coe::CoeData = serde_json::from_str(json_part)?;
+        Ok(coe::CoeSnapshot {
+            data,
+            revisions: poc2_data::SourceRevisions::default(),
+        })
+    } else {
+        let client = poc2_pipeline::http::make_client();
+        Ok(coe::fetch(&client).await?)
+    }
 }
 
 async fn run_diagnose_coe(
@@ -138,21 +182,8 @@ async fn run_diagnose_coe(
     coe_file: Option<&std::path::Path>,
 ) -> Result<()> {
     use poc2_pipeline::normalize::coe_to_bundle::unmatched_coe_mods;
-    use poc2_pipeline::sources::coe;
     let bundle = poc2_data::io::read_bundle(bundle_path)?;
-
-    let snapshot = if let Some(path) = coe_file {
-        let raw = std::fs::read_to_string(path)?;
-        let json_part = raw.trim().strip_prefix("poecd=").unwrap_or(raw.trim());
-        let data: coe::CoeData = serde_json::from_str(json_part)?;
-        coe::CoeSnapshot {
-            data,
-            revisions: poc2_data::SourceRevisions::default(),
-        }
-    } else {
-        let client = poc2_pipeline::http::make_client();
-        coe::fetch(&client).await?
-    };
+    let snapshot = load_coe_snapshot_for_subcommand(coe_file).await?;
 
     let unmatched = unmatched_coe_mods(&snapshot, &bundle);
     let total_coe = snapshot.data.tiers.len();
@@ -186,6 +217,47 @@ async fn run_diagnose_coe(
     println!("\ntop {printed} unmatched CoE mod names (add aliases for high-freq entries):");
     for (name, count) in sorted.iter().take(printed) {
         println!("  {count:>4}× {name}");
+    }
+    Ok(())
+}
+
+async fn run_coe_aliases_suggest(
+    bundle_path: &std::path::Path,
+    coe_file: Option<&std::path::Path>,
+    top_k: usize,
+    out: Option<&std::path::Path>,
+) -> Result<()> {
+    use poc2_pipeline::normalize::coe_to_bundle::{
+        render_alias_suggestions_toml, suggest_aliases_for_unmatched,
+    };
+    let bundle = poc2_data::io::read_bundle(bundle_path)?;
+    let snapshot = load_coe_snapshot_for_subcommand(coe_file).await?;
+
+    let suggestions = suggest_aliases_for_unmatched(&snapshot, &bundle, top_k);
+    let rendered = render_alias_suggestions_toml(&suggestions);
+
+    tracing::info!(
+        suggestions = suggestions.len(),
+        with_candidates = suggestions
+            .iter()
+            .filter(|s| !s.candidates.is_empty())
+            .count(),
+        no_candidates = suggestions
+            .iter()
+            .filter(|s| s.candidates.is_empty())
+            .count(),
+        "alias suggester finished"
+    );
+
+    if let Some(path) = out {
+        std::fs::write(path, &rendered)?;
+        println!(
+            "wrote {} suggestions to {}",
+            suggestions.len(),
+            path.display()
+        );
+    } else {
+        print!("{rendered}");
     }
     Ok(())
 }

@@ -24,5 +24,7 @@ pub mod sources;
 pub use build::{build_bundle, BuildOptions};
 pub use error::{PipelineError, PipelineResult};
 pub use normalize::coe_to_bundle::{
-    load_coe_aliases, unmatched_coe_mods, CoeAlias, CoeAliasTable, JoinReport, MapStrategy,
+    load_coe_aliases, render_alias_suggestions_toml, suggest_aliases_for_unmatched,
+    unmatched_coe_mods, AliasCandidate, AliasSuggestion, CoeAlias, CoeAliasTable, JoinReport,
+    MapStrategy, SuggestionSource,
 };
