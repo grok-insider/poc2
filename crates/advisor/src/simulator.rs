@@ -35,6 +35,26 @@ pub struct SimulationOutcome {
     pub change_count: u32,
 }
 
+/// Aggregated outcome from running an action `n` times with different
+/// seeds (Phase C.1 Monte Carlo aggregator).
+#[derive(Debug, Clone)]
+pub struct McOutcome {
+    /// Mean success probability across the `n` samples in `[0, 1]`.
+    pub mean_success_prob: f64,
+    /// Standard error of the mean (sqrt(p*(1-p)/n)) — surfaces as the
+    /// `± stderr` band the UI renders.
+    pub prob_stderr: f64,
+    /// Mean of `change_count` across all samples.
+    pub mean_change_count: f64,
+    /// Number of samples that ran (always equal to the request).
+    pub n_samples: u32,
+    /// One representative outcome — the deterministic-seed run, used
+    /// as the planner's "what state will the user reach" proxy. Beam
+    /// search needs a single canonical post-state per node; the MC
+    /// aggregator only refines the *probability* of getting there.
+    pub primary: SimulationOutcome,
+}
+
 /// Simulate an action against the engine. Returns a clone of the input
 /// item with the action applied (or unchanged on failure).
 ///
@@ -175,6 +195,69 @@ fn noop_success(item: Item) -> SimulationOutcome {
         success: true,
         error: None,
         change_count: 0,
+    }
+}
+
+/// Run `n` independent simulations of `action` against `item` (each
+/// with a different RNG seed derived from `rng_seed_base`) and
+/// aggregate into a [`McOutcome`].
+///
+/// `n_samples = 1` collapses to deterministic behaviour: the
+/// `primary` field is the single sample, mean_success_prob is 0 or 1,
+/// and prob_stderr is 0.
+///
+/// Per Phase C.1's perf budget: at depth-3 with 50 MC samples the
+/// planner should stay under 5 ms (advisor_plan benches verify).
+#[allow(clippy::too_many_arguments)] // mirrors `simulate`'s API contract
+#[must_use]
+pub fn simulate_n(
+    item: &Item,
+    action: &AdvisorAction,
+    omens_in: &OmenSet,
+    registry: &ModRegistry,
+    resolver: &dyn CurrencyResolver,
+    patch: PatchVersion,
+    rng_seed_base: u64,
+    n_samples: u32,
+) -> McOutcome {
+    let n_clamped = n_samples.max(1);
+    // Run the canonical seed-0 sample first; every node in the beam
+    // shares this representative state regardless of mc_samples.
+    let primary = simulate(
+        item,
+        action,
+        omens_in,
+        registry,
+        resolver,
+        patch,
+        rng_seed_base,
+    );
+
+    let mut successes: u32 = u32::from(primary.success);
+    let mut sum_change_count: u32 = primary.change_count;
+    for i in 1..n_clamped {
+        let seed = rng_seed_base.wrapping_add(u64::from(i).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let out = simulate(item, action, omens_in, registry, resolver, patch, seed);
+        if out.success {
+            successes += 1;
+        }
+        sum_change_count = sum_change_count.saturating_add(out.change_count);
+    }
+    let n_f = f64::from(n_clamped);
+    let p = f64::from(successes) / n_f;
+    let stderr = if n_clamped <= 1 {
+        0.0
+    } else {
+        (p * (1.0 - p) / n_f).sqrt()
+    };
+    let mean_change = f64::from(sum_change_count) / n_f;
+
+    McOutcome {
+        mean_success_prob: p,
+        prob_stderr: stderr,
+        mean_change_count: mean_change,
+        n_samples: n_clamped,
+        primary,
     }
 }
 
@@ -421,6 +504,58 @@ mod tests {
             1,
         );
         assert!(abandon.success);
+    }
+
+    #[test]
+    fn simulate_n_with_one_sample_collapses_to_deterministic() {
+        let reg = registry();
+        let resolver = DefaultCurrencyResolver::new();
+        let item = empty_item();
+        let omens = OmenSet::new();
+        let action = AdvisorAction::ApplyCurrency {
+            currency: CurrencyId::from("OrbOfTransmutation"),
+            omens: vec![],
+        };
+        let mc = simulate_n(
+            &item,
+            &action,
+            &omens,
+            &reg,
+            &resolver,
+            PatchVersion::PATCH_0_4_0,
+            42,
+            1,
+        );
+        assert_eq!(mc.n_samples, 1);
+        assert!(mc.prob_stderr.abs() < 1e-12);
+        assert!((mc.mean_success_prob - if mc.primary.success { 1.0 } else { 0.0 }).abs() < 1e-12);
+    }
+
+    #[test]
+    fn simulate_n_50_samples_produces_stable_estimate() {
+        let reg = registry();
+        let resolver = DefaultCurrencyResolver::new();
+        let item = empty_item();
+        let omens = OmenSet::new();
+        // OrbOfTransmutation always succeeds on Normal items, so the
+        // MC estimate is 1.0 with stderr 0.
+        let action = AdvisorAction::ApplyCurrency {
+            currency: CurrencyId::from("OrbOfTransmutation"),
+            omens: vec![],
+        };
+        let mc = simulate_n(
+            &item,
+            &action,
+            &omens,
+            &reg,
+            &resolver,
+            PatchVersion::PATCH_0_4_0,
+            7,
+            50,
+        );
+        assert_eq!(mc.n_samples, 50);
+        assert!((mc.mean_success_prob - 1.0).abs() < 1e-9);
+        assert!(mc.prob_stderr.abs() < 1e-9);
     }
 
     #[test]

@@ -49,6 +49,12 @@ pub struct Recommendation {
     /// Estimated success probability of *this single step* in `[0, 1]`.
     /// 1.0 for non-probabilistic actions (Hinekora's Lock, Stop, Abandon).
     pub expected_prob: f64,
+    /// Standard error of the success-probability estimate (Phase C.1
+    /// Monte Carlo). `0.0` when planner ran with `mc_samples = 1` or
+    /// for non-probabilistic actions. UI renders this as the
+    /// `± stderr` band ("P(reach) ≈ 65% ± 8%").
+    #[serde(default)]
+    pub prob_stderr: f64,
     /// Final utility score the planner used to rank this. Higher = better.
     pub score: f64,
     /// Human-readable explanation surfaced in the UI.
@@ -86,6 +92,7 @@ mod tests {
             },
             expected_cost: DivEquiv::point(0.125),
             expected_prob: 0.5,
+            prob_stderr: 0.07,
             score: 4.0,
             rationale: "Chaos spam toward target.".into(),
             depth: 1,

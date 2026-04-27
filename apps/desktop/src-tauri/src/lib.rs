@@ -506,6 +506,7 @@ fn recommend(
             risk: args.risk,
             top_n: args.top_n,
             seed: 0,
+            mc_samples: 50,
             weights: poc2_advisor::ScoringWeights::default(),
         },
     };

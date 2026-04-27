@@ -203,7 +203,12 @@
         <div class="meta-row">
           <span class="cost">{fmtDiv(r.expected_cost)}</span>
           <span>·</span>
-          <span class="prob">P(reach) ≈ {(r.expected_prob * 100).toFixed(1)}%</span>
+          <span class="prob">
+            P(reach) ≈ {(r.expected_prob * 100).toFixed(1)}%
+            {#if r.prob_stderr > 0}
+              ± {(r.prob_stderr * 100).toFixed(1)}%
+            {/if}
+          </span>
           <span>·</span>
           <span class="depth">depth {r.depth}</span>
         </div>

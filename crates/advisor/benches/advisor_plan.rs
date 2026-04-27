@@ -88,7 +88,8 @@ fn bench_plan(c: &mut Criterion) {
     let goal = worked_example_goal();
     let item = fresh_body_armour();
 
-    // Depth-1 fast path: rules + strategies, no lookahead. Target: <1ms.
+    // Depth-1 fast path: rules + strategies, no lookahead, no MC.
+    // Target: <1ms.
     c.bench_function("plan_depth_1_top_3", |b| {
         b.iter(|| {
             let input = PlanInput {
@@ -107,6 +108,7 @@ fn bench_plan(c: &mut Criterion) {
                     risk: 0.5,
                     top_n: 3,
                     seed: 0,
+                    mc_samples: 1,
                     weights: ScoringWeights::default(),
                 },
             };
@@ -114,7 +116,7 @@ fn bench_plan(c: &mut Criterion) {
         });
     });
 
-    // Depth-3 beam: full lookahead. Target: <50ms (well under the 2s ADR budget).
+    // Depth-3 beam: full lookahead, no MC. Pre-Phase-C.1 baseline.
     c.bench_function("plan_depth_3_top_3", |b| {
         b.iter(|| {
             let input = PlanInput {
@@ -133,6 +135,35 @@ fn bench_plan(c: &mut Criterion) {
                     risk: 0.5,
                     top_n: 3,
                     seed: 0,
+                    mc_samples: 1,
+                    weights: ScoringWeights::default(),
+                },
+            };
+            black_box(plan(&input));
+        });
+    });
+
+    // Depth-3 beam with 50 MC samples per candidate (Phase C.1 default).
+    // Target: <5ms per /docs/72-v1-execution-plan.md C.1 budget.
+    c.bench_function("plan_depth_3_top_3_mc50", |b| {
+        b.iter(|| {
+            let input = PlanInput {
+                item: item.clone(),
+                goal: goal.clone(),
+                rules: &rules,
+                strategies: &strategies,
+                registry: &registry,
+                resolver: &resolver,
+                valuator: &valuator,
+                stash: &stash,
+                patch: PatchVersion::PATCH_0_4_0,
+                config: BeamConfig {
+                    width: 5,
+                    depth: 3,
+                    risk: 0.5,
+                    top_n: 3,
+                    seed: 0,
+                    mc_samples: 50,
                     weights: ScoringWeights::default(),
                 },
             };
@@ -159,6 +190,7 @@ fn bench_plan(c: &mut Criterion) {
                     risk: 0.5,
                     top_n: 5,
                     seed: 0,
+                    mc_samples: 1,
                     weights: ScoringWeights::default(),
                 },
             };

@@ -116,6 +116,9 @@ export interface Recommendation {
   source: RecommendationSource;
   expected_cost: DivEquiv;
   expected_prob: number;
+  /** Standard error of the success probability estimate (Phase C.1).
+   * 0 when the planner ran with mc_samples=1. */
+  prob_stderr: number;
   score: number;
   rationale: string;
   depth: number;

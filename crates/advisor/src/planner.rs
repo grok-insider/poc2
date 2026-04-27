@@ -31,7 +31,7 @@ use crate::candidate::{generate_candidates, Candidate};
 use crate::goal::{is_satisfied_with_ctx, should_abandon_with_ctx, Goal};
 use crate::recommendation::{Recommendation, RecommendationSource};
 use crate::scorer::{action_cost, score, ScoringWeights};
-use crate::simulator::{simulate, SimulationOutcome};
+use crate::simulator::simulate_n;
 use crate::stash::Stash;
 
 /// Beam-search configuration.
@@ -49,6 +49,9 @@ pub struct BeamConfig {
     pub top_n: u32,
     /// Deterministic RNG seed for the simulator.
     pub seed: u64,
+    /// Monte Carlo samples per candidate (Phase C.1, default 50).
+    /// `1` reverts to v1's deterministic-single-sample behaviour.
+    pub mc_samples: u32,
     /// Scoring weights.
     pub weights: ScoringWeights,
 }
@@ -61,6 +64,7 @@ impl Default for BeamConfig {
             risk: 0.5,
             top_n: 3,
             seed: 0,
+            mc_samples: 50,
             weights: ScoringWeights::default(),
         }
     }
@@ -73,8 +77,13 @@ struct PlanNode {
     item: Item,
     /// Sum of expected costs paid to reach this state.
     accumulated_cost: DivEquiv,
-    /// Joint success probability of getting here (product of step probs).
+    /// Joint success probability of getting here (product of per-step
+    /// MC means).
     accumulated_prob: f64,
+    /// Joint variance of `accumulated_prob` under the independence
+    /// assumption (the per-step variance compounded multiplicatively).
+    /// Surfaced as the recommendation's `prob_stderr`.
+    accumulated_prob_var: f64,
     /// Action sequence we took. `path[0]` is the first action.
     path: Vec<AdvisorAction>,
     /// Source of `path[0]` — used to label the resulting Recommendation.
@@ -93,6 +102,7 @@ impl PlanNode {
             item,
             accumulated_cost: DivEquiv::ZERO,
             accumulated_prob: 1.0,
+            accumulated_prob_var: 0.0,
             path: Vec::new(),
             first_source: None,
             first_rationale: String::new(),
@@ -144,6 +154,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
             },
             expected_cost: DivEquiv::ZERO,
             expected_prob: 1.0,
+            prob_stderr: 0.0,
             score: f64::INFINITY,
             rationale: "Item already satisfies the target; stop and equip or sell.".into(),
             depth: 0,
@@ -230,34 +241,47 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
         .collect()
 }
 
-/// Build the child node by simulating `cand` against `node.item`.
+/// Build the child node by running an MC sweep of `cand` against
+/// `node.item`. Per-step probability comes from the MC mean; variance
+/// compounds multiplicatively under independence.
 fn expand_with_candidate(
     node: &PlanNode,
     cand: &Candidate,
     depth: u32,
     input: &PlanInput<'_>,
 ) -> PlanNode {
-    // Clone node, append action.
     let mut next = node.clone();
     let omens = OmenSet::new();
-    let outcome: SimulationOutcome = simulate(
+    let seed_base = input
+        .config
+        .seed
+        .wrapping_add(u64::from(depth))
+        .wrapping_add(node.path.len() as u64);
+    let mc = simulate_n(
         &node.item,
         &cand.action,
         &omens,
         input.registry,
         input.resolver,
         input.patch,
-        input
-            .config
-            .seed
-            .wrapping_add(u64::from(depth))
-            .wrapping_add(node.path.len() as u64),
+        seed_base,
+        input.config.mc_samples,
     );
-    next.item = outcome.item;
+    next.item = mc.primary.item;
     let action_cost_band = action_cost(&cand.action, input.valuator);
     next.accumulated_cost = next.accumulated_cost.plus(action_cost_band);
-    let step_prob = if outcome.success { 0.95 } else { 0.05 };
-    next.accumulated_prob *= step_prob;
+    // Step success probability with a small floor/ceiling to avoid
+    // multiplying an entire tree by 0 or 1 (which masks the rest of
+    // the per-step variance contributions).
+    let step_prob = mc.mean_success_prob.clamp(0.05, 0.95);
+    let step_var = mc.prob_stderr.powi(2);
+    // Variance of a product (under independence): if X = A*B,
+    //   Var(X) = E[A]^2 * Var(B) + E[B]^2 * Var(A) + Var(A)*Var(B)
+    let prev_p = next.accumulated_prob;
+    let prev_var = next.accumulated_prob_var;
+    next.accumulated_prob = prev_p * step_prob;
+    next.accumulated_prob_var =
+        prev_p.powi(2) * step_var + step_prob.powi(2) * prev_var + prev_var * step_var;
     next.path.push(cand.action.clone());
     if next.first_source.is_none() {
         next.first_source = Some(cand.source.clone());
@@ -350,6 +374,7 @@ fn node_to_recommendation(
         source,
         expected_cost: cost,
         expected_prob: node.accumulated_prob,
+        prob_stderr: node.accumulated_prob_var.sqrt(),
         score: score_value,
         rationale: node.first_rationale.clone(),
         depth: node.path.len() as u32,

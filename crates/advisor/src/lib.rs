@@ -55,7 +55,7 @@ pub use planner::{plan, BeamConfig, PlanInput};
 pub use recommendation::{Recommendation, RecommendationSource};
 pub use recovery::collect_strategy_hints;
 pub use scorer::{action_cost, score, ScoringWeights};
-pub use simulator::{simulate, SimulationOutcome};
+pub use simulator::{simulate, simulate_n, McOutcome, SimulationOutcome};
 pub use stash::Stash;
 
 use poc2_engine::currency::CurrencyResolver;
@@ -99,6 +99,7 @@ pub fn recommend_quick(
             risk,
             top_n,
             seed: 0,
+            mc_samples: 1, // quick path skips MC
             weights: ScoringWeights::default(),
         },
     };
