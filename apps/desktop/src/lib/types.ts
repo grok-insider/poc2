@@ -153,6 +153,23 @@ export interface StreamingProgressEvent {
 /// Topic the streaming planner emits to.
 export const ADVISOR_PROGRESS_EVENT = 'advisor://progress';
 
+/// Phase D.3 — trade search URL adapter.
+export interface TradeModLine {
+  mod_id: string;
+  affix_type: 'prefix' | 'suffix' | 'implicit' | 'enchantment';
+  fractured: boolean;
+  text_template: string | null;
+  values: number[];
+}
+
+export interface TradeSearchSummary {
+  url: string;
+  league: string;
+  item_class: string;
+  ilvl_min: number;
+  mod_lines: TradeModLine[];
+}
+
 /// Phase D.1 — Client.txt log watcher.
 export type ClientLogEvent =
   | { kind: 'area_entered'; area: string; line: string }

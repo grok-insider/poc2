@@ -31,7 +31,9 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tracing_subscriber::EnvFilter;
 
 mod client_log;
+mod trade_search;
 use client_log::{start_client_log_watcher, ClientLogEvent, ClientLogWatcher, CLIENT_LOG_EVENT};
+use trade_search::build_trade_search_url;
 
 /// Inlined seed strategies. Bundled into the binary so the app is
 /// self-contained out of the box; user-provided strategies are loaded
@@ -861,6 +863,49 @@ async fn list_leagues() -> Result<Vec<LeagueInfo>, String> {
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
+// Trade-search URL adapter (Phase D.3)
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct TradeSearchArgs {
+    item: Item,
+    /// League slug. Defaults to the bundle's patch league when None.
+    #[serde(default)]
+    league: Option<String>,
+    /// When true, opens the URL in the default browser via the shell
+    /// plugin. When false, returns the URL only (caller does the open).
+    #[serde(default = "default_true_open")]
+    open: bool,
+}
+
+const fn default_true_open() -> bool {
+    true
+}
+
+#[tauri::command]
+async fn trade_search(
+    args: TradeSearchArgs,
+    app: tauri::AppHandle,
+) -> Result<trade_search::TradeSearchSummary, String> {
+    use tauri_plugin_shell::ShellExt;
+    let league = args
+        .league
+        .unwrap_or_else(|| "Fate of the Vaal".to_string());
+    let summary = build_trade_search_url(&args.item, &league);
+    if args.open {
+        // tauri-plugin-shell::open is deprecated upstream in 2.10 in
+        // favour of tauri-plugin-opener; the shell plugin's open API
+        // still works for v1 and avoids adding another plugin dep.
+        // Migrate to tauri-plugin-opener in v1.x.
+        #[allow(deprecated)]
+        app.shell()
+            .open(&summary.url, None)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(summary)
+}
+
+// ---------------------------------------------------------------------
 // Client.txt watcher (Phase D.1)
 // ---------------------------------------------------------------------
 
@@ -1264,6 +1309,7 @@ pub fn run() {
             start_client_log,
             stop_client_log,
             client_log_status,
+            trade_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

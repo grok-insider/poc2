@@ -82,6 +82,14 @@
     };
   });
 
+  async function searchTrade() {
+    try {
+      await invoke('trade_search', { args: { item, open: true } });
+    } catch (err) {
+      error = String(err);
+    }
+  }
+
   async function refreshPrices() {
     priceLoading = true;
     priceError = null;
@@ -233,6 +241,7 @@
     <button onclick={refreshPrices} disabled={priceLoading} class="secondary">
       {priceLoading ? 'fetching…' : 'Refresh prices'}
     </button>
+    <button onclick={searchTrade} class="secondary">Search trade</button>
   </div>
 
   {#if priceMeta}
