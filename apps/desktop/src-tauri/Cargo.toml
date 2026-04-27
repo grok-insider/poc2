@@ -33,6 +33,7 @@ poc2-probability.workspace = true
 poc2-market.workspace = true
 poc2-advisor.workspace = true
 poc2-parser.workspace = true
+poc2-plugin-host.workspace = true
 
 # Common
 serde.workspace = true

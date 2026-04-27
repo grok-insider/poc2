@@ -115,8 +115,12 @@ impl PluginHost {
     /// add plugins from a directory walk.
     pub fn new() -> Result<Self, PluginError> {
         let mut config = Config::new();
+        // Fuel-based termination per the perf contract in ADR-0008
+        // v2. Epoch-interrupt-based timeouts ship in v1.x with the
+        // proper background-tick infrastructure (with no deadline
+        // set, epoch_interruption traps immediately on first
+        // instruction, which we definitely don't want).
         config.consume_fuel(true);
-        config.epoch_interruption(true);
         // Memory cap: 64 MiB per store (the per-plugin memory limit
         // happens at the Store level via ResourceLimiter).
         let engine = Engine::new(&config).map_err(PluginError::Engine)?;

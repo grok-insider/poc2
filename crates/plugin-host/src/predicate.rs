@@ -96,8 +96,10 @@ impl PluginHost {
         args: &Value,
     ) -> Result<bool, PluginError> {
         let mut store = Store::new(&self.engine, ());
+        // Per ADR-0008 v2: fuel budget per call. Generous default;
+        // tighten in v1.x as we learn typical plugin work-loads.
         store
-            .set_fuel(10_000_000)
+            .set_fuel(100_000_000)
             .map_err(|_| PluginError::FuelExhausted)?;
         let linker: Linker<()> = Linker::new(&self.engine);
         let instance = linker

@@ -1,0 +1,11 @@
+id = "predicate-ilvl-min"
+name = "Item-level threshold predicate"
+version = "0.1.0"
+poc2_api_version = "1.0.0"
+authors = ["poc2 contributors"]
+description = "Custom predicate ilvl_at_least: returns true iff item.ilvl >= args.min"
+
+capabilities = ["read_engine", "register_predicate"]
+
+[wasm]
+file = "plugin.wasm"

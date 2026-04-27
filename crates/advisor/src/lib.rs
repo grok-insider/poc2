@@ -95,6 +95,7 @@ pub fn recommend_quick(
         valuator,
         stash,
         patch,
+        plugin_dispatch: None,
         config: BeamConfig {
             width: top_n.max(3),
             depth: 1,
@@ -153,6 +154,7 @@ pub fn plan_streaming(
             valuator: input.valuator,
             stash: input.stash,
             patch: input.patch,
+            plugin_dispatch: input.plugin_dispatch,
             config: input.config,
         };
         local_input.config.depth = d;

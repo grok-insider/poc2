@@ -102,6 +102,7 @@ fn bench_plan(c: &mut Criterion) {
                 valuator: &valuator,
                 stash: &stash,
                 patch: PatchVersion::PATCH_0_4_0,
+                plugin_dispatch: None,
                 config: BeamConfig {
                     width: 5,
                     depth: 1,
@@ -129,6 +130,7 @@ fn bench_plan(c: &mut Criterion) {
                 valuator: &valuator,
                 stash: &stash,
                 patch: PatchVersion::PATCH_0_4_0,
+                plugin_dispatch: None,
                 config: BeamConfig {
                     width: 5,
                     depth: 3,
@@ -157,6 +159,7 @@ fn bench_plan(c: &mut Criterion) {
                 valuator: &valuator,
                 stash: &stash,
                 patch: PatchVersion::PATCH_0_4_0,
+                plugin_dispatch: None,
                 config: BeamConfig {
                     width: 5,
                     depth: 3,
@@ -184,6 +187,7 @@ fn bench_plan(c: &mut Criterion) {
                 valuator: &valuator,
                 stash: &stash,
                 patch: PatchVersion::PATCH_0_4_0,
+                plugin_dispatch: None,
                 config: BeamConfig {
                     width: 8,
                     depth: 5,

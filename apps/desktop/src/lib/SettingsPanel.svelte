@@ -7,6 +7,7 @@
     type ClientLogStatus,
     type LeagueInfo,
     type MetaResponse,
+    type PluginInfo,
     type ReloadBundleResponse,
     type RefreshPricesResponse,
   } from './types';
@@ -44,6 +45,47 @@
   let pricesRefreshing = $state(false);
   let pricesError = $state<string | null>(null);
   let lastRefreshAt = $state<string | null>(null);
+
+  // ---- Phase F — plugin manager ----
+  let plugins = $state<PluginInfo[]>([]);
+  let pluginsLoading = $state(false);
+  let pluginsError = $state<string | null>(null);
+
+  async function refreshPlugins() {
+    pluginsLoading = true;
+    pluginsError = null;
+    try {
+      plugins = await invoke<PluginInfo[]>('list_plugins');
+    } catch (e) {
+      pluginsError = String(e);
+    } finally {
+      pluginsLoading = false;
+    }
+  }
+
+  async function reloadPluginsFromDisk() {
+    pluginsLoading = true;
+    pluginsError = null;
+    try {
+      const count = await invoke<number>('reload_plugins');
+      pluginsError = null;
+      plugins = await invoke<PluginInfo[]>('list_plugins');
+      if (count === 0 && plugins.length === 0) {
+        pluginsError = 'No plugins found in ~/.config/poc2/plugins/';
+      }
+    } catch (e) {
+      pluginsError = String(e);
+    } finally {
+      pluginsLoading = false;
+    }
+  }
+
+  // Auto-refresh once on mount.
+  $effect.pre(() => {
+    if (plugins.length === 0 && !pluginsLoading) {
+      void refreshPlugins();
+    }
+  });
 
   // ---- Phase E — meta builds + off-meta finder ----
   let metaResult = $state<MetaResponse | null>(null);
@@ -352,13 +394,46 @@
     {/if}
   </div>
 
-  <!-- ============== Plugin manager scaffold (Phase F.6) ============== -->
-  <div class="block muted-block">
-    <h3>Plugins (Phase F.6)</h3>
+  <!-- ============== Plugin manager (Phase F.6) ============== -->
+  <div class="block">
+    <h3>Plugins</h3>
+    <div class="bundle-row">
+      <button onclick={reloadPluginsFromDisk} disabled={pluginsLoading}>
+        {pluginsLoading ? 'reloading…' : 'Reload from disk'}
+      </button>
+    </div>
     <p class="muted">
-      Plugin discovery and capability management ships in v1.0 Phase F.
-      Plugin TOML lives in <code>~/.config/poc2/plugins/</code>.
+      Plugins live in <code>~/.config/poc2/plugins/&lt;id&gt;/</code> with
+      a <code>poc2-plugin.toml</code> manifest + a <code>*.wasm</code>
+      file. See <code>examples/plugins/</code> for templates.
     </p>
+    {#if pluginsError}
+      <pre class="error">{pluginsError}</pre>
+    {/if}
+    {#if plugins.length === 0 && !pluginsLoading}
+      <p class="muted">No plugins loaded.</p>
+    {:else}
+      <ul class="plugin-list">
+        {#each plugins as p (p.id)}
+          <li>
+            <div class="plugin-header">
+              <span class="plugin-name"><code>{p.id}</code> v{p.version}</span>
+              <span class="plugin-status">
+                {p.enabled ? 'enabled' : 'disabled'}
+              </span>
+            </div>
+            <div class="plugin-meta">
+              caps: [{p.capabilities.join(', ')}]
+              {#if p.n_strategies > 0}· {p.n_strategies} strategies{/if}
+              {#if p.n_rules > 0}· {p.n_rules} rules{/if}
+            </div>
+            {#if p.description}
+              <div class="plugin-desc">{p.description}</div>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </div>
 </section>
 
@@ -383,10 +458,6 @@
 
   .block {
     margin-bottom: 0.75rem;
-  }
-
-  .muted-block {
-    opacity: 0.6;
   }
 
   .bundle-row {
@@ -484,5 +555,46 @@
 
   .niche-meta {
     color: var(--fg-muted);
+  }
+
+  .plugin-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.4rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .plugin-list li {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.4rem 0.6rem;
+  }
+
+  .plugin-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--fg);
+    margin-bottom: 0.2rem;
+  }
+
+  .plugin-status {
+    color: var(--fg-muted);
+    font-size: 0.7rem;
+  }
+
+  .plugin-meta {
+    color: var(--fg-muted);
+    font-size: 0.7rem;
+    font-family: ui-monospace, 'Fira Code', monospace;
+  }
+
+  .plugin-desc {
+    color: var(--fg);
+    font-size: 0.75rem;
+    margin-top: 0.25rem;
   }
 </style>

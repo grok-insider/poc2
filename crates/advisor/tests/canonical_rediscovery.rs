@@ -126,6 +126,7 @@ fn rediscovery_top_recommendation_is_perfect_transmute() {
         valuator: &valuator,
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
+        plugin_dispatch: None,
         config: BeamConfig {
             width: 5,
             depth: 1,
@@ -181,6 +182,7 @@ fn rediscovery_recommendation_is_traceable_to_source() {
         valuator: &valuator,
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
+        plugin_dispatch: None,
         config: BeamConfig::default(),
     };
     let recs = plan(&input);
@@ -225,6 +227,7 @@ fn rediscovery_top_3_includes_strategy_and_rule_sources() {
         valuator: &valuator,
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
+        plugin_dispatch: None,
         config: BeamConfig {
             width: 8,
             depth: 1,
@@ -274,6 +277,7 @@ fn risk_slider_changes_recommendation_score_ordering() {
         valuator: &valuator,
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
+        plugin_dispatch: None,
         config: BeamConfig {
             width: 3,
             depth: 1,
@@ -456,6 +460,7 @@ fn rare_with_3_t1_es_already_satisfies_goal() {
         valuator: &valuator,
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
+        plugin_dispatch: None,
         config: BeamConfig::default(),
     };
     let recs = plan(&input);

@@ -153,6 +153,18 @@ export interface StreamingProgressEvent {
 /// Topic the streaming planner emits to.
 export const ADVISOR_PROGRESS_EVENT = 'advisor://progress';
 
+/// Phase F — Wasm plugin info surfaced by the plugin host.
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  capabilities: string[];
+  enabled: boolean;
+  n_strategies: number;
+  n_rules: number;
+}
+
 /// Phase E — meta builds aggregator.
 export interface NicheTarget {
   concept: string;

@@ -1,0 +1,18 @@
+[package]
+name = "predicate-ilvl-min"
+description = "Example poc2 plugin: custom predicate matching item-level >= threshold"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+poc2-plugin-sdk = { path = "../../../crates/plugin-sdk" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = "symbols"

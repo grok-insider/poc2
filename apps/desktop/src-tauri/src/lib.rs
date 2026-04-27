@@ -23,6 +23,7 @@ use poc2_market::{
     apply_feed_to_valuator, default_id_mapping, fetch_snapshot as fetch_price_snapshot, Valuator,
 };
 use poc2_parser::{lower_to_item, parse_clipboard_text, ParsedItem};
+use poc2_plugin_host::PluginHost;
 use poc2_rules::RuleSet;
 use poc2_strategies::StrategyRegistry;
 use serde::{Deserialize, Serialize};
@@ -174,6 +175,9 @@ struct AdvisorState {
     /// each `start_client_log` invocation (the previous watcher's
     /// inotify subscription is dropped automatically).
     client_log_watcher: Arc<Mutex<Option<ClientLogWatcher>>>,
+    /// Wasm plugin host (Phase F). Wrapped in RwLock so the
+    /// `reload_plugins` command can swap it without restarting.
+    plugin_host: Arc<RwLock<PluginHost>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -190,6 +194,7 @@ impl AdvisorState {
     fn build() -> Self {
         let rules = RuleSet::from_rules(poc2_rules::seed_rules());
         let bundle_state = build_bundle_state(None);
+        let plugin_host = build_plugin_host();
         Self {
             bundle: Arc::new(RwLock::new(bundle_state)),
             rules: Arc::new(rules),
@@ -197,8 +202,36 @@ impl AdvisorState {
             price_refresh: Arc::new(Mutex::new(None)),
             streaming_task: Arc::new(Mutex::new(None)),
             client_log_watcher: Arc::new(Mutex::new(None)),
+            plugin_host: Arc::new(RwLock::new(plugin_host)),
         }
     }
+}
+
+/// Build the Wasm plugin host + scan
+/// `$XDG_CONFIG_HOME/poc2/plugins/` for plugins.
+fn build_plugin_host() -> PluginHost {
+    let mut host = PluginHost::new().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "plugin host failed to initialize; running with no-plugin host");
+        // Try once more (the failure mode is wasmtime config; should
+        // not actually happen in practice). Falling back to a panic
+        // here would cripple the app for plugin-less users.
+        PluginHost::new().expect("plugin host constructor must succeed")
+    });
+    let plugin_dir = if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
+        Some(Path::new(&xdg_config).join("poc2/plugins"))
+    } else {
+        std::env::var_os("HOME").map(|home| Path::new(&home).join(".config/poc2/plugins"))
+    };
+    if let Some(dir) = plugin_dir {
+        match host.discover_plugins(&dir) {
+            Ok(n) if n > 0 => {
+                tracing::info!(plugin_count = n, dir = %dir.display(), "discovered plugins")
+            }
+            Ok(_) => tracing::debug!(dir = %dir.display(), "no plugins found"),
+            Err(e) => tracing::warn!(dir = %dir.display(), error = %e, "plugin discovery failed"),
+        }
+    }
+    host
 }
 
 /// Construct a [`BundleState`] from the bundle search machinery (or
@@ -507,6 +540,7 @@ fn recommend(
         .bundle_patch
         .unwrap_or(PatchVersion::PATCH_0_4_0);
     let valuator_guard = state.valuator.lock().expect("valuator mutex poisoned");
+    let plugin_guard = state.plugin_host.read().expect("plugin_host poisoned");
     let input = PlanInput {
         item: args.item,
         goal: args.goal,
@@ -517,6 +551,7 @@ fn recommend(
         valuator: &valuator_guard,
         stash: &args.stash,
         patch,
+        plugin_dispatch: Some(&*plugin_guard as &dyn poc2_strategies::PluginPredicateDispatch),
         config: BeamConfig {
             width: args.top_n.max(3),
             depth: args.depth.max(1),
@@ -528,6 +563,7 @@ fn recommend(
         },
     };
     let recommendations = plan(&input);
+    drop(plugin_guard);
     let response = RecommendResponse {
         recommendations,
         patch: format!("{patch}"),
@@ -863,6 +899,61 @@ async fn list_leagues() -> Result<Vec<LeagueInfo>, String> {
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
+// Plugin manager (Phase F.6)
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct PluginInfo {
+    id: String,
+    name: String,
+    version: String,
+    description: String,
+    capabilities: Vec<String>,
+    enabled: bool,
+    n_strategies: usize,
+    n_rules: usize,
+}
+
+#[tauri::command]
+fn list_plugins(state: tauri::State<'_, AdvisorState>) -> Result<Vec<PluginInfo>, String> {
+    let host = state
+        .plugin_host
+        .read()
+        .map_err(|_| "plugin_host poisoned".to_string())?;
+    Ok(host
+        .plugins()
+        .map(|p| PluginInfo {
+            id: p.manifest.id.clone(),
+            name: p.manifest.name.clone(),
+            version: p.manifest.version.clone(),
+            description: p.manifest.description.clone(),
+            capabilities: p
+                .manifest
+                .capabilities
+                .iter()
+                .map(|c| format!("{c:?}").to_lowercase())
+                .collect(),
+            enabled: p.enabled,
+            n_strategies: p.strategies.len(),
+            n_rules: p.rules.len(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn reload_plugins(state: tauri::State<'_, AdvisorState>) -> Result<usize, String> {
+    let new_host = build_plugin_host();
+    let count = new_host.plugin_count();
+    let mut guard = state
+        .plugin_host
+        .write()
+        .map_err(|_| "plugin_host poisoned".to_string())?;
+    *guard = new_host;
+    drop(guard);
+    Ok(count)
+}
+
+// ---------------------------------------------------------------------
 // Meta-build aggregator + off-meta finder (Phase E.1 + E.2)
 // ---------------------------------------------------------------------
 
@@ -1142,6 +1233,7 @@ async fn recommend_streaming(
     let rules = state.rules.clone();
     let bundle = state.bundle.clone();
     let valuator = state.valuator.clone();
+    let plugin_host = state.plugin_host.clone();
     let app_clone = app.clone();
     let item = args.item;
     let goal = args.goal;
@@ -1153,6 +1245,7 @@ async fn recommend_streaming(
     let task = tokio::task::spawn_blocking(move || {
         let bundle_guard = bundle.read().expect("bundle rwlock poisoned");
         let valuator_guard = valuator.lock().expect("valuator mutex poisoned");
+        let plugin_guard = plugin_host.read().expect("plugin_host poisoned");
         let patch = bundle_guard
             .bundle_patch
             .unwrap_or(PatchVersion::PATCH_0_4_0);
@@ -1166,6 +1259,7 @@ async fn recommend_streaming(
             valuator: &valuator_guard,
             stash: &stash,
             patch,
+            plugin_dispatch: Some(&*plugin_guard as &dyn poc2_strategies::PluginPredicateDispatch),
             config: BeamConfig {
                 width: top_n.max(3),
                 depth: depth.max(1),
@@ -1355,6 +1449,8 @@ pub fn run() {
             client_log_status,
             trade_search,
             fetch_meta_builds,
+            list_plugins,
+            reload_plugins,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

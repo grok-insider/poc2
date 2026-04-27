@@ -24,7 +24,7 @@ use poc2_engine::patch::PatchVersion;
 use poc2_engine::registry::ModRegistry;
 use poc2_market::{DivEquiv, Valuator};
 use poc2_rules::RuleSet;
-use poc2_strategies::{PredicateContext, StrategyRegistry};
+use poc2_strategies::{PluginPredicateDispatch, PredicateContext, StrategyRegistry};
 
 use crate::action::AdvisorAction;
 use crate::candidate::{generate_candidates, Candidate};
@@ -125,17 +125,26 @@ pub struct PlanInput<'a> {
     pub stash: &'a Stash,
     pub patch: PatchVersion,
     pub config: BeamConfig,
+    /// Plugin-host bridge for custom predicates (Phase F.3). `None`
+    /// means the planner runs without plugin custom predicates;
+    /// every `ItemPredicate::Custom` evaluates to false.
+    pub plugin_dispatch: Option<&'a dyn PluginPredicateDispatch>,
 }
 
 /// Build a [`PredicateContext`] for `item` against the planner inputs +
 /// the per-node accumulated cost. Predicates that reference cost / stash
 /// / valuator data evaluate against this context; everything else
-/// continues to read the item directly.
+/// continues to read the item directly. Plugin custom predicates
+/// dispatch via `input.plugin_dispatch` when set (Phase F.3).
 fn ctx_for_node<'a>(input: &'a PlanInput<'a>, accumulated_cost: DivEquiv) -> PredicateContext<'a> {
-    PredicateContext::new(input.registry)
+    let mut ctx = PredicateContext::new(input.registry)
         .with_cost(accumulated_cost.expected)
         .with_valuator(input.valuator)
-        .with_stash(input.stash)
+        .with_stash(input.stash);
+    if let Some(dispatch) = input.plugin_dispatch {
+        ctx = ctx.with_plugin_dispatch(dispatch);
+    }
+    ctx
 }
 
 /// Run beam search; return the top-N first-action recommendations.
@@ -450,6 +459,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            plugin_dispatch: None,
             config: BeamConfig {
                 width: 3,
                 depth: 1,
@@ -505,6 +515,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            plugin_dispatch: None,
             config: BeamConfig::default(),
         };
         let recs = plan(&input);
@@ -530,6 +541,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            plugin_dispatch: None,
             config: BeamConfig::default(),
         };
         let recs = plan(&input);
