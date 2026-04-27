@@ -92,7 +92,7 @@
 - Build data bundle: `cargo run --release -p poc2-pipeline -- build --out ~/.config/poc2/bundles/poc2.bundle.json.gz --patch 0.4.0`.
 - Train advisor models (smoke ~10 min): `cargo run --release --bin train-advisor -- --corpus pipeline/data/training_goals.toml --bundle ~/.config/poc2/bundles/poc2.bundle.json.gz --out ~/.config/poc2/cache/trained_models/poc2-trained-models-0.4.0.json --samples 10000 --verbose`.
 - Train advisor models (production ~hours): same command with `--samples 100000`. The desktop loader picks up artefacts from `~/.config/poc2/cache/trained_models/` on the next bundle reload; the planner consults them via `PlanInput.trained_models`. **Always pass `--bundle`** — without it the binary trains against an empty synthetic registry and every goal's `V_path(s0)` degenerates to the value-iteration floor (`-1000`). Add `--strict-audit` in CI to fail-fast when corpus goals reference concepts the bundle's mod taxonomy doesn't carry.
-- Inspect trained-model cache status: call the `trained_model_status` Tauri command from the desktop UI (or via `cargo run --bin poc2-desktop` then DevTools).
+- Inspect trained-model cache status: call the `trained_model_status` Tauri command from the desktop UI's DevTools console (`cd apps/desktop && nix develop --command pnpm tauri:dev`, then `await window.__TAURI__.core.invoke('trained_model_status')`).
 
 ## Verification Expectations
 
