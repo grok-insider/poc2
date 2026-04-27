@@ -45,5 +45,7 @@ pub use executor::{
     ExecutionState, TerminalKind,
 };
 pub use loader::{load_strategy_str, load_strategy_toml, StrategyError, StrategyResult};
-pub use predicate::{eval, eval_all, eval_any, is_hybrid_mod, PredicateContext, StashView};
+pub use predicate::{
+    eval, eval_all, eval_any, is_hybrid_mod, PluginPredicateDispatch, PredicateContext, StashView,
+};
 pub use registry::StrategyRegistry;

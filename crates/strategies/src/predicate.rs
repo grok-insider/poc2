@@ -36,6 +36,25 @@ pub trait StashView: Send + Sync {
     fn currency_count(&self, currency: &CurrencyId) -> u32;
 }
 
+/// Bridge to the plugin host's custom-predicate dispatcher (Phase F.3).
+///
+/// Defined as a trait so this crate doesn't depend on
+/// `poc2_plugin_host` (which would pull in wasmtime). The host crate
+/// provides an `impl PluginPredicateDispatch for PluginHost`.
+pub trait PluginPredicateDispatch: Send + Sync {
+    /// Evaluate `plugin_id::name(item, args)`. `Err` on plugin-side
+    /// failure; the predicate evaluator surfaces the error as
+    /// `false` to keep a misbehaving plugin from tanking a planning
+    /// session.
+    fn dispatch(
+        &self,
+        plugin_id: &str,
+        name: &str,
+        item: &Item,
+        args: &serde_json::Value,
+    ) -> Result<bool, String>;
+}
+
 /// Bundles every input the predicate evaluator needs.
 ///
 /// Build via the [`PredicateContext::new`] constructor + chained
@@ -56,6 +75,10 @@ pub struct PredicateContext<'a> {
     /// Estimated sale price of the current item state, in
     /// divine-equivalent. Drives [`ItemPredicate::ExpectedSalePrice`].
     pub expected_sale_price_div: Option<f64>,
+    /// Plugin host bridge (Phase F.3). Drives
+    /// [`ItemPredicate::Custom`]. `None` means custom predicates
+    /// always evaluate to false.
+    pub plugin_dispatch: Option<&'a dyn PluginPredicateDispatch>,
 }
 
 impl<'a> PredicateContext<'a> {
@@ -70,6 +93,7 @@ impl<'a> PredicateContext<'a> {
             valuator: None,
             stash: None,
             expected_sale_price_div: None,
+            plugin_dispatch: None,
         }
     }
 
@@ -94,6 +118,12 @@ impl<'a> PredicateContext<'a> {
     #[must_use]
     pub fn with_expected_sale_price(mut self, price_div: f64) -> Self {
         self.expected_sale_price_div = Some(price_div);
+        self
+    }
+
+    #[must_use]
+    pub fn with_plugin_dispatch(mut self, dispatch: &'a dyn PluginPredicateDispatch) -> Self {
+        self.plugin_dispatch = Some(dispatch);
         self
     }
 }
@@ -161,6 +191,17 @@ pub fn eval(predicate: &ItemPredicate, item: &Item, ctx: &PredicateContext<'_>) 
         ItemPredicate::All(ps) => ps.iter().all(|p| eval(p, item, ctx)),
         ItemPredicate::Any(ps) => ps.iter().any(|p| eval(p, item, ctx)),
         ItemPredicate::Not(p) => !eval(p, item, ctx),
+
+        ItemPredicate::Custom {
+            plugin_id,
+            name,
+            args,
+        } => match ctx.plugin_dispatch {
+            Some(dispatch) => dispatch
+                .dispatch(plugin_id, name, item, args)
+                .unwrap_or(false),
+            None => false,
+        },
     }
 }
 

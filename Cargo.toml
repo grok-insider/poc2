@@ -9,6 +9,8 @@ members = [
     "crates/market",
     "crates/advisor",
     "crates/parser",
+    "crates/plugin-host",
+    "crates/plugin-sdk",
     "pipeline",
     "apps/desktop/src-tauri",
 ]
@@ -21,6 +23,8 @@ default-members = [
     "crates/market",
     "crates/advisor",
     "crates/parser",
+    "crates/plugin-host",
+    "crates/plugin-sdk",
     "pipeline",
 ]
 
@@ -83,6 +87,11 @@ poc2-market      = { path = "crates/market",      version = "0.1.0" }
 poc2-advisor     = { path = "crates/advisor",     version = "0.1.0" }
 poc2-parser      = { path = "crates/parser",      version = "0.1.0" }
 poc2-pipeline    = { path = "pipeline",           version = "0.1.0" }
+poc2-plugin-host = { path = "crates/plugin-host", version = "0.1.0" }
+poc2-plugin-sdk  = { path = "crates/plugin-sdk",  version = "0.1.0" }
+
+# Wasm runtime (Phase F)
+wasmtime = { version = "26", default-features = false, features = ["cranelift", "runtime"] }
 
 [profile.release]
 lto = "thin"

@@ -235,6 +235,20 @@ pub enum ItemPredicate {
     Always,
     /// Always false — useful for testing rejection paths.
     Never,
+    /// Plugin-defined custom predicate (Phase F.3).
+    ///
+    /// `plugin_id` references a loaded plugin; `name` is the
+    /// declared predicate name. `args` is an opaque JSON value the
+    /// plugin's `eval_predicate` function receives verbatim.
+    /// Always returns false when no plugin host is attached to the
+    /// [`PredicateContext`] (so existing rules/strategies that don't
+    /// reference plugins are unaffected).
+    Custom {
+        plugin_id: String,
+        name: String,
+        #[serde(default)]
+        args: serde_json::Value,
+    },
 }
 
 // ---------------------------------------------------------------------------

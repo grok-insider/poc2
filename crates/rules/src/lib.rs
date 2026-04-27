@@ -31,6 +31,6 @@ pub mod rule;
 pub mod seed;
 
 pub use engine::{evaluate, evaluate_with_ctx, EngineResult};
-pub use loader::{load_rule_str, RuleError};
+pub use loader::{load_rule_json, load_rule_str, load_rules_json, load_rules_str, RuleError};
 pub use rule::{Category, Confidence, Rule, RuleId, RuleSet, Suggestion, SuggestionAction};
 pub use seed::seed_rules;
