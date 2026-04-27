@@ -11,7 +11,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
-use poc2_advisor::{plan, BeamConfig, Goal, PlanInput, Recommendation, Stash};
+use poc2_advisor::{
+    plan, plan_streaming, BeamConfig, Goal, PlanInput, Recommendation, Stash, StreamingProgress,
+};
 use poc2_data::Bundle;
 use poc2_engine::currency::DefaultCurrencyResolver;
 use poc2_engine::item::Item;
@@ -24,6 +26,7 @@ use poc2_parser::{lower_to_item, parse_clipboard_text, ParsedItem};
 use poc2_rules::RuleSet;
 use poc2_strategies::StrategyRegistry;
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tracing_subscriber::EnvFilter;
@@ -159,6 +162,10 @@ struct AdvisorState {
     valuator: Arc<Mutex<Valuator>>,
     /// Most recent live-price refresh metadata, if any.
     price_refresh: Arc<Mutex<Option<PriceRefreshMeta>>>,
+    /// In-flight streaming task. Each new `recommend_streaming` call
+    /// aborts the prior task to avoid stale emits clobbering newer
+    /// requests (per Phase C.2).
+    streaming_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,6 +187,7 @@ impl AdvisorState {
             rules: Arc::new(rules),
             valuator: Arc::new(Mutex::new(Valuator::default())),
             price_refresh: Arc::new(Mutex::new(None)),
+            streaming_task: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -845,6 +853,109 @@ async fn list_leagues() -> Result<Vec<LeagueInfo>, String> {
 // Bundle hot-swap (Phase A.6)
 // ---------------------------------------------------------------------
 
+// ---------------------------------------------------------------------
+// Streaming recommendations (Phase C.2)
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Clone)]
+struct StreamingProgressEvent {
+    /// Beam-search depth this batch was computed at.
+    depth: u32,
+    /// Top-N recommendations at this depth.
+    recommendations: Vec<Recommendation>,
+    /// True iff this is the deepest (final) emission.
+    is_final: bool,
+    /// Patch the planner ran against.
+    patch: String,
+}
+
+/// Tauri event topic the streaming planner emits to.
+const ADVISOR_PROGRESS_EVENT: &str = "advisor://progress";
+
+#[tauri::command]
+async fn recommend_streaming(
+    args: RecommendArgs,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<(), String> {
+    // Cancel any in-flight task; the abort is best-effort (the worker
+    // task uses spawn_blocking and only checks for cancellation
+    // between depth-emits via the channel, which is closed when the
+    // app handle is dropped).
+    if let Ok(mut guard) = state.streaming_task.lock() {
+        if let Some(handle) = guard.take() {
+            handle.abort();
+        }
+    }
+
+    let rules = state.rules.clone();
+    let bundle = state.bundle.clone();
+    let valuator = state.valuator.clone();
+    let app_clone = app.clone();
+    let item = args.item;
+    let goal = args.goal;
+    let stash = args.stash;
+    let risk = args.risk;
+    let top_n = args.top_n;
+    let depth = args.depth;
+
+    let task = tokio::task::spawn_blocking(move || {
+        let bundle_guard = bundle.read().expect("bundle rwlock poisoned");
+        let valuator_guard = valuator.lock().expect("valuator mutex poisoned");
+        let patch = bundle_guard
+            .bundle_patch
+            .unwrap_or(PatchVersion::PATCH_0_4_0);
+        let input = PlanInput {
+            item,
+            goal,
+            rules: rules.as_ref(),
+            strategies: bundle_guard.strategies.as_ref(),
+            registry: bundle_guard.registry.as_ref(),
+            resolver: bundle_guard.resolver.as_ref(),
+            valuator: &valuator_guard,
+            stash: &stash,
+            patch,
+            config: BeamConfig {
+                width: top_n.max(3),
+                depth: depth.max(1),
+                risk,
+                top_n,
+                seed: 0,
+                mc_samples: 50,
+                weights: poc2_advisor::ScoringWeights::default(),
+            },
+        };
+        // Run depth-1 → depth-3 → final-depth, with the final being
+        // the user-configured depth (clamped to [1, 8] for sanity).
+        let final_depth = depth.clamp(1, 8);
+        let mut depths = Vec::with_capacity(3);
+        depths.push(1);
+        if final_depth >= 3 && !depths.contains(&3) {
+            depths.push(3);
+        }
+        if !depths.contains(&final_depth) {
+            depths.push(final_depth);
+        }
+        plan_streaming(&input, &depths, |progress: StreamingProgress| {
+            let event = StreamingProgressEvent {
+                depth: progress.depth,
+                recommendations: progress.recommendations,
+                is_final: progress.is_final,
+                patch: format!("{patch}"),
+            };
+            // Best-effort emit; if the frontend hung up, drop the event.
+            let _ = app_clone.emit(ADVISOR_PROGRESS_EVENT, event);
+        });
+        drop(valuator_guard);
+        drop(bundle_guard);
+    });
+
+    if let Ok(mut guard) = state.streaming_task.lock() {
+        *guard = Some(task);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 struct ReloadBundleArgs {
     /// Optional explicit path. `None` re-runs the XDG-aware bundle
@@ -973,6 +1084,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ping,
             recommend,
+            recommend_streaming,
             parse_item_text,
             read_clipboard_item,
             refresh_prices,

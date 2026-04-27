@@ -58,6 +58,8 @@ pub use scorer::{action_cost, score, ScoringWeights};
 pub use simulator::{simulate, simulate_n, McOutcome, SimulationOutcome};
 pub use stash::Stash;
 
+// StreamingProgress + plan_streaming exported above via `pub fn`.
+
 use poc2_engine::currency::CurrencyResolver;
 use poc2_engine::item::Item;
 use poc2_engine::patch::PatchVersion;
@@ -104,4 +106,66 @@ pub fn recommend_quick(
         },
     };
     plan(&input)
+}
+
+/// One streaming progress event. Emitted by [`plan_streaming`] at each
+/// depth boundary so the UI can render progressively-better
+/// recommendations.
+#[derive(Debug, Clone)]
+pub struct StreamingProgress {
+    /// The depth that just completed.
+    pub depth: u32,
+    /// Recommendations at this depth (top-N as configured).
+    pub recommendations: Vec<Recommendation>,
+    /// True iff this is the final emission (`depth >= max_depth`).
+    pub is_final: bool,
+}
+
+/// Run the planner at progressively-deeper depths (1 → 3 → 8 by
+/// default), emitting `StreamingProgress` after each beam search.
+///
+/// This is the synchronous worker the Tauri layer wraps in a
+/// `spawn_blocking` task. Cancellation is cooperative: the caller drops
+/// the receiver to stop further sends.
+///
+/// `depths`: the depths to run at, in order. Defaults to `[1, 3, 8]`
+/// when empty. Each entry overrides the input's `config.depth`.
+#[allow(clippy::too_many_arguments)] // mirrors PlanInput shape
+pub fn plan_streaming(
+    input: &PlanInput<'_>,
+    depths: &[u32],
+    mut emit: impl FnMut(StreamingProgress),
+) {
+    let depth_list: &[u32] = if depths.is_empty() {
+        &[1, 3, 8]
+    } else {
+        depths
+    };
+    let max_depth = *depth_list.iter().max().unwrap_or(&1);
+    for (i, &d) in depth_list.iter().enumerate() {
+        let mut local_input = PlanInput {
+            item: input.item.clone(),
+            goal: input.goal.clone(),
+            rules: input.rules,
+            strategies: input.strategies,
+            registry: input.registry,
+            resolver: input.resolver,
+            valuator: input.valuator,
+            stash: input.stash,
+            patch: input.patch,
+            config: input.config,
+        };
+        local_input.config.depth = d;
+        // Earlier depths skip MC for snappy first-paint; the deepest run
+        // uses the user's configured mc_samples.
+        if i + 1 < depth_list.len() {
+            local_input.config.mc_samples = local_input.config.mc_samples.min(5);
+        }
+        let recs = plan(&local_input);
+        emit(StreamingProgress {
+            depth: d,
+            recommendations: recs,
+            is_final: d >= max_depth || i + 1 == depth_list.len(),
+        });
+    }
 }

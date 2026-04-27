@@ -142,6 +142,17 @@ export interface RecommendResponse {
   bundle_path: string | null;
 }
 
+/// Phase C.2 streaming progress event.
+export interface StreamingProgressEvent {
+  depth: number;
+  recommendations: Recommendation[];
+  is_final: boolean;
+  patch: string;
+}
+
+/// Topic the streaming planner emits to.
+export const ADVISOR_PROGRESS_EVENT = 'advisor://progress';
+
 export interface ModLine {
   text: string;
   fractured: boolean;

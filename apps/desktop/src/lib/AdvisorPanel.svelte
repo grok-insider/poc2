@@ -1,14 +1,17 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import type {
-    AdvisorAction,
-    Goal,
-    Item,
-    PriceRefreshMeta,
-    Recommendation,
-    RecommendArgs,
-    RecommendResponse,
-    RefreshPricesResponse,
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import {
+    ADVISOR_PROGRESS_EVENT,
+    type AdvisorAction,
+    type Goal,
+    type Item,
+    type PriceRefreshMeta,
+    type Recommendation,
+    type RecommendArgs,
+    type RecommendResponse,
+    type RefreshPricesResponse,
+    type StreamingProgressEvent,
   } from './types';
 
   type Props = {
@@ -32,11 +35,52 @@
   } | null>(null);
   let priceMeta = $state<PriceRefreshMeta | null>(null);
   let loading = $state(false);
+  let streamingDepth = $state<number | null>(null);
   let priceLoading = $state(false);
   let priceError = $state<string | null>(null);
   let error = $state<string | null>(null);
   let risk = $state(0.5);
   let depth = $state(2);
+  let useStreaming = $state(true);
+  let unlistenStream: UnlistenFn | null = null;
+
+  // Subscribe to the streaming-planner event channel exactly once.
+  $effect(() => {
+    let cancelled = false;
+    listen<StreamingProgressEvent>(ADVISOR_PROGRESS_EVENT, (ev) => {
+      if (cancelled) return;
+      const p = ev.payload;
+      recommendations = p.recommendations;
+      onRecommendations?.(recommendations);
+      streamingDepth = p.depth;
+      meta = meta
+        ? { ...meta, patch: p.patch }
+        : {
+            patch: p.patch,
+            rule_count: 0,
+            strategy_count: 0,
+            mod_count: 0,
+            bundle_path: null,
+          };
+      if (p.is_final) {
+        loading = false;
+        streamingDepth = null;
+      }
+    }).then((u) => {
+      if (cancelled) {
+        u();
+        return;
+      }
+      unlistenStream = u;
+    });
+    return () => {
+      cancelled = true;
+      if (unlistenStream) {
+        unlistenStream();
+        unlistenStream = null;
+      }
+    };
+  });
 
   async function refreshPrices() {
     priceLoading = true;
@@ -69,6 +113,26 @@
         top_n: 5,
         depth,
       };
+      if (useStreaming) {
+        // Streaming: emits via the advisor://progress event listener
+        // above. The terminal event clears `loading`.
+        await invoke('recommend_streaming', { args });
+        // Always also fire one synchronous call so meta counts are
+        // populated even when streaming hasn't completed yet.
+        const response = await invoke<RecommendResponse>('recommend', { args });
+        if (recommendations.length === 0) {
+          recommendations = response.recommendations;
+          onRecommendations?.(recommendations);
+        }
+        meta = {
+          patch: response.patch,
+          rule_count: response.rule_count,
+          strategy_count: response.strategy_count,
+          mod_count: response.mod_count,
+          bundle_path: response.bundle_path,
+        };
+        return; // loading cleared by the final stream event
+      }
       const response = await invoke<RecommendResponse>('recommend', { args });
       recommendations = response.recommendations;
       onRecommendations?.(recommendations);
@@ -83,7 +147,7 @@
       error = String(err);
       recommendations = [];
     } finally {
-      loading = false;
+      if (!useStreaming) loading = false;
     }
   }
 
@@ -156,8 +220,16 @@
       <input type="range" min="1" max="5" step="1" bind:value={depth} />
     </label>
     <button onclick={refresh} disabled={loading}>
-      {loading ? 'planning…' : 'Re-plan'}
+      {loading
+        ? streamingDepth !== null
+          ? `streaming (depth ${streamingDepth})…`
+          : 'planning…'
+        : 'Re-plan'}
     </button>
+    <label class="streaming-toggle">
+      <input type="checkbox" bind:checked={useStreaming} />
+      streaming
+    </label>
     <button onclick={refreshPrices} disabled={priceLoading} class="secondary">
       {priceLoading ? 'fetching…' : 'Refresh prices'}
     </button>
@@ -259,6 +331,14 @@
     color: var(--fg-muted);
     border: 1px solid var(--border);
     font-weight: 400;
+  }
+
+  .streaming-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    color: var(--fg-muted);
   }
 
   .warn {
