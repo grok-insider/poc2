@@ -17,10 +17,67 @@
 //! accept the breach catalyst in 0.4 per the heuristics rulebook.
 //! Sanctified / mirrored / corrupted items reject catalysts.
 
-use crate::currency::{ApplyContext, ApplyOutcome, Currency};
+use crate::currency::{ApplyContext, ApplyOutcome, CannotApply, Currency};
 use crate::error::{EngineError, EngineResult};
-use crate::ids::{CurrencyId, TagId};
+use crate::ids::{CurrencyId, ItemClassId, TagId};
 use crate::item::{Item, QualityKind};
+
+/// Item classes catalysts are eligible to apply to (M14.5).
+///
+/// Catalysts are tagged-quality currency restricted to jewellery and
+/// jewels in PoE2 0.4. Sceptres, weapons, armours, and accessories outside
+/// this list reject catalysts.
+const CATALYST_ELIGIBLE_CLASSES: &[&str] = &["Ring", "Amulet", "Belt", "Jewel"];
+
+/// PascalCase class ids known to be ineligible for catalysts. Used by the
+/// best-effort `Catalyst::can_apply_to` heuristic when `Item.base` carries
+/// a class-id placeholder (v3 transitional state). Real-bundle items with
+/// metadata-path bases pass this heuristic and get caught by the
+/// registry-backed gate inside `apply()`.
+const CATALYST_KNOWN_NONELIGIBLE_CLASSES: &[&str] = &[
+    "BodyArmour",
+    "Helmet",
+    "Boots",
+    "Gloves",
+    "OneHandSword",
+    "TwoHandSword",
+    "OneHandAxe",
+    "TwoHandAxe",
+    "OneHandMace",
+    "TwoHandMace",
+    "Bow",
+    "Crossbow",
+    "Spear",
+    "Staff",
+    "Sceptre",
+    "Wand",
+    "Dagger",
+    "Claw",
+    "Quiver",
+    "Focus",
+    "Talisman",
+    "Waystone",
+    "Charm",
+    "Tablet",
+];
+
+/// Resolve an item's class id for catalyst gating.
+///
+/// Prefers [`crate::base_registry::BaseRegistry`] when the item's `base`
+/// is a real bundle id; falls back to `ItemClassId::from(item.base.as_str())`
+/// for the v3 transitional period when fixtures stuff class ids into
+/// `Item.base`. Same polymorphic shape as the basic-orb sampler's
+/// `class_for_item`, kept inline to avoid leaking the helper across
+/// currency modules.
+fn resolve_class_for_catalyst(
+    item: &Item,
+    base_registry: &crate::base_registry::BaseRegistry,
+) -> ItemClassId {
+    if let Some(c) = base_registry.class_of(&item.base) {
+        return c.clone();
+    }
+    ItemClassId::from(item.base.as_str())
+}
 
 /// Quality cap (vanilla bases). Exceptional bases will raise this to 30
 /// in M2.6; we'll plumb that through `BaseType::quality_cap` then.
@@ -117,7 +174,41 @@ impl Currency for Catalyst {
         self.display_name
     }
 
-    fn apply(&self, item: &mut Item, _ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
+    /// Pre-flight class gate. Rejects items whose `base` resolves to a
+    /// class outside [`CATALYST_ELIGIBLE_CLASSES`]. Best-effort against
+    /// fixture items (where `Item.base` carries the class id directly);
+    /// real-bundle items resolve via the registered [`crate::BaseRegistry`]
+    /// only at `apply()` time, so `can_apply_to` may pass on real-bundle
+    /// items the registry would later reject. The advisor double-checks
+    /// at apply time so the hard error path stays correct.
+    fn can_apply_to(&self, item: &Item) -> Result<(), CannotApply> {
+        let valid = self.valid_rarities();
+        if !valid.contains(item.rarity) {
+            return Err(CannotApply::WrongRarity {
+                item_rarity: item.rarity,
+                expected: valid,
+            });
+        }
+        if item.mirrored {
+            return Err(CannotApply::Mirrored);
+        }
+        if item.corrupted {
+            return Err(CannotApply::Corrupted);
+        }
+        // Best-effort class check using the item.base placeholder. If
+        // `item.base` matches a known PascalCase class id that is *not* in
+        // the eligible set, reject. Otherwise accept and let `apply()`
+        // do the registry-backed check.
+        let candidate_class = item.base.as_str();
+        if CATALYST_KNOWN_NONELIGIBLE_CLASSES.contains(&candidate_class) {
+            return Err(CannotApply::Other(
+                "catalysts apply only to Ring / Amulet / Belt / Jewel",
+            ));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if item.sanctified {
             return Err(EngineError::ItemSanctified);
         }
@@ -128,6 +219,16 @@ impl Currency for Catalyst {
         }
         if item.corrupted {
             return Err(EngineError::ItemCorrupted);
+        }
+        // Registry-backed class gate (M14.5).
+        let class = resolve_class_for_catalyst(item, ctx.base_registry);
+        if !CATALYST_ELIGIBLE_CLASSES.contains(&class.as_str()) {
+            return Err(EngineError::InvalidApplication(format!(
+                "{}: cannot apply to class {} — eligible classes are {}",
+                self.display_name,
+                class,
+                CATALYST_ELIGIBLE_CLASSES.join(", ")
+            )));
         }
 
         // Quality is already at the cap → reject (player should know).
@@ -197,12 +298,12 @@ mod tests {
         rng: &'a mut Xoshiro256PlusPlus,
         omens: &'a mut OmenSet,
     ) -> ApplyContext<'a> {
-        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0, omens)
+        ApplyContext::new_without_bases(reg, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     #[test]
     fn first_apply_tags_and_adds_increment() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();
@@ -215,7 +316,7 @@ mod tests {
 
     #[test]
     fn matching_tag_increments_quality() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();
@@ -230,7 +331,7 @@ mod tests {
 
     #[test]
     fn switching_tag_resets_then_adds_increment() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();
@@ -256,7 +357,7 @@ mod tests {
 
     #[test]
     fn quality_capped_at_20() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();
@@ -270,7 +371,7 @@ mod tests {
 
     #[test]
     fn adaptive_catalyst_applies_double_increment() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();
@@ -283,7 +384,7 @@ mod tests {
 
     #[test]
     fn corrupted_item_rejects_catalyst() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();
@@ -295,7 +396,7 @@ mod tests {
 
     #[test]
     fn sanctified_item_rejects_catalyst() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();
@@ -307,7 +408,7 @@ mod tests {
 
     #[test]
     fn untagged_quality_resets_on_switch_to_tagged() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();

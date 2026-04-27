@@ -3,7 +3,6 @@
 //! Alch / Exalt / Chaos / Annul / Divine / Vaal land in M2.4c-d.
 //! Greater / Perfect variants land in M2.4e.
 
-use rand::seq::SliceRandom;
 use rand::Rng;
 use smallvec::SmallVec;
 
@@ -11,34 +10,46 @@ use crate::currency::{ApplyContext, ApplyOutcome, Currency};
 use crate::error::{EngineError, EngineResult};
 use crate::ids::{CurrencyId, ItemClassId};
 use crate::item::{AffixType, Item, ModRoll, Rarity};
-use crate::mods::{ModDefinition, ModKind};
+use crate::mods::{ModDefinition, ModFlags, ModKind};
 use crate::registry::{ModIndex, ModRegistry};
+
+/// Mod-flag exclusion mask for basic-orb sampling (M14.3).
+///
+/// Trans / Aug / Regal / Alch / Exalt / Chaos (every tier) cannot roll mods
+/// flagged as essence-, desecrated-, or corrupted-only. The bundle tags
+/// these mods at pipeline time; this constant is the runtime gate that
+/// honors those tags during [`sample_eligible_mod`].
+///
+/// Per `docs/81-engine-training-and-rule-encoding-plan.md` §4.3 Tier 1.3
+/// and rule R232.
+const BASIC_ORB_EXCLUDES: ModFlags = ModFlags::ESSENCE_ONLY
+    .union(ModFlags::DESECRATED_ONLY)
+    .union(ModFlags::CORRUPTED_ONLY);
 
 // =========================================================================
 // Helpers shared by all "add a mod" orbs
 // =========================================================================
 
-/// Compute the class of an item from its base. The full `BaseType` lookup is
-/// not part of the engine's hot path yet — for now we ferry the class via a
-/// helper. Once M2.4 stabilizes, the engine will keep a `BaseRegistry` like
-/// `ModRegistry` that gives O(1) base → class.
+/// Compute the class of an item from its base.
 ///
-/// In the interim, callers who need to apply a currency must already know
-/// the item's class. The engine offers helpers that take the class directly.
-/// `Item.base` is opaque to the engine until the BaseRegistry is wired up.
-pub(crate) fn class_for_item(item: &Item) -> ItemClassId {
-    // PLACEHOLDER: until BaseRegistry lands, the caller must set Item.base
-    // to the item-class id directly when constructing test items. The
-    // pipeline-built bundles always carry the full base id, but the engine
-    // needs the class for its lookups, not the base. We'll resolve this in
-    // M2.4-followup by either:
-    //   (a) introducing BaseRegistry, or
-    //   (b) extending Item with a denormalized `class: ItemClassId`.
-    // Option (b) is cheaper and is what the test fixtures use.
+/// M14.2: resolves via [`crate::BaseRegistry`] when the item's `base` is a
+/// real bundle id. Falls back to `ItemClassId::from(item.base.as_str())`
+/// for legacy fixtures that stuff the class id into `Item.base` as a
+/// placeholder. The fallback is preserved through the v3 transitional
+/// period; the v3 hard-reset bundle migration (M14.7) eliminates the need
+/// for the fallback by guaranteeing every imported item carries a real
+/// `BaseTypeId`.
+pub(crate) fn class_for_item(
+    item: &Item,
+    base_registry: &crate::base_registry::BaseRegistry,
+) -> ItemClassId {
+    if let Some(class) = base_registry.class_of(&item.base) {
+        return class.clone();
+    }
     ItemClassId::from(item.base.as_str())
 }
 
-/// Sample a mod uniformly at random from the eligible set.
+/// Sample a mod from the eligible set with CoE-derived numerical weights.
 ///
 /// Eligibility:
 /// 1. The mod's `affix_type` matches `affix`.
@@ -49,23 +60,34 @@ pub(crate) fn class_for_item(item: &Item) -> ItemClassId {
 /// 5. The mod is `ModKind::Explicit` (we don't roll implicits/enchants/desecrated
 ///    via this path).
 /// 6. The mod's `patch_range` contains the current patch.
+/// 7. **(M14.3)** The mod's `flags` does not intersect `excludes`. Basic
+///    orbs pass [`BASIC_ORB_EXCLUDES`] so essence-only / desecrated-only /
+///    corrupted-only mods never leak into Trans/Aug/Regal/Alch/Exalt/Chaos
+///    pools. Other call sites (essence apply, bone reveal, Vaal corruption)
+///    pass their own masks per `docs/34-heuristics-rulebook.md`.
 ///
-/// Weights from `spawn_weights` are applied: total weight 0 mods are
-/// excluded; weighted random selection over the rest.
+/// Weights are resolved via [`ModRegistry::weight_for`], which consults
+/// `bundle.weights` (CoE numerical weights) and falls back to RePoE-fork
+/// eligibility flags. Mods with weight `<= 0.0` are excluded; weighted
+/// random selection over the rest uses the f64 cumulative-distribution
+/// trick.
+#[allow(clippy::too_many_arguments)] // 8 args: 7 prior + the M14.3 `excludes` mask.
 fn sample_eligible_mod<'r>(
     registry: &'r ModRegistry,
+    base_registry: &crate::base_registry::BaseRegistry,
     item: &Item,
     affix: AffixType,
     rng: &mut dyn rand::RngCore,
     patch: crate::patch::PatchVersion,
     min_required_level: u32,
+    excludes: ModFlags,
 ) -> Option<&'r ModDefinition> {
-    let class = class_for_item(item);
+    let class = class_for_item(item, base_registry);
     let candidates = registry.for_class_affix(&class, affix);
 
     // Build the list of (mod, weight) tuples after filtering.
     // SmallVec to avoid heap allocation in the small-eligibility-set common case.
-    let mut eligible: SmallVec<[(ModIndex, u32); 64]> = SmallVec::new();
+    let mut eligible: SmallVec<[(ModIndex, f64); 64]> = SmallVec::new();
 
     let occupied_groups = collect_occupied_groups(registry, item);
 
@@ -83,8 +105,11 @@ fn sample_eligible_mod<'r>(
         if occupied_groups.contains(&m.mod_group.0) {
             continue;
         }
-        let w = total_weight_for_item(m, item);
-        if w == 0 {
+        if m.flags.intersects(excludes) {
+            continue;
+        }
+        let w = total_weight_for_item(m, item, registry, &class);
+        if w <= 0.0 {
             continue;
         }
         eligible.push((idx, w));
@@ -94,29 +119,32 @@ fn sample_eligible_mod<'r>(
         return None;
     }
 
-    let total: u64 = eligible.iter().map(|(_, w)| u64::from(*w)).sum();
-    let mut pick = rng.gen_range(0..total);
+    let total: f64 = eligible.iter().map(|(_, w)| *w).sum();
+    if total <= 0.0 {
+        return None;
+    }
+    let mut pick = rng.gen_range(0.0..total);
     for (idx, w) in &eligible {
-        let w64 = u64::from(*w);
-        if pick < w64 {
+        if pick < *w {
             return registry.at(*idx);
         }
-        pick -= w64;
+        pick -= *w;
     }
-    // Defensive: should never reach here unless the iterator and the random
-    // distribution disagree (they don't).
-    eligible.choose(rng).and_then(|(i, _)| registry.at(*i))
+    // Defensive: floating-point summation may round the cumulative just under
+    // `total` so the loop falls through — return the last eligible entry.
+    eligible.last().and_then(|(i, _)| registry.at(*i))
 }
 
-/// Sum of `spawn_weights` entries whose tag is present on the item's tag set
-/// (i.e., the actual probability mass of this mod on this item).
-fn total_weight_for_item(m: &ModDefinition, _item: &Item) -> u32 {
-    // TODO(M2.5): once Item carries denormalized base tags, multiply by the
-    // intersection of tags. For now, until BaseRegistry lands, we treat every
-    // non-zero weight as 1; this is identical to RePoE-fork's eligibility
-    // semantics and produces uniform sampling within the eligible set —
-    // sufficient for M2.4b correctness tests.
-    u32::from(m.spawn_weights.iter().any(|sw| sw.weight > 0))
+/// Resolve the spawn weight of a mod on this item via the registry's
+/// CoE-derived weight tables, with the eligibility fallback for mods that
+/// lack observations.
+fn total_weight_for_item(
+    m: &ModDefinition,
+    item: &Item,
+    registry: &ModRegistry,
+    class: &ItemClassId,
+) -> f64 {
+    registry.weight_for(&m.id, &item.base, item.ilvl, class)
 }
 
 /// Set of mod-groups already occupied on the item (any affix slot).
@@ -340,13 +368,21 @@ impl Currency for OrbOfTransmutation {
         }
         let affix = pick_open_affix(item, ctx.rng, /* magic max = */ 1)
             .ok_or(EngineError::AffixSlotFull { affix_type: "any" })?;
-        let m = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, 0).ok_or_else(
-            || EngineError::NoEligibleMods {
-                base: item.base.to_string(),
-                ilvl: item.ilvl,
-                affix_type: affix_label(affix),
-            },
-        )?;
+        let m = sample_eligible_mod(
+            ctx.registry,
+            ctx.base_registry,
+            item,
+            affix,
+            ctx.rng,
+            ctx.patch,
+            0,
+            BASIC_ORB_EXCLUDES,
+        )
+        .ok_or_else(|| EngineError::NoEligibleMods {
+            base: item.base.to_string(),
+            ilvl: item.ilvl,
+            affix_type: affix_label(affix),
+        })?;
         let roll = roll_mod(m, ctx.rng);
         item.rarity = Rarity::Magic;
         push_mod(item, roll);
@@ -403,13 +439,21 @@ impl Currency for OrbOfAugmentation {
         let affix = pick_open_affix(item, ctx.rng, 1).ok_or(EngineError::AffixSlotFull {
             affix_type: "magic-item is full",
         })?;
-        let m = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, 0).ok_or_else(
-            || EngineError::NoEligibleMods {
-                base: item.base.to_string(),
-                ilvl: item.ilvl,
-                affix_type: affix_label(affix),
-            },
-        )?;
+        let m = sample_eligible_mod(
+            ctx.registry,
+            ctx.base_registry,
+            item,
+            affix,
+            ctx.rng,
+            ctx.patch,
+            0,
+            BASIC_ORB_EXCLUDES,
+        )
+        .ok_or_else(|| EngineError::NoEligibleMods {
+            base: item.base.to_string(),
+            ilvl: item.ilvl,
+            affix_type: affix_label(affix),
+        })?;
         push_mod(item, roll_mod(m, ctx.rng));
         Ok(())
     }
@@ -465,13 +509,21 @@ impl Currency for RegalOrb {
         let affix = pick_open_affix(item, ctx.rng, 3).ok_or(EngineError::AffixSlotFull {
             affix_type: "rare-item already full somehow",
         })?;
-        let m = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, 0).ok_or_else(
-            || EngineError::NoEligibleMods {
-                base: item.base.to_string(),
-                ilvl: item.ilvl,
-                affix_type: affix_label(affix),
-            },
-        )?;
+        let m = sample_eligible_mod(
+            ctx.registry,
+            ctx.base_registry,
+            item,
+            affix,
+            ctx.rng,
+            ctx.patch,
+            0,
+            BASIC_ORB_EXCLUDES,
+        )
+        .ok_or_else(|| EngineError::NoEligibleMods {
+            base: item.base.to_string(),
+            ilvl: item.ilvl,
+            affix_type: affix_label(affix),
+        })?;
         item.rarity = Rarity::Rare;
         push_mod(item, roll_mod(m, ctx.rng));
         Ok(())
@@ -534,8 +586,16 @@ impl Currency for OrbOfAlchemy {
             let Some(affix) = pick_open_affix(item, ctx.rng, /* rare max = */ 3) else {
                 break;
             };
-            let Some(m) = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, 0)
-            else {
+            let Some(m) = sample_eligible_mod(
+                ctx.registry,
+                ctx.base_registry,
+                item,
+                affix,
+                ctx.rng,
+                ctx.patch,
+                0,
+                BASIC_ORB_EXCLUDES,
+            ) else {
                 break;
             };
             push_mod(item, roll_mod(m, ctx.rng));
@@ -603,12 +663,21 @@ impl Currency for ExaltedOrb {
                 pick_open_affix_with_omen(item, ctx, 3).ok_or(EngineError::AffixSlotFull {
                     affix_type: "Exalted Orb: no eligible affix slot",
                 })?;
-            let m = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, 0)
-                .ok_or_else(|| EngineError::NoEligibleMods {
-                    base: item.base.to_string(),
-                    ilvl: item.ilvl,
-                    affix_type: affix_label(affix),
-                })?;
+            let m = sample_eligible_mod(
+                ctx.registry,
+                ctx.base_registry,
+                item,
+                affix,
+                ctx.rng,
+                ctx.patch,
+                0,
+                BASIC_ORB_EXCLUDES,
+            )
+            .ok_or_else(|| EngineError::NoEligibleMods {
+                base: item.base.to_string(),
+                ilvl: item.ilvl,
+                affix_type: affix_label(affix),
+            })?;
             push_mod(item, roll_mod(m, ctx.rng));
         }
         Ok(())
@@ -768,12 +837,21 @@ fn chaos_apply(
     let new_affix = pick_open_affix(item, ctx.rng, 3).ok_or(EngineError::AffixSlotFull {
         affix_type: "no slot opened up after Chaos Orb removal",
     })?;
-    let m = sample_eligible_mod(ctx.registry, item, new_affix, ctx.rng, ctx.patch, min_level)
-        .ok_or_else(|| EngineError::NoEligibleMods {
-            base: item.base.to_string(),
-            ilvl: item.ilvl,
-            affix_type: affix_label(new_affix),
-        })?;
+    let m = sample_eligible_mod(
+        ctx.registry,
+        ctx.base_registry,
+        item,
+        new_affix,
+        ctx.rng,
+        ctx.patch,
+        min_level,
+        BASIC_ORB_EXCLUDES,
+    )
+    .ok_or_else(|| EngineError::NoEligibleMods {
+        base: item.base.to_string(),
+        ilvl: item.ilvl,
+        affix_type: affix_label(new_affix),
+    })?;
     push_mod(item, roll_mod(m, ctx.rng));
     Ok(())
 }
@@ -935,20 +1013,90 @@ impl Currency for VaalOrb {
             ));
         }
 
-        let outcome = sample_vaal_outcome(ctx.rng);
+        // M14.4: Omen of Corruption suppresses the NoChange outcome.
+        // `consume_prevent_no_change` removes the omen iff present and in
+        // patch range; the boolean shifts the sampler into a 5-outcome mode.
+        let prevent_no_change = ctx.omens.consume_prevent_no_change(ctx.patch);
+        let outcome = sample_vaal_outcome(ctx.rng, prevent_no_change);
         item.corrupted = true;
         match outcome {
-            // No-change AND placeholder-enchantment both leave the rolled
-            // mods alone. Real enchantment list comes via the corrupted
-            // mod-domain data in M2.6; until then they're identical.
-            VaalOutcome::NoChange | VaalOutcome::AddEnchantment => {}
+            VaalOutcome::NoChange => {}
             VaalOutcome::RerollValues => reroll_explicit_values(item, ctx),
             VaalOutcome::BrickMods => {
-                // Approximation: clear non-fractured mods and add no replacement.
-                // Full "brick" semantics (replace with corrupted-only mods)
-                // lands when corrupted mod-domain data is integrated.
-                item.prefixes.retain(|m| m.is_fractured);
-                item.suffixes.retain(|m| m.is_fractured);
+                // Clear non-fractured explicit mods. For each cleared slot,
+                // attempt to sample a ModKind::Corrupted mod from the
+                // registry (filtered by item class and affix type). When
+                // no Corrupted-explicit pool exists for the class — which
+                // is the v3 starting state, since `vaal_implicits.json`
+                // populates only Implicit-affix Corrupted mods — the slot
+                // stays empty and the item ends up with fewer explicit
+                // mods, which approximates the in-game brick.
+                let kept_prefixes = item
+                    .prefixes
+                    .iter()
+                    .filter(|m| m.is_fractured)
+                    .cloned()
+                    .collect::<smallvec::SmallVec<_>>();
+                let kept_suffixes = item
+                    .suffixes
+                    .iter()
+                    .filter(|m| m.is_fractured)
+                    .cloned()
+                    .collect::<smallvec::SmallVec<_>>();
+                let prefixes_to_replace = item.prefixes.len() - kept_prefixes.len();
+                let suffixes_to_replace = item.suffixes.len() - kept_suffixes.len();
+                item.prefixes = kept_prefixes;
+                item.suffixes = kept_suffixes;
+                for _ in 0..prefixes_to_replace {
+                    if let Some(m) = sample_corrupted_explicit(
+                        ctx.registry,
+                        ctx.base_registry,
+                        item,
+                        AffixType::Prefix,
+                        ctx.rng,
+                        ctx.patch,
+                    ) {
+                        push_mod(item, roll_mod(m, ctx.rng));
+                    }
+                }
+                for _ in 0..suffixes_to_replace {
+                    if let Some(m) = sample_corrupted_explicit(
+                        ctx.registry,
+                        ctx.base_registry,
+                        item,
+                        AffixType::Suffix,
+                        ctx.rng,
+                        ctx.patch,
+                    ) {
+                        push_mod(item, roll_mod(m, ctx.rng));
+                    }
+                }
+            }
+            VaalOutcome::AddEnchantment => {
+                // Roll one Vaal implicit (Corrupted-kind, Implicit-affix)
+                // from the registry filtered by item class. The outcome is
+                // a no-op when the bundle has no Vaal-implicit data for
+                // the class (older fixtures).
+                if let Some(m) = sample_corrupted_implicit(
+                    ctx.registry,
+                    ctx.base_registry,
+                    item,
+                    ctx.rng,
+                    ctx.patch,
+                ) {
+                    let values = m
+                        .stats
+                        .iter()
+                        .map(|s| s.roll(ctx.rng.gen::<f64>()))
+                        .collect();
+                    item.enchantments.push(ModRoll {
+                        mod_id: m.id.clone(),
+                        affix_type: AffixType::Implicit,
+                        kind: ModKind::Corrupted,
+                        values,
+                        is_fractured: false,
+                    });
+                }
             }
             VaalOutcome::AddSocket => {
                 // Vaal can add a socket beyond the cap; we just push an empty one.
@@ -962,15 +1110,174 @@ impl Currency for VaalOrb {
     }
 }
 
-fn sample_vaal_outcome(rng: &mut dyn rand::RngCore) -> VaalOutcome {
-    match rng.gen_range(0u8..6u8) {
-        0 => VaalOutcome::NoChange,
-        1 => VaalOutcome::RerollValues,
-        2 => VaalOutcome::BrickMods,
-        3 => VaalOutcome::AddEnchantment,
-        4 => VaalOutcome::AddSocket,
-        _ => VaalOutcome::AddQuality,
+/// Vaal outcome categorical distribution (M14.4).
+///
+/// Authoritative source: poe2wiki Vaal Orb outcomes, cross-checked with
+/// `docs/81-engine-training-and-rule-encoding-plan.md` §4.4 Tier 1.4.
+///
+/// | Outcome        | Base | Omen of Corruption |
+/// |----------------|------|--------------------|
+/// | NoChange       | 0.25 | 0.0                |
+/// | RerollValues   | 0.20 | 0.267              |
+/// | BrickMods      | 0.15 | 0.20               |
+/// | AddEnchantment | 0.20 | 0.267              |
+/// | AddSocket      | 0.10 | 0.133              |
+/// | AddQuality     | 0.10 | 0.133              |
+///
+/// The omen variant simply removes the NoChange branch and renormalizes
+/// the remaining five over their original 0.75 mass.
+fn sample_vaal_outcome(rng: &mut dyn rand::RngCore, prevent_no_change: bool) -> VaalOutcome {
+    let r: f64 = rng.gen();
+    if prevent_no_change {
+        // Cumulative thresholds over [RerollValues, BrickMods,
+        // AddEnchantment, AddSocket, AddQuality] with mass 0.20 / 0.15 /
+        // 0.20 / 0.10 / 0.10 normalized by 0.75:
+        //   0.2667, 0.4667, 0.7333, 0.8667, 1.0
+        if r < 0.266_666_67 {
+            VaalOutcome::RerollValues
+        } else if r < 0.466_666_67 {
+            VaalOutcome::BrickMods
+        } else if r < 0.733_333_33 {
+            VaalOutcome::AddEnchantment
+        } else if r < 0.866_666_67 {
+            VaalOutcome::AddSocket
+        } else {
+            VaalOutcome::AddQuality
+        }
+    } else {
+        // Cumulative thresholds: 0.25 / 0.45 / 0.60 / 0.80 / 0.90 / 1.00.
+        if r < 0.25 {
+            VaalOutcome::NoChange
+        } else if r < 0.45 {
+            VaalOutcome::RerollValues
+        } else if r < 0.60 {
+            VaalOutcome::BrickMods
+        } else if r < 0.80 {
+            VaalOutcome::AddEnchantment
+        } else if r < 0.90 {
+            VaalOutcome::AddSocket
+        } else {
+            VaalOutcome::AddQuality
+        }
     }
+}
+
+/// Sample a Corrupted-kind explicit mod from the registry filtered by
+/// item class and affix type. Used by Vaal's [`VaalOutcome::BrickMods`]
+/// path to replace cleared explicit slots. Returns `None` when no
+/// matching Corrupted-explicit mods exist for the class (the typical
+/// case in v3 starter bundles).
+fn sample_corrupted_explicit<'r>(
+    registry: &'r ModRegistry,
+    base_registry: &crate::base_registry::BaseRegistry,
+    item: &Item,
+    affix: AffixType,
+    rng: &mut dyn rand::RngCore,
+    patch: crate::patch::PatchVersion,
+) -> Option<&'r ModDefinition> {
+    let class = class_for_item(item, base_registry);
+    let candidates = registry.for_class_affix(&class, affix);
+    let occupied = collect_occupied_groups(registry, item);
+    let mut eligible: SmallVec<[(ModIndex, f64); 16]> = SmallVec::new();
+    for &idx in candidates {
+        let Some(m) = registry.at(idx) else { continue };
+        if m.kind != ModKind::Corrupted {
+            continue;
+        }
+        if !m.patch_range.contains(patch) {
+            continue;
+        }
+        if occupied.contains(&m.mod_group.0) {
+            continue;
+        }
+        if m.required_level > item.ilvl {
+            continue;
+        }
+        // Vaal corruption can roll essence-only-flagged Corrupted mods
+        // (those don't exist) but never Desecrated-only ones.
+        if m.flags
+            .intersects(ModFlags::ESSENCE_ONLY | ModFlags::DESECRATED_ONLY)
+        {
+            continue;
+        }
+        // Use the registry's weight resolver; falls back to eligibility-flag
+        // if no per-base/per-class observation exists.
+        let w = registry.weight_for(&m.id, &item.base, item.ilvl, &class);
+        if w <= 0.0 {
+            continue;
+        }
+        eligible.push((idx, w));
+    }
+    if eligible.is_empty() {
+        return None;
+    }
+    let total: f64 = eligible.iter().map(|(_, w)| *w).sum();
+    let mut pick = rng.gen_range(0.0..total);
+    for (idx, w) in &eligible {
+        if pick < *w {
+            return registry.at(*idx);
+        }
+        pick -= *w;
+    }
+    eligible.last().and_then(|(i, _)| registry.at(*i))
+}
+
+/// Sample a Vaal implicit (Corrupted-kind, Implicit-affix) from the
+/// registry filtered by item class. Used by Vaal's
+/// [`VaalOutcome::AddEnchantment`] path. Returns `None` when no Vaal
+/// implicits exist for the class.
+fn sample_corrupted_implicit<'r>(
+    registry: &'r ModRegistry,
+    base_registry: &crate::base_registry::BaseRegistry,
+    item: &Item,
+    rng: &mut dyn rand::RngCore,
+    patch: crate::patch::PatchVersion,
+) -> Option<&'r ModDefinition> {
+    let class = class_for_item(item, base_registry);
+    // The `by_class_affix` index keys on `m.affix_type`, including
+    // `AffixType::Implicit`, so Vaal implicits land in the per-class
+    // implicit slot of the index naturally.
+    let candidates = registry.for_class_affix(&class, AffixType::Implicit);
+    let mut eligible: SmallVec<[(ModIndex, f64); 16]> = SmallVec::new();
+    for &idx in candidates {
+        let Some(m) = registry.at(idx) else { continue };
+        if m.kind != ModKind::Corrupted {
+            continue;
+        }
+        if !m.patch_range.contains(patch) {
+            continue;
+        }
+        if m.required_level > item.ilvl {
+            continue;
+        }
+        // Don't double-add an existing Vaal implicit. Also respect
+        // mod-group exclusivity against the existing enchantment slot.
+        if item.enchantments.iter().any(|e| e.mod_id == m.id) {
+            continue;
+        }
+        if item.enchantments.iter().any(|e| {
+            registry
+                .group_of(&e.mod_id)
+                .is_some_and(|g| g == &m.mod_group.0)
+        }) {
+            continue;
+        }
+        // Uniform weighting for Vaal-implicit selection — the wiki
+        // does not document a per-implicit weight table for PoE2.
+        eligible.push((idx, 1.0));
+    }
+    if eligible.is_empty() {
+        return None;
+    }
+    let total: f64 = eligible.iter().map(|(_, w)| *w).sum();
+    let mut pick = rng.gen_range(0.0..total);
+    for (idx, w) in &eligible {
+        if pick < *w {
+            return registry.at(*idx);
+        }
+        pick -= *w;
+    }
+    eligible.last().and_then(|(i, _)| registry.at(*i))
 }
 
 // =========================================================================
@@ -1023,12 +1330,21 @@ fn add_one_mod_with_min(
     }
     let affix = pick_open_affix(item, ctx.rng, max_slots)
         .ok_or(EngineError::AffixSlotFull { affix_type: name })?;
-    let m = sample_eligible_mod(ctx.registry, item, affix, ctx.rng, ctx.patch, min_level)
-        .ok_or_else(|| EngineError::NoEligibleMods {
-            base: item.base.to_string(),
-            ilvl: item.ilvl,
-            affix_type: affix_label(affix),
-        })?;
+    let m = sample_eligible_mod(
+        ctx.registry,
+        ctx.base_registry,
+        item,
+        affix,
+        ctx.rng,
+        ctx.patch,
+        min_level,
+        BASIC_ORB_EXCLUDES,
+    )
+    .ok_or_else(|| EngineError::NoEligibleMods {
+        base: item.base.to_string(),
+        ilvl: item.ilvl,
+        affix_type: affix_label(affix),
+    })?;
     if let Some(rar) = promote_to {
         item.rarity = rar;
     }
@@ -1300,24 +1616,27 @@ mod tests {
     }
 
     fn fixture_registry() -> ModRegistry {
-        ModRegistry::from_mods(vec![
-            mk_mod(
-                "MovementSpeed1",
-                "MovementSpeed",
-                AffixType::Prefix,
-                "Boots",
-            ),
-            mk_mod(
-                "MovementSpeed2",
-                "MovementSpeed",
-                AffixType::Prefix,
-                "Boots",
-            ),
-            mk_mod("Life1", "Life", AffixType::Prefix, "Boots"),
-            mk_mod("FireRes1", "FireResistance", AffixType::Suffix, "Boots"),
-            mk_mod("ColdRes1", "ColdResistance", AffixType::Suffix, "Boots"),
-            mk_mod("Stamina1", "Stamina", AffixType::Suffix, "Boots"),
-        ])
+        ModRegistry::from_mods(
+            vec![
+                mk_mod(
+                    "MovementSpeed1",
+                    "MovementSpeed",
+                    AffixType::Prefix,
+                    "Boots",
+                ),
+                mk_mod(
+                    "MovementSpeed2",
+                    "MovementSpeed",
+                    AffixType::Prefix,
+                    "Boots",
+                ),
+                mk_mod("Life1", "Life", AffixType::Prefix, "Boots"),
+                mk_mod("FireRes1", "FireResistance", AffixType::Suffix, "Boots"),
+                mk_mod("ColdRes1", "ColdResistance", AffixType::Suffix, "Boots"),
+                mk_mod("Stamina1", "Stamina", AffixType::Suffix, "Boots"),
+            ],
+            vec![],
+        )
     }
 
     fn ctx<'a>(
@@ -1325,7 +1644,7 @@ mod tests {
         rng: &'a mut Xoshiro256PlusPlus,
         omens: &'a mut crate::omen::OmenSet,
     ) -> ApplyContext<'a> {
-        ApplyContext::new(registry, rng, PatchVersion::PATCH_0_4_0, omens)
+        ApplyContext::new_without_bases(registry, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     #[test]
@@ -1621,30 +1940,33 @@ mod tests {
         });
 
         // Stub the registry mod with a non-trivial range so reroll is observable.
-        let reg = ModRegistry::from_mods(vec![ModDefinition {
-            id: ModId::from("Life1"),
-            name: None,
-            mod_group: crate::mods::ModGroup(ModGroupId::from("Life")),
-            affix_type: AffixType::Prefix,
-            kind: ModKind::Explicit,
-            domain: ModDomain::Item,
-            tags: smallvec![],
-            concept_set: smallvec![],
-            spawn_weights: smallvec![SpawnWeight {
-                tag: TagId::from("Boots"),
-                weight: 1
+        let reg = ModRegistry::from_mods(
+            vec![ModDefinition {
+                id: ModId::from("Life1"),
+                name: None,
+                mod_group: crate::mods::ModGroup(ModGroupId::from("Life")),
+                affix_type: AffixType::Prefix,
+                kind: ModKind::Explicit,
+                domain: ModDomain::Item,
+                tags: smallvec![],
+                concept_set: smallvec![],
+                spawn_weights: smallvec![SpawnWeight {
+                    tag: TagId::from("Boots"),
+                    weight: 1
+                }],
+                stats: smallvec![crate::mods::ModStat {
+                    stat_id: "base_maximum_life".into(),
+                    min: 100.0,
+                    max: 200.0
+                }],
+                required_level: 1,
+                allowed_item_classes: smallvec![ItemClassId::from("Boots")],
+                patch_range: PatchRange::ALL,
+                flags: ModFlags::empty(),
+                text_template: None,
             }],
-            stats: smallvec![crate::mods::ModStat {
-                stat_id: "base_maximum_life".into(),
-                min: 100.0,
-                max: 200.0
-            }],
-            required_level: 1,
-            allowed_item_classes: smallvec![ItemClassId::from("Boots")],
-            patch_range: PatchRange::ALL,
-            flags: ModFlags::empty(),
-            text_template: None,
-        }]);
+            vec![],
+        );
 
         DivineOrb::new()
             .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
@@ -1657,30 +1979,33 @@ mod tests {
     fn divine_skips_fractured_mods() {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xd2);
         let mut omens = crate::omen::OmenSet::new();
-        let reg = ModRegistry::from_mods(vec![ModDefinition {
-            id: ModId::from("Life1"),
-            name: None,
-            mod_group: crate::mods::ModGroup(ModGroupId::from("Life")),
-            affix_type: AffixType::Prefix,
-            kind: ModKind::Explicit,
-            domain: ModDomain::Item,
-            tags: smallvec![],
-            concept_set: smallvec![],
-            spawn_weights: smallvec![SpawnWeight {
-                tag: TagId::from("Boots"),
-                weight: 1
+        let reg = ModRegistry::from_mods(
+            vec![ModDefinition {
+                id: ModId::from("Life1"),
+                name: None,
+                mod_group: crate::mods::ModGroup(ModGroupId::from("Life")),
+                affix_type: AffixType::Prefix,
+                kind: ModKind::Explicit,
+                domain: ModDomain::Item,
+                tags: smallvec![],
+                concept_set: smallvec![],
+                spawn_weights: smallvec![SpawnWeight {
+                    tag: TagId::from("Boots"),
+                    weight: 1
+                }],
+                stats: smallvec![crate::mods::ModStat {
+                    stat_id: "base_maximum_life".into(),
+                    min: 100.0,
+                    max: 200.0
+                }],
+                required_level: 1,
+                allowed_item_classes: smallvec![ItemClassId::from("Boots")],
+                patch_range: PatchRange::ALL,
+                flags: ModFlags::empty(),
+                text_template: None,
             }],
-            stats: smallvec![crate::mods::ModStat {
-                stat_id: "base_maximum_life".into(),
-                min: 100.0,
-                max: 200.0
-            }],
-            required_level: 1,
-            allowed_item_classes: smallvec![ItemClassId::from("Boots")],
-            patch_range: PatchRange::ALL,
-            flags: ModFlags::empty(),
-            text_template: None,
-        }]);
+            vec![],
+        );
 
         let mut item = fixture_normal_boots();
         item.rarity = Rarity::Rare;
@@ -1763,7 +2088,7 @@ mod tests {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x600);
         let mut _omens = crate::omen::OmenSet::new();
         for _ in 0..600 {
-            let outcome = sample_vaal_outcome(&mut rng);
+            let outcome = sample_vaal_outcome(&mut rng, false);
             seen.insert(outcome as u8);
         }
         assert_eq!(seen.len(), 6, "saw {} distinct outcomes", seen.len());
@@ -1775,27 +2100,30 @@ mod tests {
         // Multiple prefix and suffix groups, each with mods at varied
         // required_level so we can demonstrate min-mod-level filtering
         // regardless of which affix the orb picks.
-        ModRegistry::from_mods(vec![
-            // Prefixes - Life group
-            mk_mod_lvl("Life_T3", "Life", AffixType::Prefix, "Boots", 1),
-            mk_mod_lvl("Life_T2", "Life", AffixType::Prefix, "Boots", 40),
-            mk_mod_lvl("Life_T1", "Life", AffixType::Prefix, "Boots", 75),
-            // Prefixes - ES group
-            mk_mod_lvl("ES_T3", "ES", AffixType::Prefix, "Boots", 1),
-            mk_mod_lvl("ES_T1", "ES", AffixType::Prefix, "Boots", 75),
-            // Prefixes - Mana group
-            mk_mod_lvl("Mana_T3", "Mana", AffixType::Prefix, "Boots", 1),
-            mk_mod_lvl("Mana_T1", "Mana", AffixType::Prefix, "Boots", 75),
-            // Suffixes - FireRes group
-            mk_mod_lvl("FireRes_T3", "FireRes", AffixType::Suffix, "Boots", 1),
-            mk_mod_lvl("FireRes_T1", "FireRes", AffixType::Suffix, "Boots", 75),
-            // Suffixes - ColdRes group
-            mk_mod_lvl("ColdRes_T3", "ColdRes", AffixType::Suffix, "Boots", 1),
-            mk_mod_lvl("ColdRes_T1", "ColdRes", AffixType::Suffix, "Boots", 75),
-            // Suffixes - Stamina group (movement-speed-equivalent)
-            mk_mod_lvl("Stamina_T3", "Stamina", AffixType::Suffix, "Boots", 1),
-            mk_mod_lvl("Stamina_T1", "Stamina", AffixType::Suffix, "Boots", 75),
-        ])
+        ModRegistry::from_mods(
+            vec![
+                // Prefixes - Life group
+                mk_mod_lvl("Life_T3", "Life", AffixType::Prefix, "Boots", 1),
+                mk_mod_lvl("Life_T2", "Life", AffixType::Prefix, "Boots", 40),
+                mk_mod_lvl("Life_T1", "Life", AffixType::Prefix, "Boots", 75),
+                // Prefixes - ES group
+                mk_mod_lvl("ES_T3", "ES", AffixType::Prefix, "Boots", 1),
+                mk_mod_lvl("ES_T1", "ES", AffixType::Prefix, "Boots", 75),
+                // Prefixes - Mana group
+                mk_mod_lvl("Mana_T3", "Mana", AffixType::Prefix, "Boots", 1),
+                mk_mod_lvl("Mana_T1", "Mana", AffixType::Prefix, "Boots", 75),
+                // Suffixes - FireRes group
+                mk_mod_lvl("FireRes_T3", "FireRes", AffixType::Suffix, "Boots", 1),
+                mk_mod_lvl("FireRes_T1", "FireRes", AffixType::Suffix, "Boots", 75),
+                // Suffixes - ColdRes group
+                mk_mod_lvl("ColdRes_T3", "ColdRes", AffixType::Suffix, "Boots", 1),
+                mk_mod_lvl("ColdRes_T1", "ColdRes", AffixType::Suffix, "Boots", 75),
+                // Suffixes - Stamina group (movement-speed-equivalent)
+                mk_mod_lvl("Stamina_T3", "Stamina", AffixType::Suffix, "Boots", 1),
+                mk_mod_lvl("Stamina_T1", "Stamina", AffixType::Suffix, "Boots", 75),
+            ],
+            vec![],
+        )
     }
 
     fn mk_mod_lvl(
@@ -2044,11 +2372,14 @@ mod tests {
     fn whittling_picks_lowest_required_level_mod_in_chaos() {
         // Two prefixes: high-req and low-req. Chaos with Whittling removes
         // the lowest-required-level one.
-        let reg = ModRegistry::from_mods(vec![
-            mk_mod_lvl("HighReqLife", "Life", AffixType::Prefix, "Boots", 80),
-            mk_mod_lvl("LowReqMana", "Mana", AffixType::Prefix, "Boots", 5),
-            mk_mod_lvl("FreshMod", "FreshGroup", AffixType::Suffix, "Boots", 1),
-        ]);
+        let reg = ModRegistry::from_mods(
+            vec![
+                mk_mod_lvl("HighReqLife", "Life", AffixType::Prefix, "Boots", 80),
+                mk_mod_lvl("LowReqMana", "Mana", AffixType::Prefix, "Boots", 5),
+                mk_mod_lvl("FreshMod", "FreshGroup", AffixType::Suffix, "Boots", 1),
+            ],
+            vec![],
+        );
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xc1);
         let mut omens = crate::omen::OmenSet::new();
         omens.push(crate::omen::Omen::whittling());

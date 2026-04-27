@@ -17,6 +17,7 @@
 use rand_xoshiro::rand_core::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
+use crate::base_registry::BaseRegistry;
 use crate::currency::{ApplyContext, ApplyOutcome, Currency};
 use crate::error::EngineResult;
 use crate::item::Item;
@@ -37,11 +38,35 @@ pub fn apply_currency(
     patch: PatchVersion,
     omens: &mut OmenSet,
 ) -> EngineResult<ApplyOutcome> {
+    apply_currency_with_bases(
+        currency,
+        item,
+        registry,
+        &crate::base_registry::EMPTY,
+        rng,
+        patch,
+        omens,
+    )
+}
+
+/// `apply_currency` with an explicit [`BaseRegistry`] threaded through
+/// [`ApplyContext`]. Production code (Tauri loader, advisor simulator) calls
+/// this variant; tests and currency-internal helpers stick with the
+/// short-form [`apply_currency`] which uses the empty static registry.
+pub fn apply_currency_with_bases(
+    currency: &dyn Currency,
+    item: &mut Item,
+    registry: &ModRegistry,
+    base_registry: &BaseRegistry,
+    rng: &mut dyn rand::RngCore,
+    patch: PatchVersion,
+    omens: &mut OmenSet,
+) -> EngineResult<ApplyOutcome> {
     if let Some(seed) = item.hinekora_lock {
         let mut locked_rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         // Snapshot omens so a failure rolls back any consumption.
         let omen_snapshot = omens.clone();
-        let mut ctx = ApplyContext::new(registry, &mut locked_rng, patch, omens);
+        let mut ctx = ApplyContext::new(registry, base_registry, &mut locked_rng, patch, omens);
         let result = currency.apply(item, &mut ctx);
         if result.is_ok() {
             item.hinekora_lock = None;
@@ -52,7 +77,7 @@ pub fn apply_currency(
         result
     } else {
         let omen_snapshot = omens.clone();
-        let mut ctx = ApplyContext::new(registry, rng, patch, omens);
+        let mut ctx = ApplyContext::new(registry, base_registry, rng, patch, omens);
         let result = currency.apply(item, &mut ctx);
         if result.is_err() {
             *omens = omen_snapshot;
@@ -76,14 +101,41 @@ pub fn preview_currency(
     patch: PatchVersion,
     omens: &OmenSet,
 ) -> EngineResult<Item> {
+    preview_currency_with_bases(
+        currency,
+        item,
+        registry,
+        &crate::base_registry::EMPTY,
+        rng,
+        patch,
+        omens,
+    )
+}
+
+/// `preview_currency` with an explicit [`BaseRegistry`].
+pub fn preview_currency_with_bases(
+    currency: &dyn Currency,
+    item: &Item,
+    registry: &ModRegistry,
+    base_registry: &BaseRegistry,
+    rng: &mut dyn rand::RngCore,
+    patch: PatchVersion,
+    omens: &OmenSet,
+) -> EngineResult<Item> {
     let mut clone = item.clone();
     let mut omens_clone = omens.clone();
     if let Some(seed) = clone.hinekora_lock {
         let mut locked_rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let mut ctx = ApplyContext::new(registry, &mut locked_rng, patch, &mut omens_clone);
+        let mut ctx = ApplyContext::new(
+            registry,
+            base_registry,
+            &mut locked_rng,
+            patch,
+            &mut omens_clone,
+        );
         currency.apply(&mut clone, &mut ctx)?;
     } else {
-        let mut ctx = ApplyContext::new(registry, rng, patch, &mut omens_clone);
+        let mut ctx = ApplyContext::new(registry, base_registry, rng, patch, &mut omens_clone);
         currency.apply(&mut clone, &mut ctx)?;
     }
     // Don't clear the lock here even on success — preview is non-mutating.
@@ -108,11 +160,39 @@ pub fn commit_with_preview<P>(
 where
     P: FnOnce(&Item) -> bool,
 {
-    let preview = preview_currency(currency, item, registry, rng, patch, omens)?;
+    commit_with_preview_with_bases(
+        currency,
+        item,
+        registry,
+        &crate::base_registry::EMPTY,
+        rng,
+        patch,
+        omens,
+        accept,
+    )
+}
+
+/// `commit_with_preview` with an explicit [`BaseRegistry`].
+#[allow(clippy::too_many_arguments)] // 8 args: 7 from `commit_with_preview` + the base registry.
+pub fn commit_with_preview_with_bases<P>(
+    currency: &dyn Currency,
+    item: &mut Item,
+    registry: &ModRegistry,
+    base_registry: &BaseRegistry,
+    rng: &mut dyn rand::RngCore,
+    patch: PatchVersion,
+    omens: &mut OmenSet,
+    accept: P,
+) -> EngineResult<Option<Item>>
+where
+    P: FnOnce(&Item) -> bool,
+{
+    let preview =
+        preview_currency_with_bases(currency, item, registry, base_registry, rng, patch, omens)?;
     if !accept(&preview) {
         return Ok(None);
     }
-    apply_currency(currency, item, registry, rng, patch, omens)?;
+    apply_currency_with_bases(currency, item, registry, base_registry, rng, patch, omens)?;
     Ok(Some(item.clone()))
 }
 
@@ -173,12 +253,15 @@ mod tests {
     }
 
     fn registry() -> ModRegistry {
-        ModRegistry::from_mods(vec![
-            mk_mod("Life1", "Life", AffixType::Prefix, "Boots"),
-            mk_mod("ES1", "ES", AffixType::Prefix, "Boots"),
-            mk_mod("FireRes1", "FireRes", AffixType::Suffix, "Boots"),
-            mk_mod("ColdRes1", "ColdRes", AffixType::Suffix, "Boots"),
-        ])
+        ModRegistry::from_mods(
+            vec![
+                mk_mod("Life1", "Life", AffixType::Prefix, "Boots"),
+                mk_mod("ES1", "ES", AffixType::Prefix, "Boots"),
+                mk_mod("FireRes1", "FireRes", AffixType::Suffix, "Boots"),
+                mk_mod("ColdRes1", "ColdRes", AffixType::Suffix, "Boots"),
+            ],
+            vec![],
+        )
     }
 
     #[test]

@@ -28,13 +28,47 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use smallvec::SmallVec;
 
-use crate::currency::{ApplyContext, ApplyOutcome, Currency};
+use crate::currency::{ApplyContext, ApplyOutcome, CannotApply, Currency};
 use crate::error::{EngineError, EngineResult};
-use crate::ids::{CurrencyId, ModId};
+use crate::ids::{CurrencyId, ItemClassId, ModId};
 use crate::item::{
     AbyssLord, AffixType, BoneSize, BoneSubtype, HiddenDesecratedSlot, Item, ModRoll, Rarity,
 };
 use crate::mods::{ModDefinition, ModKind};
+
+/// Item classes whose desecrated pools are *empty* — applying a bone is
+/// legal mechanically but the mods sampled at reveal won't include any
+/// lord-pool entries. Per the poe2db Desecrated Modifier table, sceptres
+/// have no exclusive desecrated mods at all; lord-targeting omens
+/// (Blackblooded/Liege/Sovereign) on sceptres are pure waste and are
+/// rejected at `Bone::apply` time.
+const SCEPTRE_CLASSES_NO_EXCLUSIVE_DESECRATED: &[&str] = &["Sceptre"];
+
+/// Resolve an item's class id for bone gating, mirroring
+/// `Catalyst::resolve_class_for_catalyst`. Same polymorphic semantics as
+/// the basic-orb sampler: prefers the registry, falls back to
+/// `ItemClassId::from(item.base.as_str())` for v3-transitional fixtures.
+fn resolve_class_for_bone(
+    item: &Item,
+    base_registry: &crate::base_registry::BaseRegistry,
+) -> ItemClassId {
+    if let Some(c) = base_registry.class_of(&item.base) {
+        return c.clone();
+    }
+    ItemClassId::from(item.base.as_str())
+}
+
+/// Heuristic: does the string look like a PascalCase item-class id
+/// (e.g., "BodyArmour") rather than a metadata path (e.g.,
+/// "Metadata/Items/...") or some other identifier? Used by the
+/// best-effort `Bone::can_apply_to` and `Catalyst::can_apply_to` to
+/// decide when the placeholder shape is recognisable enough to gate on.
+fn is_pascal_case_class_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && !s.contains('/')
+        && s.chars().all(|c| c.is_ascii_alphanumeric())
+}
 
 // =========================================================================
 // Bone — applies a hidden desecrated mod to an item
@@ -95,6 +129,49 @@ impl Currency for Bone {
         crate::currency::RaritySet::RARE
     }
 
+    /// Pre-flight class gate (M14.6). Like [`Catalyst::can_apply_to`],
+    /// uses the polymorphic `Item.base` interpretation: when the string
+    /// matches a known PascalCase class id outside this subtype's valid
+    /// list, reject. Real-bundle items with metadata-path bases pass
+    /// through and get caught by the registry-backed gate inside `apply()`.
+    fn can_apply_to(&self, item: &Item) -> Result<(), CannotApply> {
+        let valid = self.valid_rarities();
+        if !valid.contains(item.rarity) {
+            return Err(CannotApply::WrongRarity {
+                item_rarity: item.rarity,
+                expected: valid,
+            });
+        }
+        if item.mirrored {
+            return Err(CannotApply::Mirrored);
+        }
+        if item.corrupted {
+            return Err(CannotApply::Corrupted);
+        }
+        if item.hidden_desecrated.is_some() {
+            return Err(CannotApply::Other(
+                "item already carries an unrevealed desecrated mod",
+            ));
+        }
+        // Best-effort class check using the item.base placeholder. A class
+        // id that is *not* in this subtype's valid list earns a hard
+        // rejection. Otherwise accept.
+        let candidate_class = item.base.as_str();
+        let valid_classes = self.subtype.valid_classes();
+        if !valid_classes.contains(&candidate_class) {
+            // If the candidate string is a recognised PascalCase class id
+            // but absent from the valid list, reject with structure. If it
+            // is not a recognised class id (e.g., a metadata path), allow
+            // through — `apply()` does the registry-backed check.
+            if is_pascal_case_class_id(candidate_class) {
+                return Err(CannotApply::Other(
+                    "bone subtype is not valid on this item class",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if !item.is_modifiable() {
             return Err(EngineError::InvalidApplication(
@@ -112,12 +189,43 @@ impl Currency for Bone {
             ));
         }
 
+        // Registry-backed class gate (M14.6).
+        let class = resolve_class_for_bone(item, ctx.base_registry);
+        let valid_classes = self.subtype.valid_classes();
+        if !valid_classes.contains(&class.as_str()) {
+            return Err(EngineError::InvalidApplication(format!(
+                "Bone {:?}: cannot apply to class {} — valid classes are {}",
+                self.subtype,
+                class,
+                valid_classes.join(", ")
+            )));
+        }
+
         // Pick affix slot.
         // Sinistral / Dextral Necromancy force the affix.
         // Lord-targeting omens (Blackblooded / Liege / Sovereign) tag the
         //   slot so the reveal pool is restricted to that lord's mods.
         let forced_affix = ctx.omens.consume_affix_only(ctx.patch);
         let lord = ctx.omens.consume_lord_target(ctx.patch);
+
+        // Lord-pool restrictions (M14.6):
+        //  - Cranium → Jewel uses the `Lightless` / `of the Abyss` pool;
+        //    lord-named omens are illegal on jewels.
+        //  - Sceptres have no exclusive desecrated; lord-named omens are
+        //    pure waste on them.
+        if let Some(lord_value) = lord {
+            if !self.subtype.supports_lord_pool() {
+                return Err(EngineError::InvalidApplication(format!(
+                    "Bone {:?}: lord-targeting omen ({lord_value:?}) is not valid on this subtype's pool",
+                    self.subtype,
+                )));
+            }
+            if SCEPTRE_CLASSES_NO_EXCLUSIVE_DESECRATED.contains(&class.as_str()) {
+                return Err(EngineError::InvalidApplication(format!(
+                    "Bone: lord-targeting omen ({lord_value:?}) is invalid on {class} (no exclusive desecrated mods)"
+                )));
+            }
+        }
 
         let prefix_open = item.prefixes.len() < 3;
         let suffix_open = item.suffixes.len() < 3;
@@ -330,7 +438,7 @@ mod tests {
         rng: &'a mut Xoshiro256PlusPlus,
         omens: &'a mut crate::omen::OmenSet,
     ) -> ApplyContext<'a> {
-        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0, omens)
+        ApplyContext::new_without_bases(reg, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     fn desecrated_mod(id: &str, affix: AffixType, group: &str) -> ModDefinition {
@@ -362,7 +470,7 @@ mod tests {
 
     #[test]
     fn bone_adds_hidden_desecrated_slot() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
@@ -380,7 +488,7 @@ mod tests {
 
     #[test]
     fn bone_rejects_when_already_has_hidden() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
@@ -394,7 +502,7 @@ mod tests {
 
     #[test]
     fn bone_rejects_non_rare() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(3);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();
@@ -406,7 +514,7 @@ mod tests {
 
     #[test]
     fn bone_rejects_when_both_slots_full() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_rare_armour();

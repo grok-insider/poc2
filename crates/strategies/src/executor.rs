@@ -295,7 +295,7 @@ mod tests {
     }
 
     fn empty_registry() -> ModRegistry {
-        ModRegistry::from_mods(vec![])
+        ModRegistry::from_mods(vec![], vec![])
     }
 
     fn three_step_strategy() -> Strategy {

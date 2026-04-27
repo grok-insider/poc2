@@ -107,7 +107,7 @@ fn fr_target_goal() -> Goal {
 
 #[test]
 fn b4_loop_recurring_chaos_candidate_emitted_for_rare_with_mods() {
-    let registry = ModRegistry::from_mods(vec![fr_suffix_mod("FR_Tier3")]);
+    let registry = ModRegistry::from_mods(vec![fr_suffix_mod("FR_Tier3")], vec![]);
     let item = rare_with_one_mod();
     let goal = fr_target_goal();
 
@@ -156,7 +156,7 @@ fn b4_loop_recurring_chaos_candidate_emitted_for_rare_with_mods() {
 
 #[test]
 fn b4_loop_recurring_recommendation_carries_loop_estimate() {
-    let registry = ModRegistry::from_mods(vec![fr_suffix_mod("FR_Tier3")]);
+    let registry = ModRegistry::from_mods(vec![fr_suffix_mod("FR_Tier3")], vec![]);
     let item = rare_with_one_mod();
     let goal = fr_target_goal();
 

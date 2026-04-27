@@ -40,6 +40,7 @@
 
 pub mod action;
 pub mod candidate;
+pub mod featurize;
 pub mod goal;
 pub mod planner;
 pub mod recommendation;
@@ -47,9 +48,11 @@ pub mod recovery;
 pub mod scorer;
 pub mod simulator;
 pub mod stash;
+pub mod training;
 
 pub use action::{from_rule_action, from_strategy_action, AdvisorAction};
 pub use candidate::{generate_candidates, generate_candidates_with_goal, Candidate};
+pub use featurize::{featurize, target_match_bitmap, FeatureVec};
 pub use goal::{is_satisfied, should_abandon, Goal};
 pub use planner::{plan, BeamConfig, PlanInput};
 pub use recommendation::{Recommendation, RecommendationSource};

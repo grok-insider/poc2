@@ -265,22 +265,25 @@ mod tests {
 
     #[test]
     fn lower_resolves_mod_text_via_template_match() {
-        let registry = ModRegistry::from_mods(vec![
-            mk_mod(
-                "EsPrefix1",
-                "+{0} to Maximum Energy Shield",
-                ModKind::Explicit,
-                AffixType::Prefix,
-                "BodyArmour",
-            ),
-            mk_mod(
-                "ColdResSuffix1",
-                "+{0}% to Cold Resistance",
-                ModKind::Explicit,
-                AffixType::Suffix,
-                "BodyArmour",
-            ),
-        ]);
+        let registry = ModRegistry::from_mods(
+            vec![
+                mk_mod(
+                    "EsPrefix1",
+                    "+{0} to Maximum Energy Shield",
+                    ModKind::Explicit,
+                    AffixType::Prefix,
+                    "BodyArmour",
+                ),
+                mk_mod(
+                    "ColdResSuffix1",
+                    "+{0}% to Cold Resistance",
+                    ModKind::Explicit,
+                    AffixType::Suffix,
+                    "BodyArmour",
+                ),
+            ],
+            vec![],
+        );
 
         let parsed = parse_clipboard_text(
             "Item Class: Body Armours\n\
@@ -302,7 +305,7 @@ mod tests {
 
     #[test]
     fn unresolved_lines_surface_in_output() {
-        let registry = ModRegistry::from_mods(vec![]);
+        let registry = ModRegistry::from_mods(vec![], vec![]);
         let parsed = parse_clipboard_text(
             "Item Class: Body Armours\n\
              Rarity: Rare\n\
@@ -321,13 +324,16 @@ mod tests {
 
     #[test]
     fn fractured_flag_propagates_to_mod_roll() {
-        let registry = ModRegistry::from_mods(vec![mk_mod(
-            "EsPrefix1",
-            "+{0} to Maximum Energy Shield",
-            ModKind::Explicit,
-            AffixType::Prefix,
-            "BodyArmour",
-        )]);
+        let registry = ModRegistry::from_mods(
+            vec![mk_mod(
+                "EsPrefix1",
+                "+{0} to Maximum Energy Shield",
+                ModKind::Explicit,
+                AffixType::Prefix,
+                "BodyArmour",
+            )],
+            vec![],
+        );
         let parsed = parse_clipboard_text(
             "Item Class: Body Armours\n\
              Rarity: Rare\n\

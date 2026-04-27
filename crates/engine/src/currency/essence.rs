@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn greater_essence_promotes_magic_to_rare_with_target_mod() {
         let target = mk_target_mod("EssMod_Life_Greater", "Life", AffixType::Prefix);
-        let reg = ModRegistry::from_mods(vec![target]);
+        let reg = ModRegistry::from_mods(vec![target], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x1);
         let mut omens = OmenSet::new();
 
@@ -371,7 +371,12 @@ mod tests {
 
         ess.apply(
             &mut item,
-            &mut ApplyContext::new(&reg, &mut rng, PatchVersion::PATCH_0_4_0, &mut omens),
+            &mut ApplyContext::new_without_bases(
+                &reg,
+                &mut rng,
+                PatchVersion::PATCH_0_4_0,
+                &mut omens,
+            ),
         )
         .unwrap();
 
@@ -393,7 +398,7 @@ mod tests {
         );
         let life = mk_target_mod("LifeMod", "Life", AffixType::Prefix);
         let res = mk_target_mod("FireResMod", "FireRes", AffixType::Suffix);
-        let reg = ModRegistry::from_mods(vec![target, life, res]);
+        let reg = ModRegistry::from_mods(vec![target, life, res], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x2);
         let mut omens = OmenSet::new();
         omens.push(Omen::dextral_crystallisation());
@@ -432,7 +437,12 @@ mod tests {
 
         ess.apply(
             &mut item,
-            &mut ApplyContext::new(&reg, &mut rng, PatchVersion::PATCH_0_4_0, &mut omens),
+            &mut ApplyContext::new_without_bases(
+                &reg,
+                &mut rng,
+                PatchVersion::PATCH_0_4_0,
+                &mut omens,
+            ),
         )
         .unwrap();
 
@@ -450,7 +460,7 @@ mod tests {
     fn perfect_essence_rejects_when_no_removable_mods() {
         // Crystallisation forces suffix removal but there are no suffixes.
         let target = mk_target_mod("EssMod_X", "GA", AffixType::Suffix);
-        let reg = ModRegistry::from_mods(vec![target]);
+        let reg = ModRegistry::from_mods(vec![target], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x3);
         let mut omens = OmenSet::new();
         omens.push(Omen::dextral_crystallisation());
@@ -473,7 +483,12 @@ mod tests {
         );
         let r = ess.apply(
             &mut item,
-            &mut ApplyContext::new(&reg, &mut rng, PatchVersion::PATCH_0_4_0, &mut omens),
+            &mut ApplyContext::new_without_bases(
+                &reg,
+                &mut rng,
+                PatchVersion::PATCH_0_4_0,
+                &mut omens,
+            ),
         );
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
@@ -481,7 +496,7 @@ mod tests {
     #[test]
     fn essence_rejects_corrupted_unless_corrupted_essence() {
         let target = mk_target_mod("EssMod_X", "GA", AffixType::Suffix);
-        let reg = ModRegistry::from_mods(vec![target]);
+        let reg = ModRegistry::from_mods(vec![target], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x4);
         let mut omens = OmenSet::new();
 
@@ -492,7 +507,12 @@ mod tests {
         let perfect = Essence::new("X", "X", EssenceQuality::Perfect, "EssMod_X");
         let r = perfect.apply(
             &mut item,
-            &mut ApplyContext::new(&reg, &mut rng, PatchVersion::PATCH_0_4_0, &mut omens),
+            &mut ApplyContext::new_without_bases(
+                &reg,
+                &mut rng,
+                PatchVersion::PATCH_0_4_0,
+                &mut omens,
+            ),
         );
         assert!(matches!(r, Err(EngineError::ItemCorrupted)));
 
@@ -509,7 +529,12 @@ mod tests {
         corrupted
             .apply(
                 &mut item,
-                &mut ApplyContext::new(&reg, &mut rng, PatchVersion::PATCH_0_4_0, &mut omens),
+                &mut ApplyContext::new_without_bases(
+                    &reg,
+                    &mut rng,
+                    PatchVersion::PATCH_0_4_0,
+                    &mut omens,
+                ),
             )
             .unwrap();
         assert_eq!(item.suffixes.len(), 1);

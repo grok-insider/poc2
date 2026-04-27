@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn rules_fire_for_normal_with_seed_rule() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let rules = RuleSet::from_rules(poc2_rules::seed_rules());
         let strategies = StrategyRegistry::default();
         let stash = Stash::unlimited();
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn fallback_emits_when_no_rules_match() {
         // Sanctified items should bypass most rules but emit at least guidance.
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let rules = RuleSet::default();
         let strategies = StrategyRegistry::default();
         let stash = Stash::unlimited();
@@ -763,7 +763,7 @@ mod tests {
 
     #[test]
     fn stash_filters_unavailable_actions() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let rules = RuleSet::from_rules(poc2_rules::seed_rules());
         let strategies = StrategyRegistry::default();
         // Empty stash → no affordable actions.
@@ -799,7 +799,7 @@ mod tests {
         use poc2_engine::ids::CurrencyId;
         use poc2_strategies::{CmpOp, FloatValuePredicate, ItemPredicate};
 
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let stash = Stash::unlimited();
         let strategies = StrategyRegistry::default();
         let item = empty_item(Rarity::Normal);

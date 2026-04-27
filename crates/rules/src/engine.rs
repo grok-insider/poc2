@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn evaluate_returns_matching_rules_only() {
-        let registry = ModRegistry::from_mods(vec![]);
+        let registry = ModRegistry::from_mods(vec![], vec![]);
         let set = RuleSet::from_rules(vec![
             rule_for_normal_apply_transmute(),
             rule_for_rare_with_4_mods_fracture(),
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn evaluate_sorts_by_priority_descending() {
-        let registry = ModRegistry::from_mods(vec![]);
+        let registry = ModRegistry::from_mods(vec![], vec![]);
         let set = RuleSet::from_rules(vec![
             rule_for_normal_apply_transmute(),    // priority 100
             rule_for_rare_with_4_mods_fracture(), // priority 200

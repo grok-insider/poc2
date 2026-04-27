@@ -237,7 +237,7 @@ mod tests {
     fn empty_target_is_always_satisfied() {
         let goal = Goal::empty(DivEquiv::point(10.0));
         let item = mk_item_with_prefixes(vec![]);
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         assert!(is_satisfied(&goal, &item, &reg));
     }
 
@@ -256,11 +256,14 @@ mod tests {
             constraints: vec![],
         };
         let goal = Goal::new(target, DivEquiv::point(100.0));
-        let reg = ModRegistry::from_mods(vec![
-            mk_es_mod("ES1", false),
-            mk_es_mod("ES2", false),
-            mk_es_mod("ES3", false),
-        ]);
+        let reg = ModRegistry::from_mods(
+            vec![
+                mk_es_mod("ES1", false),
+                mk_es_mod("ES2", false),
+                mk_es_mod("ES3", false),
+            ],
+            vec![],
+        );
         let item = mk_item_with_prefixes(vec![roll("ES1"), roll("ES2"), roll("ES3")]);
         assert!(is_satisfied(&goal, &item, &reg));
     }
@@ -280,7 +283,7 @@ mod tests {
             constraints: vec![],
         };
         let goal = Goal::new(target, DivEquiv::point(10.0));
-        let reg = ModRegistry::from_mods(vec![mk_es_mod("HYB1", true)]);
+        let reg = ModRegistry::from_mods(vec![mk_es_mod("HYB1", true)], vec![]);
         let item = mk_item_with_prefixes(vec![roll("HYB1")]);
         assert!(is_satisfied(&goal, &item, &reg));
     }
@@ -300,7 +303,7 @@ mod tests {
             constraints: vec![],
         };
         let goal = Goal::new(target, DivEquiv::point(10.0));
-        let reg = ModRegistry::from_mods(vec![mk_es_mod("HYB1", true)]);
+        let reg = ModRegistry::from_mods(vec![mk_es_mod("HYB1", true)], vec![]);
         let item = mk_item_with_prefixes(vec![roll("HYB1")]);
         assert!(!is_satisfied(&goal, &item, &reg));
     }
@@ -313,7 +316,7 @@ mod tests {
             budget: DivEquiv::point(50.0),
         };
         let mut item = mk_item_with_prefixes(vec![]);
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         assert!(!should_abandon(&goal, &item, &reg));
         item.corrupted = true;
         assert!(should_abandon(&goal, &item, &reg));

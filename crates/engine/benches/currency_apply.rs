@@ -43,7 +43,7 @@ fn registry_with_n_per_affix(n: usize) -> ModRegistry {
             "BodyArmour",
         ));
     }
-    ModRegistry::from_mods(mods)
+    ModRegistry::from_mods(mods, vec![])
 }
 
 fn mk_mod(id: &str, group: &str, affix: AffixType, class: &str) -> ModDefinition {

@@ -398,48 +398,51 @@ mod tests {
     use smallvec::smallvec;
 
     fn registry() -> ModRegistry {
-        ModRegistry::from_mods(vec![
-            ModDefinition {
-                id: ModId::from("Life1"),
-                name: None,
-                mod_group: ModGroup(ModGroupId::from("Life")),
-                affix_type: AffixType::Prefix,
-                kind: ModKind::Explicit,
-                domain: ModDomain::Item,
-                tags: smallvec![],
-                concept_set: smallvec![],
-                spawn_weights: smallvec![SpawnWeight {
-                    tag: TagId::from("BodyArmour"),
-                    weight: 1
-                }],
-                stats: smallvec![],
-                required_level: 1,
-                allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
-                patch_range: PatchRange::ALL,
-                flags: ModFlags::empty(),
-                text_template: None,
-            },
-            ModDefinition {
-                id: ModId::from("FireRes1"),
-                name: None,
-                mod_group: ModGroup(ModGroupId::from("FireRes")),
-                affix_type: AffixType::Suffix,
-                kind: ModKind::Explicit,
-                domain: ModDomain::Item,
-                tags: smallvec![],
-                concept_set: smallvec![],
-                spawn_weights: smallvec![SpawnWeight {
-                    tag: TagId::from("BodyArmour"),
-                    weight: 1
-                }],
-                stats: smallvec![],
-                required_level: 1,
-                allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
-                patch_range: PatchRange::ALL,
-                flags: ModFlags::empty(),
-                text_template: None,
-            },
-        ])
+        ModRegistry::from_mods(
+            vec![
+                ModDefinition {
+                    id: ModId::from("Life1"),
+                    name: None,
+                    mod_group: ModGroup(ModGroupId::from("Life")),
+                    affix_type: AffixType::Prefix,
+                    kind: ModKind::Explicit,
+                    domain: ModDomain::Item,
+                    tags: smallvec![],
+                    concept_set: smallvec![],
+                    spawn_weights: smallvec![SpawnWeight {
+                        tag: TagId::from("BodyArmour"),
+                        weight: 1
+                    }],
+                    stats: smallvec![],
+                    required_level: 1,
+                    allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
+                    patch_range: PatchRange::ALL,
+                    flags: ModFlags::empty(),
+                    text_template: None,
+                },
+                ModDefinition {
+                    id: ModId::from("FireRes1"),
+                    name: None,
+                    mod_group: ModGroup(ModGroupId::from("FireRes")),
+                    affix_type: AffixType::Suffix,
+                    kind: ModKind::Explicit,
+                    domain: ModDomain::Item,
+                    tags: smallvec![],
+                    concept_set: smallvec![],
+                    spawn_weights: smallvec![SpawnWeight {
+                        tag: TagId::from("BodyArmour"),
+                        weight: 1
+                    }],
+                    stats: smallvec![],
+                    required_level: 1,
+                    allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
+                    patch_range: PatchRange::ALL,
+                    flags: ModFlags::empty(),
+                    text_template: None,
+                },
+            ],
+            vec![],
+        )
     }
 
     fn empty_item() -> Item {

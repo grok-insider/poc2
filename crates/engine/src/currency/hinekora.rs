@@ -134,12 +134,12 @@ mod tests {
         rng: &'a mut Xoshiro256PlusPlus,
         omens: &'a mut crate::omen::OmenSet,
     ) -> ApplyContext<'a> {
-        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0, omens)
+        ApplyContext::new_without_bases(reg, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     #[test]
     fn lock_sets_seed_on_clean_item() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x1);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn lock_rejects_corrupted() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x2);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn lock_rejects_mirrored() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x3);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn lock_rejects_already_locked() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x4);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn lock_seed_is_drawn_from_ctx_rng_deterministically() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
 
         let mut rng_a = Xoshiro256PlusPlus::seed_from_u64(0x00c0_ffee);
         let mut omens_a = crate::omen::OmenSet::new();

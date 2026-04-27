@@ -71,7 +71,7 @@ fn worked_example_goal() -> Goal {
 }
 
 fn run_plan(item: Item) -> Vec<poc2_advisor::Recommendation> {
-    let registry = ModRegistry::from_mods(Vec::new());
+    let registry = ModRegistry::from_mods(Vec::new(), Vec::new());
     let strategies = StrategyRegistry::default();
     let rules = RuleSet::from_rules(poc2_rules::seed_rules());
     let resolver = DefaultCurrencyResolver::new();

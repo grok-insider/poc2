@@ -4,9 +4,7 @@
 //!
 //! The Recombinator takes two source items of the same item-class and
 //! produces a single output item drawn from the combined mod pool of
-//! both inputs. Both sources are consumed (in real PoE2; the engine
-//! doesn't track stash here, so the caller is responsible for
-//! discarding the inputs after a successful recombine).
+//! both inputs. Both sources are consumed.
 //!
 //! ## Inputs
 //!
@@ -24,19 +22,47 @@
 //! - Same base, same ilvl as the input.
 //! - Rarity = Rare.
 //! - Quality is reset to 0; quality-tagged catalyst boosts are lost.
-//! - Mods: from the union of both inputs' explicit mod rolls,
-//!   uniformly sample a count ∈ `[1, base_class_max_per_affix * 2]`
-//!   and split between prefixes/suffixes by each mod's affix type.
-//!   Fractured mods always carry over (they're "preserved" in the recipe).
-//!   Mod-group exclusivity is honored: if two candidates share a group,
-//!   only the first sampled one is kept.
+//! - Mods: from the union of both inputs' explicit mod rolls, sampled
+//!   per the wiki success-chance formula (M14.4). Fractured mods always
+//!   carry over (they're "preserved" in the recipe). Mod-group
+//!   exclusivity is honored: if two candidates share a group, only the
+//!   first sampled one is kept.
 //!
-//! ## Caveats
+//! ## Wiki success formula (M14.4)
 //!
-//! The exact PoE2 0.4 sampling distribution is not perfectly documented;
-//! community testing suggests ~50% chance per source mod plus a bias
-//! toward retaining rare-tier mods. Until more data lands (M5+), the
-//! engine uses uniform sampling.
+//! Per the [poe2wiki Recombinator article](https://www.poe2wiki.net/wiki/Recombinator),
+//! a recombine attempt either succeeds (producing the chosen output mod
+//! set) or fails (both inputs consumed, no output). Success chance is:
+//!
+//! ```text
+//! P(success) = clamp(a × c × Π_i (Σ_{j=m_i}^{m_t0} w_j / Z), 0, 1)
+//! ```
+//!
+//! where:
+//! - `a` is the per-base coefficient (Armour=10, Weapon=16, Quiver/Focus/Belt=12,
+//!   Ring/Amulet=16). See [`BASE_COEFF_*`].
+//! - `c` is the mod-count coefficient driven by the chosen output mod count.
+//!   See [`MOD_COUNT_COEFF`].
+//! - For each chosen output mod `i`, the inner term sums weights of
+//!   tier-ladder peers from the chosen tier `m_i` up to the highest tier
+//!   the base/ilvl admits (`m_t0`).
+//! - `Z` is the total weight of mods of the same affix type that can roll
+//!   on the selected base.
+//!
+//! The advisor surfaces the success chance through `LoopEstimate` so the
+//! UI can show "expected attempts ≈ 1 / P(success)".
+//!
+//! ## API surface
+//!
+//! - [`recombine`] — back-compat unary entry point that returns the
+//!   sampled `Item` regardless of the formula's success probability.
+//!   Used by existing strategy-executor and test code paths that don't
+//!   yet model the success/failure outcome.
+//! - [`recombine_with_chance`] — M14.4 entry point that returns a
+//!   [`RecombinatorOutcome`] (`Success(Item)` or `Failure`) per the wiki
+//!   formula. Used by the advisor when computing per-attempt expected cost.
+//! - [`compute_recombine_success_chance`] — pure-function formula
+//!   accessible to the advisor for offline planning without RNG draws.
 
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -53,6 +79,95 @@ use crate::registry::ModRegistry;
 /// through `BaseType::max_prefixes` once the BaseRegistry lands.
 const RECOMBINE_MAX_PREFIXES: u8 = 3;
 const RECOMBINE_MAX_SUFFIXES: u8 = 3;
+
+/// Per-base recombinator coefficient (the `a` term in the wiki formula).
+///
+/// Source: poe2wiki Recombinator article §3 "Success Chance Formula".
+pub const BASE_COEFF_ARMOUR: f64 = 10.0;
+pub const BASE_COEFF_WEAPON: f64 = 16.0;
+pub const BASE_COEFF_QUIVER_FOCUS_BELT: f64 = 12.0;
+pub const BASE_COEFF_RING_AMULET: f64 = 16.0;
+/// Default coefficient for item classes the wiki doesn't enumerate
+/// (jewels, charms, tablets). Conservative — keeps recombines for
+/// unsupported classes from over-succeeding while a richer table lands.
+pub const BASE_COEFF_OTHER: f64 = 8.0;
+
+/// Mod-count coefficient `c[k]` for an output of `k` mods.
+///
+/// Source: poe2wiki Recombinator article §3 "Mod Count Coefficient" table.
+/// Indexed `[1, 6]` (mod count 0 returns 1.0 as the no-op identity).
+const MOD_COUNT_COEFF: [f64; 7] = [
+    1.0,  // k = 0 (no mods picked — formula is the empty product = 1)
+    1.0,  // k = 1
+    0.85, // k = 2
+    0.65, // k = 3
+    0.40, // k = 4
+    0.20, // k = 5
+    0.10, // k = 6
+];
+
+/// Resolve the recombinator's per-base coefficient `a` for a given item
+/// class id.
+///
+/// Item-class strings are matched against the canonical PascalCase keys.
+/// Unrecognized classes fall back to [`BASE_COEFF_OTHER`].
+fn base_coeff_for_class(class: &str) -> f64 {
+    match class {
+        // Armour-class items
+        "BodyArmour" | "Helmet" | "Boots" | "Gloves" => BASE_COEFF_ARMOUR,
+        // Weapons (one- and two-hand, all flavours)
+        "OneHandSword" | "TwoHandSword" | "OneHandAxe" | "TwoHandAxe" | "OneHandMace"
+        | "TwoHandMace" | "Bow" | "Crossbow" | "Spear" | "Staff" | "Sceptre" | "Wand"
+        | "Dagger" | "Claw" => BASE_COEFF_WEAPON,
+        // Quiver / Focus / Belt
+        "Quiver" | "Focus" | "Belt" => BASE_COEFF_QUIVER_FOCUS_BELT,
+        // Jewellery
+        "Ring" | "Amulet" => BASE_COEFF_RING_AMULET,
+        _ => BASE_COEFF_OTHER,
+    }
+}
+
+/// Outcome of a [`recombine_with_chance`] attempt (M14.4).
+///
+/// On `Failure` the inputs are still consumed — the caller is responsible
+/// for discarding both stash items even though no output is produced.
+/// This mirrors the in-game mechanic where a failed recombine destroys
+/// both sources.
+///
+/// The `Success` variant boxes the produced [`Item`] so that the failure
+/// path doesn't pad to the full item-state size; recombines are bursty
+/// (many failures per success on hard recipes) so this keeps the
+/// allocator footprint reasonable.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecombinatorOutcome {
+    /// Recombine succeeded; the wrapped `Item` is the produced output.
+    Success(Box<Item>),
+    /// Recombine failed; both inputs are consumed and no output exists.
+    Failure,
+}
+
+/// Compute the per-attempt success chance for a recombine that would
+/// produce the given output mod set on the given base.
+///
+/// Pure function — no RNG draws. The advisor calls this for offline
+/// loop-iteration estimation; [`recombine_with_chance`] consumes the same
+/// chance for runtime sampling.
+///
+/// Returns a probability in `[0.0, 1.0]`. Returns `1.0` when the
+/// computed value exceeds 1 (which can happen for small mod counts on
+/// high-coefficient bases — the formula's intent is "guaranteed
+/// success" in that regime).
+pub fn compute_recombine_success_chance(
+    base_class: &str,
+    output_mod_count: usize,
+    per_mod_tier_ratios: &[f64],
+) -> f64 {
+    let a = base_coeff_for_class(base_class);
+    let c_idx = output_mod_count.min(MOD_COUNT_COEFF.len() - 1);
+    let c = MOD_COUNT_COEFF[c_idx];
+    let product: f64 = per_mod_tier_ratios.iter().product();
+    (a * c * product).clamp(0.0, 1.0)
+}
 
 /// Recombine two Rare items into one. Returns the new Rare item;
 /// callers are responsible for discarding `a` and `b`.
@@ -181,6 +296,92 @@ pub fn recombine(
     })
 }
 
+/// Recombine with the M14.4 wiki success-chance formula.
+///
+/// Validates inputs, samples a candidate output mod set just like
+/// [`recombine`], but then evaluates the wiki success-chance formula to
+/// decide whether the produced output materializes ([`RecombinatorOutcome::Success`])
+/// or the attempt fails ([`RecombinatorOutcome::Failure`]) — both inputs
+/// are still consumed in either case.
+///
+/// Per-mod tier ratios `Σ_{j=m}^{m_t0} w_j / Z` are computed using
+/// [`ModRegistry::weight_for`] over the source mod's tier-ladder peers.
+/// When the registry has no weight observations for a mod, the term
+/// degrades to `1.0 / k` where `k` is the number of mods of that affix
+/// type on the base — matching the eligibility-fallback behaviour of
+/// `weight_for`.
+pub fn recombine_with_chance(
+    a: &Item,
+    b: &Item,
+    registry: &ModRegistry,
+    rng: &mut dyn rand::RngCore,
+) -> EngineResult<RecombinatorOutcome> {
+    let candidate = recombine(a, b, registry, rng)?;
+    let class = a.base.as_str();
+    let mod_count = candidate.prefixes.len() + candidate.suffixes.len();
+
+    // Compute per-mod tier ratios. For each chosen output mod, sum the
+    // weights of its tier-ladder peers (registry's mod-group ladder)
+    // up to the mods whose `required_level <= ilvl`, then divide by the
+    // total weight of mods of the same affix type the base admits.
+    let mut ratios: SmallVec<[f64; 6]> = SmallVec::new();
+    for roll in candidate.prefixes.iter().chain(candidate.suffixes.iter()) {
+        let group = registry.group_of(&roll.mod_id);
+        let Some(group) = group else {
+            // Unknown mod (out-of-bundle). Use a neutral 1.0 ratio so
+            // the formula doesn't penalize unrecognized mods.
+            ratios.push(1.0);
+            continue;
+        };
+        // Numerator: sum of weights of tier-ladder peers at ilvl ≤ candidate.ilvl
+        // (the chosen mod's tier and lower-tier siblings — i.e., the cumulative
+        // weight from m_t0 down to m_i, equivalent to the wiki's Σ_{j=m_i}^{m_t0}).
+        let mut numerator = 0.0;
+        for &peer_idx in registry.group_members(group) {
+            let Some(peer) = registry.at(peer_idx) else {
+                continue;
+            };
+            if peer.required_level > candidate.ilvl {
+                continue;
+            }
+            if peer.affix_type != roll.affix_type {
+                continue;
+            }
+            numerator += registry.weight_for(
+                &peer.id,
+                &candidate.base,
+                candidate.ilvl,
+                &crate::ids::ItemClassId::from(class),
+            );
+        }
+        // Denominator: total weight of mods of this affix type on the base.
+        let z = sum_affix_weights(registry, &candidate, roll.affix_type, class);
+        let ratio = if z > 0.0 { numerator / z } else { 1.0 };
+        ratios.push(ratio);
+    }
+
+    let p_success = compute_recombine_success_chance(class, mod_count, &ratios);
+    let r: f64 = rng.gen();
+    if r < p_success {
+        Ok(RecombinatorOutcome::Success(Box::new(candidate)))
+    } else {
+        Ok(RecombinatorOutcome::Failure)
+    }
+}
+
+/// Sum of `weight_for` across every mod of the given affix type that the
+/// item's base/class admits. The denominator `Z` of the wiki formula.
+fn sum_affix_weights(registry: &ModRegistry, item: &Item, affix: AffixType, class: &str) -> f64 {
+    let class_id = crate::ids::ItemClassId::from(class);
+    registry
+        .for_class_affix(&class_id, affix)
+        .iter()
+        .filter_map(|&idx| registry.at(idx))
+        .filter(|m| m.required_level <= item.ilvl)
+        .map(|m| registry.weight_for(&m.id, &item.base, item.ilvl, &class_id))
+        .sum()
+}
+
 /// Reject recombines that don't satisfy the precondition list.
 fn validate_inputs(a: &Item, b: &Item) -> EngineResult<()> {
     for (label, item) in [("a", a), ("b", b)] {
@@ -293,17 +494,20 @@ mod tests {
     }
 
     fn small_registry() -> ModRegistry {
-        ModRegistry::from_mods(vec![
-            mk_mod("APrefix1", "G_AP1", AffixType::Prefix, "BodyArmour"),
-            mk_mod("APrefix2", "G_AP2", AffixType::Prefix, "BodyArmour"),
-            mk_mod("BPrefix1", "G_BP1", AffixType::Prefix, "BodyArmour"),
-            mk_mod("ASuffix1", "G_AS1", AffixType::Suffix, "BodyArmour"),
-            mk_mod("BSuffix1", "G_BS1", AffixType::Suffix, "BodyArmour"),
-            mk_mod("BSuffix2", "G_BS2", AffixType::Suffix, "BodyArmour"),
-            // Two mods sharing a group, to test exclusivity.
-            mk_mod("CDup1", "G_DUP", AffixType::Prefix, "BodyArmour"),
-            mk_mod("CDup2", "G_DUP", AffixType::Prefix, "BodyArmour"),
-        ])
+        ModRegistry::from_mods(
+            vec![
+                mk_mod("APrefix1", "G_AP1", AffixType::Prefix, "BodyArmour"),
+                mk_mod("APrefix2", "G_AP2", AffixType::Prefix, "BodyArmour"),
+                mk_mod("BPrefix1", "G_BP1", AffixType::Prefix, "BodyArmour"),
+                mk_mod("ASuffix1", "G_AS1", AffixType::Suffix, "BodyArmour"),
+                mk_mod("BSuffix1", "G_BS1", AffixType::Suffix, "BodyArmour"),
+                mk_mod("BSuffix2", "G_BS2", AffixType::Suffix, "BodyArmour"),
+                // Two mods sharing a group, to test exclusivity.
+                mk_mod("CDup1", "G_DUP", AffixType::Prefix, "BodyArmour"),
+                mk_mod("CDup2", "G_DUP", AffixType::Prefix, "BodyArmour"),
+            ],
+            vec![],
+        )
     }
 
     #[test]

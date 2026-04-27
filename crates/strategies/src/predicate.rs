@@ -341,7 +341,7 @@ mod tests {
             flags: ModFlags::HYBRID,
             ..mod_es.clone()
         };
-        let registry = ModRegistry::from_mods(vec![mod_es, mod_hybrid]);
+        let registry = ModRegistry::from_mods(vec![mod_es, mod_hybrid], vec![]);
 
         let item = Item {
             base: ItemClassId::from("BodyArmour").as_str().into(),

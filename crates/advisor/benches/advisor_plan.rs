@@ -78,7 +78,7 @@ fn worked_example_goal() -> Goal {
 }
 
 fn bench_plan(c: &mut Criterion) {
-    let registry = ModRegistry::from_mods(vec![]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
     let resolver = DefaultCurrencyResolver::new();
     let rules = RuleSet::from_rules(poc2_rules::seed_rules());
     let strategy = load_strategy_str(CANONICAL_STRATEGY).expect("canonical strategy loads");

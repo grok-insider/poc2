@@ -37,6 +37,7 @@
 
 pub mod analyzer;
 pub mod base;
+pub mod base_registry;
 pub mod currency;
 pub mod engine;
 pub mod error;
@@ -48,9 +49,11 @@ pub mod omen;
 pub mod patch;
 pub mod registry;
 pub mod tag;
+pub mod weights;
 
 pub use analyzer::{analyze, BuiltInClassifier, Classifier, CompositeClassifier};
 pub use base::{BaseType, InventorySize, ReleaseState};
+pub use base_registry::BaseRegistry;
 pub use error::{EngineError, EngineResult};
 pub use ids::{
     BaseTypeId, ConceptId, CurrencyId, EssenceId, ItemClassId, ModGroupId, ModId, OmenId, StatId,
@@ -68,12 +71,17 @@ pub use omen::{Omen, OmenEffect, OmenSet};
 pub use patch::{PatchRange, PatchVersion};
 pub use registry::{ModIndex, ModRegistry};
 pub use tag::{Tag, TagCategory};
+pub use weights::{Confidence, WeightObservation, WeightScope};
 
 pub use currency::{
-    recombine, ApplyContext, ApplyOutcome, Bone, CannotApply, Catalyst, Currency, CurrencyResolver,
-    DefaultCurrencyResolver, Essence, EssenceQuality, FracturingOrb, HinekorasLock, RaritySet,
+    compute_recombine_success_chance, recombine, recombine_with_chance, ApplyContext, ApplyOutcome,
+    Bone, CannotApply, Catalyst, Currency, CurrencyResolver, DefaultCurrencyResolver, Essence,
+    EssenceQuality, FracturingOrb, HinekorasLock, RaritySet, RecombinatorOutcome,
 };
-pub use engine::{apply_currency, commit_with_preview, preview_currency};
+pub use engine::{
+    apply_currency, apply_currency_with_bases, commit_with_preview, commit_with_preview_with_bases,
+    preview_currency, preview_currency_with_bases,
+};
 
 /// Schema version of the engine's serialized types.
 ///

@@ -32,7 +32,9 @@ pub use catalyst::{
 pub use essence::{Essence, EssenceQuality};
 pub use fracturing::FracturingOrb;
 pub use hinekora::HinekorasLock;
-pub use recombinator::recombine;
+pub use recombinator::{
+    compute_recombine_success_chance, recombine, recombine_with_chance, RecombinatorOutcome,
+};
 pub use resolver::{CurrencyResolver, DefaultCurrencyResolver};
 
 use rand::RngCore;
@@ -150,29 +152,52 @@ impl std::fmt::Display for CannotApply {
 
 /// Context passed to every `Currency::apply` invocation.
 ///
-/// Holds the registry, RNG, current patch, and the active omen set.
-/// Currencies consume omens from the set as part of their apply paths
-/// (see [`crate::omen::OmenSet`] for the consumption helpers).
+/// Holds the mod registry, base registry, RNG, current patch, and the
+/// active omen set. Currencies consume omens from the set as part of their
+/// apply paths (see [`crate::omen::OmenSet`] for the consumption helpers).
+///
+/// `base_registry` (M14.2) is consulted by helpers that need to resolve
+/// `BaseTypeId → ItemClassId / tags` (Bone/Catalyst class gating in
+/// M14.5/M14.6, tag-intersection weight resolution in `weight_for`'s
+/// fallback, etc.). When the engine's caller does not have a populated
+/// registry — most test fixtures, currency-internal helpers — they pass
+/// [`crate::base_registry::EMPTY`] (the static empty registry).
 pub struct ApplyContext<'a> {
     pub registry: &'a ModRegistry,
+    pub base_registry: &'a crate::base_registry::BaseRegistry,
     pub rng: &'a mut dyn RngCore,
     pub patch: PatchVersion,
     pub omens: &'a mut crate::omen::OmenSet,
 }
 
 impl<'a> ApplyContext<'a> {
+    /// Construct an `ApplyContext` with an explicit base registry.
     pub fn new(
         registry: &'a ModRegistry,
+        base_registry: &'a crate::base_registry::BaseRegistry,
         rng: &'a mut dyn RngCore,
         patch: PatchVersion,
         omens: &'a mut crate::omen::OmenSet,
     ) -> Self {
         Self {
             registry,
+            base_registry,
             rng,
             patch,
             omens,
         }
+    }
+
+    /// Construct an `ApplyContext` with the global empty base registry —
+    /// suitable for tests and other call sites that operate on synthetic
+    /// fixtures whose `Item.base` carries the legacy class-id placeholder.
+    pub fn new_without_bases(
+        registry: &'a ModRegistry,
+        rng: &'a mut dyn RngCore,
+        patch: PatchVersion,
+        omens: &'a mut crate::omen::OmenSet,
+    ) -> Self {
+        Self::new(registry, &crate::base_registry::EMPTY, rng, patch, omens)
     }
 }
 

@@ -93,130 +93,133 @@ fn mk_mod(
 }
 
 fn registry() -> ModRegistry {
-    ModRegistry::from_mods(vec![
-        // Energy Shield prefixes — three groups, three tiers each. The
-        // user's "T1 ES flat or hybrid" target accepts any of these.
-        mk_mod(
-            "ES_Flat_T1",
-            "ES_Flat",
-            AffixType::Prefix,
-            ModKind::Explicit,
-            75,
-            &[("local_energy_shield", 60.0, 80.0)],
-        ),
-        mk_mod(
-            "ES_Flat_T2",
-            "ES_Flat",
-            AffixType::Prefix,
-            ModKind::Explicit,
-            50,
-            &[("local_energy_shield", 40.0, 55.0)],
-        ),
-        mk_mod(
-            "ES_Flat_T3",
-            "ES_Flat",
-            AffixType::Prefix,
-            ModKind::Explicit,
-            1,
-            &[("local_energy_shield", 10.0, 25.0)],
-        ),
-        mk_mod(
-            "ES_Pct_T1",
-            "ES_Pct",
-            AffixType::Prefix,
-            ModKind::Explicit,
-            75,
-            &[("local_energy_shield_+%", 50.0, 65.0)],
-        ),
-        mk_mod(
-            "ES_Pct_T3",
-            "ES_Pct",
-            AffixType::Prefix,
-            ModKind::Explicit,
-            1,
-            &[("local_energy_shield_+%", 10.0, 20.0)],
-        ),
-        mk_mod(
-            "ES_Life_Hybrid_T1",
-            "ES_Life_Hybrid",
-            AffixType::Prefix,
-            ModKind::Explicit,
-            75,
-            &[
-                ("local_energy_shield_+%", 14.0, 18.0),
-                ("base_maximum_life", 25.0, 35.0),
-            ],
-        ),
-        // Other prefixes (so Regal / Exalt have non-ES options too)
-        mk_mod(
-            "Mana_T3",
-            "Mana",
-            AffixType::Prefix,
-            ModKind::Explicit,
-            1,
-            &[("base_maximum_mana", 20.0, 30.0)],
-        ),
-        // Suffix mods
-        mk_mod(
-            "FireRes_T1",
-            "FireRes",
-            AffixType::Suffix,
-            ModKind::Explicit,
-            75,
-            &[("base_fire_damage_resistance_%", 41.0, 45.0)],
-        ),
-        mk_mod(
-            "ColdRes_T1",
-            "ColdRes",
-            AffixType::Suffix,
-            ModKind::Explicit,
-            75,
-            &[("base_cold_damage_resistance_%", 41.0, 45.0)],
-        ),
-        mk_mod(
-            "LightningRes_T1",
-            "LightningRes",
-            AffixType::Suffix,
-            ModKind::Explicit,
-            75,
-            &[("base_lightning_damage_resistance_%", 41.0, 45.0)],
-        ),
-        mk_mod(
-            "Dexterity_T3",
-            "Dexterity",
-            AffixType::Suffix,
-            ModKind::Explicit,
-            1,
-            &[("additional_dexterity", 5.0, 10.0)],
-        ),
-        // Desecrated mods (for Reveal-at-Well-of-Souls)
-        mk_mod(
-            "Desecrated_ES_Boost",
-            "DesecratedESBoost",
-            AffixType::Prefix,
-            ModKind::Desecrated,
-            1,
-            &[("local_energy_shield_+%", 12.0, 18.0)],
-        ),
-        mk_mod(
-            "Desecrated_AllRes",
-            "DesecratedAllRes",
-            AffixType::Suffix,
-            ModKind::Desecrated,
-            1,
-            &[("all_resistance_%", 8.0, 12.0)],
-        ),
-        // The Perfect Essence of Seeking target mod (Body Armour:
-        // 40-50% reduced Critical Damage Bonus, suffix).
-        mk_mod(
-            "Seeking_Perfect_BodyArmour",
-            "ReducedCritDmg",
-            AffixType::Suffix,
-            ModKind::Explicit,
-            1,
-            &[("reduced_crit_damage_bonus_%", 40.0, 50.0)],
-        ),
-    ])
+    ModRegistry::from_mods(
+        vec![
+            // Energy Shield prefixes — three groups, three tiers each. The
+            // user's "T1 ES flat or hybrid" target accepts any of these.
+            mk_mod(
+                "ES_Flat_T1",
+                "ES_Flat",
+                AffixType::Prefix,
+                ModKind::Explicit,
+                75,
+                &[("local_energy_shield", 60.0, 80.0)],
+            ),
+            mk_mod(
+                "ES_Flat_T2",
+                "ES_Flat",
+                AffixType::Prefix,
+                ModKind::Explicit,
+                50,
+                &[("local_energy_shield", 40.0, 55.0)],
+            ),
+            mk_mod(
+                "ES_Flat_T3",
+                "ES_Flat",
+                AffixType::Prefix,
+                ModKind::Explicit,
+                1,
+                &[("local_energy_shield", 10.0, 25.0)],
+            ),
+            mk_mod(
+                "ES_Pct_T1",
+                "ES_Pct",
+                AffixType::Prefix,
+                ModKind::Explicit,
+                75,
+                &[("local_energy_shield_+%", 50.0, 65.0)],
+            ),
+            mk_mod(
+                "ES_Pct_T3",
+                "ES_Pct",
+                AffixType::Prefix,
+                ModKind::Explicit,
+                1,
+                &[("local_energy_shield_+%", 10.0, 20.0)],
+            ),
+            mk_mod(
+                "ES_Life_Hybrid_T1",
+                "ES_Life_Hybrid",
+                AffixType::Prefix,
+                ModKind::Explicit,
+                75,
+                &[
+                    ("local_energy_shield_+%", 14.0, 18.0),
+                    ("base_maximum_life", 25.0, 35.0),
+                ],
+            ),
+            // Other prefixes (so Regal / Exalt have non-ES options too)
+            mk_mod(
+                "Mana_T3",
+                "Mana",
+                AffixType::Prefix,
+                ModKind::Explicit,
+                1,
+                &[("base_maximum_mana", 20.0, 30.0)],
+            ),
+            // Suffix mods
+            mk_mod(
+                "FireRes_T1",
+                "FireRes",
+                AffixType::Suffix,
+                ModKind::Explicit,
+                75,
+                &[("base_fire_damage_resistance_%", 41.0, 45.0)],
+            ),
+            mk_mod(
+                "ColdRes_T1",
+                "ColdRes",
+                AffixType::Suffix,
+                ModKind::Explicit,
+                75,
+                &[("base_cold_damage_resistance_%", 41.0, 45.0)],
+            ),
+            mk_mod(
+                "LightningRes_T1",
+                "LightningRes",
+                AffixType::Suffix,
+                ModKind::Explicit,
+                75,
+                &[("base_lightning_damage_resistance_%", 41.0, 45.0)],
+            ),
+            mk_mod(
+                "Dexterity_T3",
+                "Dexterity",
+                AffixType::Suffix,
+                ModKind::Explicit,
+                1,
+                &[("additional_dexterity", 5.0, 10.0)],
+            ),
+            // Desecrated mods (for Reveal-at-Well-of-Souls)
+            mk_mod(
+                "Desecrated_ES_Boost",
+                "DesecratedESBoost",
+                AffixType::Prefix,
+                ModKind::Desecrated,
+                1,
+                &[("local_energy_shield_+%", 12.0, 18.0)],
+            ),
+            mk_mod(
+                "Desecrated_AllRes",
+                "DesecratedAllRes",
+                AffixType::Suffix,
+                ModKind::Desecrated,
+                1,
+                &[("all_resistance_%", 8.0, 12.0)],
+            ),
+            // The Perfect Essence of Seeking target mod (Body Armour:
+            // 40-50% reduced Critical Damage Bonus, suffix).
+            mk_mod(
+                "Seeking_Perfect_BodyArmour",
+                "ReducedCritDmg",
+                AffixType::Suffix,
+                ModKind::Explicit,
+                1,
+                &[("reduced_crit_damage_bonus_%", 40.0, 50.0)],
+            ),
+        ],
+        vec![],
+    )
 }
 
 #[allow(dead_code)] // for completeness when M2.7 lands

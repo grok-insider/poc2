@@ -148,6 +148,15 @@ const SEED_STRATEGIES: &[(&str, &str)] = &[
 /// `recommend` invocation) dominate writes (manual reloads).
 struct BundleState {
     registry: Arc<ModRegistry>,
+    /// Indexed `bundle.base_items` (M14.2). Currently held but not yet
+    /// consumed by Tauri commands; M14.5 (Catalyst class gate) and M14.6
+    /// (Bone subtype gate) thread it through `apply_currency_with_bases`
+    /// so the engine can resolve real `BaseTypeId → ItemClassId` for
+    /// pipeline-built items. Until then, advisor commands run against
+    /// fixture-shaped items whose `Item.base` is a class-id placeholder
+    /// and falls through `class_for_item`'s back-compat path.
+    #[allow(dead_code)]
+    base_registry: Arc<poc2_engine::BaseRegistry>,
     strategies: Arc<StrategyRegistry>,
     resolver: Arc<DefaultCurrencyResolver>,
     bundle_path: Option<PathBuf>,
@@ -290,49 +299,62 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
         Some(p) => try_load_bundle(p),
         None => load_bundle_from_known_paths(),
     };
-    let (registry, bundle_path, bundle_patch, essences, catalysts, asset_seeds) = match loaded {
-        Some((bundle, path)) => {
-            let patch = bundle.game_patch();
-            tracing::info!(
-                path = %path.display(),
-                patch = %patch,
-                mods = bundle.mods.len(),
-                bases = bundle.base_items.len(),
-                omens = bundle.omens.entries.len(),
-                essences = bundle.essences.entries.len(),
-                catalysts = bundle.catalysts.entries.len(),
-                bones = bundle.bones.entries.len(),
-                weights = bundle.weights.len(),
-                "loaded data bundle"
-            );
-            let asset_seeds = build_asset_seeds(&bundle);
-            let essences = bundle.essence_catalogue();
-            let catalysts = bundle.catalyst_catalogue();
-            (
-                ModRegistry::from_mods(bundle.mods),
-                Some(path),
-                Some(patch),
-                essences,
-                catalysts,
-                asset_seeds,
-            )
-        }
-        None => {
-            tracing::warn!(
-                "no data bundle found; running with empty mod registry. \
-                 Build a bundle via the pipeline (`cargo run -p poc2-pipeline -- build`) \
-                 and place it in `~/.config/poc2/bundles/` or set POC2_BUNDLE."
-            );
-            (
-                ModRegistry::from_mods(Vec::new()),
-                None,
-                None,
-                Vec::new(),
-                Vec::new(),
-                build_asset_seeds_without_bundle(),
-            )
-        }
-    };
+    let (registry, base_registry, bundle_path, bundle_patch, essences, catalysts, asset_seeds) =
+        match loaded {
+            Some((bundle, path)) => {
+                let patch = bundle.game_patch();
+                tracing::info!(
+                    path = %path.display(),
+                    patch = %patch,
+                    mods = bundle.mods.len(),
+                    bases = bundle.base_items.len(),
+                    omens = bundle.omens.entries.len(),
+                    essences = bundle.essences.entries.len(),
+                    catalysts = bundle.catalysts.entries.len(),
+                    bones = bundle.bones.entries.len(),
+                    weights = bundle.weights.len(),
+                    "loaded data bundle"
+                );
+                let asset_seeds = build_asset_seeds(&bundle);
+                let essences = bundle.essence_catalogue();
+                let catalysts = bundle.catalyst_catalogue();
+                let base_registry = poc2_engine::BaseRegistry::from_bases(bundle.base_items);
+                tracing::info!(
+                    bases_indexed = base_registry.len(),
+                    "indexed bases into base registry"
+                );
+                let registry = ModRegistry::from_mods(bundle.mods, bundle.weights);
+                tracing::info!(
+                    weight_observations = registry.weight_observation_count(),
+                    "indexed weight observations into mod registry"
+                );
+                (
+                    registry,
+                    base_registry,
+                    Some(path),
+                    Some(patch),
+                    essences,
+                    catalysts,
+                    asset_seeds,
+                )
+            }
+            None => {
+                tracing::warn!(
+                    "no data bundle found; running with empty mod registry. \
+                     Build a bundle via the pipeline (`cargo run -p poc2-pipeline -- build`) \
+                     and place it in `~/.config/poc2/bundles/` or set POC2_BUNDLE."
+                );
+                (
+                    ModRegistry::from_mods(Vec::new(), Vec::new()),
+                    poc2_engine::BaseRegistry::default(),
+                    None,
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                    build_asset_seeds_without_bundle(),
+                )
+            }
+        };
 
     let mut loaded_strategies = Vec::new();
     for (name, toml) in SEED_STRATEGIES {
@@ -352,6 +374,7 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
 
     BundleState {
         registry: Arc::new(registry),
+        base_registry: Arc::new(base_registry),
         strategies: Arc::new(strategies),
         resolver: Arc::new(resolver),
         bundle_path,

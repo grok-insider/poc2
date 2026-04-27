@@ -160,14 +160,61 @@ pub enum BoneSize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BoneSubtype {
-    /// Necklace, Ring, Belt
+    /// Ring, Amulet, Belt, Talisman.
     Collarbone,
-    /// Weapon, Quiver
+    /// All weapons (one- and two-hand) plus Quiver.
     Jawbone,
-    /// Armour
+    /// Armour pieces: BodyArmour, Helmet, Boots, Gloves.
     Rib,
     /// Jewel (only `Preserved` size exists per current data).
     Cranium,
+}
+
+impl BoneSubtype {
+    /// Item classes that accept this bone subtype (M14.6).
+    ///
+    /// Source: `docs/81-engine-training-and-rule-encoding-plan.md` §4.6
+    /// Tier 1.6, cross-checked with poe2db Abyssal Bones documentation.
+    /// Vertebrae → Waystone is a known gap because the engine's
+    /// [`BoneSubtype`] enum doesn't yet include `Vertebrae`; that lands
+    /// when waystone crafting graduates beyond the v3 deferred-scope list.
+    pub const fn valid_classes(self) -> &'static [&'static str] {
+        match self {
+            Self::Rib => &["BodyArmour", "Helmet", "Boots", "Gloves"],
+            Self::Jawbone => &[
+                "OneHandSword",
+                "TwoHandSword",
+                "OneHandAxe",
+                "TwoHandAxe",
+                "OneHandMace",
+                "TwoHandMace",
+                "Bow",
+                "Crossbow",
+                "Spear",
+                "Staff",
+                "Sceptre",
+                "Wand",
+                "Dagger",
+                "Claw",
+                "Quiver",
+            ],
+            Self::Collarbone => &["Ring", "Amulet", "Belt", "Talisman"],
+            Self::Cranium => &["Jewel"],
+        }
+    }
+
+    /// True iff this subtype's pool ever yields a lord-targeted desecrated
+    /// mod (Liege/Sovereign/Blackblooded). Used by the apply-time gate
+    /// to reject lord-pool omens on jewels (whose pool is `Lightless` /
+    /// `of the Abyss`, not Lich-named) and sceptres (which have no
+    /// exclusive desecrated per the wiki).
+    pub const fn supports_lord_pool(self) -> bool {
+        // Cranium → Jewel uses the Lightless / of-the-Abyss pool, not the
+        // lord-named pool. Other subtypes can host lord mods on classes
+        // that accept lord-targeted desecrated. Sceptres are an exception
+        // handled at the apply-time gate by class-string check.
+        !matches!(self, Self::Cranium)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -222,6 +269,20 @@ pub enum QualityKind {
 // -------------------------------------------------------------------------
 
 /// Runtime state of an item.
+///
+/// `base` is polymorphic in v3 transitional state (M14.2):
+/// - **Pipeline-built items** populate `base` with the canonical bundle
+///   `BaseTypeId` (e.g., `"Metadata/Items/Armours/BodyArmours/FourBodyInt3"`).
+///   The engine consults [`crate::BaseRegistry`] to resolve item class and
+///   tags from this id.
+/// - **Test fixtures and pre-v3 legacy state** populate `base` with a
+///   PascalCase item-class id (e.g., `"BodyArmour"`). The class-resolution
+///   helper falls back to `ItemClassId::from(item.base.as_str())` when the
+///   registry doesn't recognize the id.
+///
+/// M14.7 introduces a hard-reset bundle-schema bump that wipes legacy state
+/// and guarantees every imported item ships a real `BaseTypeId`; the
+/// polymorphic interpretation is removed at that point.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub base: BaseTypeId,

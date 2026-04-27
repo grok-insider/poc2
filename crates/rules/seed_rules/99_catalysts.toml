@@ -75,3 +75,27 @@ priority = 110
 kind = "apply_currency"
 currency = "UnstableCatalyst"
 omens = []
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R093-adaptive-catalyst-on-belt-breach"
+category = "other"
+explanation = "Belts with breach-related mods (Mark of the Abyss, Mageblood-style synergies) get the most value out of an Adaptive catalyst tagged for breach. M14.5 enforces the class-eligibility gate (`Ring/Amulet/Belt/Jewel`); this rule layers a tag-preference recommendation on top of that gate. Community: the heuristics rulebook does not give a verified exclusion, but breach-aligned belts are the canonical case in 0.4 builds."
+source = "/docs/34 §99 (catalysts)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { item_class = "Belt" },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Belt: Adaptive Catalyst tagged 'breach' is the canonical 0.4 belt-quality currency for breach-relevant builds. The engine's Catalyst::can_apply_to gate (M14.5) accepts any catalyst on a Belt; this rule reflects the typical preferred recommendation rather than a hard restriction."
+priority = 100
+[rule.then.action]
+kind = "apply_currency"
+currency = "AdaptiveCatalyst"
+omens = []

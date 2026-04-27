@@ -181,12 +181,12 @@ mod tests {
         rng: &'a mut Xoshiro256PlusPlus,
         omens: &'a mut crate::omen::OmenSet,
     ) -> ApplyContext<'a> {
-        ApplyContext::new(reg, rng, PatchVersion::PATCH_0_4_0, omens)
+        ApplyContext::new_without_bases(reg, rng, PatchVersion::PATCH_0_4_0, omens)
     }
 
     #[test]
     fn fracturing_requires_at_least_4_mods() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
@@ -208,7 +208,7 @@ mod tests {
     fn fracturing_counts_hidden_desecrated_for_threshold() {
         // The user's worked example: 3 visible prefixes + 1 hidden suffix
         // satisfies the 4-mod requirement.
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(2);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
@@ -238,7 +238,7 @@ mod tests {
         // their fracture flag should toggle on, but the hidden slot
         // stays None-fractured (no field to set; just stays Some) and
         // the previously-fractured mod stays the same mod id.
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         for seed in 0u64..1000 {
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
             let mut omens = crate::omen::OmenSet::new();
@@ -266,7 +266,7 @@ mod tests {
     fn fracturing_distribution_is_uniform_over_eligible_mods() {
         // 3 visible prefixes + 1 hidden suffix => 1/3 chance each prefix.
         // Over 6000 trials, each ~2000 ± noise. We allow ±10% margin.
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut counts = [0usize; 3];
         for seed in 0u64..6000 {
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
@@ -310,7 +310,7 @@ mod tests {
     fn fracturing_refuses_when_only_fractured_or_hidden_remain() {
         // 3 fractured prefixes + 1 hidden — pool of "non-fractured visible"
         // is empty. Returns FractureHiddenMod.
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0xff);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn fracturing_rejects_corrupted_or_mirrored() {
-        let reg = ModRegistry::from_mods(vec![]);
+        let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(7);
         let mut omens = crate::omen::OmenSet::new();
         let mut item = fixture_item();

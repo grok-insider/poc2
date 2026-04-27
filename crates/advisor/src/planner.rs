@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn plan_returns_recommendations_for_normal_with_seed_rules() {
-        let registry = ModRegistry::from_mods(vec![]);
+        let registry = ModRegistry::from_mods(vec![], vec![]);
         let resolver = DefaultCurrencyResolver::new();
         let rules = RuleSet::from_rules(poc2_rules::seed_rules());
         let strategies = StrategyRegistry::default();
@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn plan_with_empty_target_emits_stop() {
-        let registry = ModRegistry::from_mods(vec![]);
+        let registry = ModRegistry::from_mods(vec![], vec![]);
         let resolver = DefaultCurrencyResolver::new();
         let rules = RuleSet::default();
         let strategies = StrategyRegistry::default();
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn plan_filters_unaffordable_actions() {
-        let registry = ModRegistry::from_mods(vec![]);
+        let registry = ModRegistry::from_mods(vec![], vec![]);
         let resolver = DefaultCurrencyResolver::new();
         let rules = RuleSet::from_rules(poc2_rules::seed_rules());
         let strategies = StrategyRegistry::default();

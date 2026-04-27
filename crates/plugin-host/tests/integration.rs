@@ -219,7 +219,7 @@ fn predicate_context_dispatches_custom_predicate_through_host() {
     let mut host = PluginHost::new().unwrap();
     host.discover_plugins(dir.path()).unwrap();
 
-    let registry = ModRegistry::from_mods(vec![]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
     let ctx = PredicateContext::new(&registry).with_plugin_dispatch(&host);
     let item = fixture_item();
     let p = ItemPredicate::Custom {
@@ -235,7 +235,7 @@ fn custom_predicate_returns_false_without_plugin_dispatch() {
     use poc2_engine::registry::ModRegistry;
     use poc2_strategies::{eval, ItemPredicate, PredicateContext};
 
-    let registry = ModRegistry::from_mods(vec![]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
     let ctx = PredicateContext::new(&registry);
     let item = fixture_item();
     let p = ItemPredicate::Custom {

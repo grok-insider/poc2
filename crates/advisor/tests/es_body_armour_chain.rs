@@ -179,7 +179,7 @@ fn run_plan(item: Item, registry: ModRegistry, risk: f64) -> Vec<poc2_advisor::R
 fn b1_occupancy_adjustment_prefers_aug_over_regal_when_keeper_present() {
     use poc2_advisor::scorer::occupancy_adjustment;
 
-    let registry = ModRegistry::from_mods(vec![es_prefix_mod("ES_Tier1")]);
+    let registry = ModRegistry::from_mods(vec![es_prefix_mod("ES_Tier1")], vec![]);
     let mut item = body_armour(Rarity::Magic);
     item.prefixes.push(ModRoll {
         mod_id: ModId::from("ES_Tier1"),
@@ -221,12 +221,15 @@ fn b2_tier_fix_emits_fracture_on_max_rolled_keeper_with_4_mods() {
     use poc2_advisor::candidate::generate_candidates_with_goal;
     use poc2_strategies::PredicateContext;
 
-    let registry = ModRegistry::from_mods(vec![
-        es_prefix_mod("ES_Tier1"),
-        es_prefix_mod("ES_Tier2"),
-        fr_suffix_mod("FR_Tier1"),
-        fr_suffix_mod("FR_Tier2"),
-    ]);
+    let registry = ModRegistry::from_mods(
+        vec![
+            es_prefix_mod("ES_Tier1"),
+            es_prefix_mod("ES_Tier2"),
+            fr_suffix_mod("FR_Tier1"),
+            fr_suffix_mod("FR_Tier2"),
+        ],
+        vec![],
+    );
     let mut item = body_armour(Rarity::Rare);
     item.prefixes.push(ModRoll {
         mod_id: ModId::from("ES_Tier1"),
@@ -294,7 +297,7 @@ fn b2_tier_fix_emits_divine_on_sub_max_keeper() {
     use poc2_advisor::candidate::generate_candidates_with_goal;
     use poc2_strategies::PredicateContext;
 
-    let registry = ModRegistry::from_mods(vec![es_prefix_mod("ES_Tier1")]);
+    let registry = ModRegistry::from_mods(vec![es_prefix_mod("ES_Tier1")], vec![]);
     let mut item = body_armour(Rarity::Rare);
     item.prefixes.push(ModRoll {
         mod_id: ModId::from("ES_Tier1"),
@@ -361,7 +364,7 @@ fn b7_real_strategy_es_body_armour_emits_perfect_transmute_at_depth_1() {
 
     // Empty registry — the planner doesn't need real mods to pick the
     // first actionable strategy step, since no simulation has run yet.
-    let registry = ModRegistry::from_mods(vec![]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
     let rules = RuleSet::default();
     let resolver = DefaultCurrencyResolver::new();
     let stash = Stash::unlimited();
@@ -435,7 +438,7 @@ fn b6_omen_aware_reveals_appear_when_hidden_desecrated_present() {
     use poc2_advisor::candidate::generate_candidates_with_goal;
     use poc2_strategies::PredicateContext;
 
-    let registry = ModRegistry::from_mods(vec![es_prefix_mod("ES_Tier1")]);
+    let registry = ModRegistry::from_mods(vec![es_prefix_mod("ES_Tier1")], vec![]);
     let mut item = body_armour(Rarity::Rare);
     item.hidden_desecrated = Some(HiddenDesecratedSlot {
         affix_type: AffixType::Prefix,

@@ -103,7 +103,7 @@ fn canonical_strategy_path() -> std::path::PathBuf {
 #[test]
 fn rediscovery_top_recommendation_is_perfect_transmute() {
     // Setup the full advisor stack.
-    let registry = ModRegistry::from_mods(vec![]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
     let resolver = DefaultCurrencyResolver::new();
     let rules = RuleSet::from_rules(poc2_rules::seed_rules());
 
@@ -161,7 +161,7 @@ fn rediscovery_top_recommendation_is_perfect_transmute() {
 
 #[test]
 fn rediscovery_recommendation_is_traceable_to_source() {
-    let registry = ModRegistry::from_mods(vec![]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
     let resolver = DefaultCurrencyResolver::new();
     let rules = RuleSet::from_rules(poc2_rules::seed_rules());
 
@@ -207,7 +207,7 @@ fn rediscovery_recommendation_is_traceable_to_source() {
 
 #[test]
 fn rediscovery_top_3_includes_strategy_and_rule_sources() {
-    let registry = ModRegistry::from_mods(vec![]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
     let resolver = DefaultCurrencyResolver::new();
     let rules = RuleSet::from_rules(poc2_rules::seed_rules());
 
@@ -255,7 +255,7 @@ fn rediscovery_top_3_includes_strategy_and_rule_sources() {
 fn risk_slider_changes_recommendation_score_ordering() {
     // High-budget greedy plan should score higher (cheaper effective cost
     // when risk=1) than the same plan under a cautious risk=0.
-    let registry = ModRegistry::from_mods(vec![]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
     let resolver = DefaultCurrencyResolver::new();
     let rules = RuleSet::from_rules(poc2_rules::seed_rules());
 
@@ -355,13 +355,16 @@ fn rare_with_3_t1_es_already_satisfies_goal() {
         text_template: None,
     };
 
-    let registry = ModRegistry::from_mods(vec![
-        mk_es_mod("ES1"),
-        mk_es_mod("ES2"),
-        mk_es_mod("ES3"),
-        mk_res_mod("FireRes1", "FireRes"),
-        mk_res_mod("ColdRes1", "ColdRes"),
-    ]);
+    let registry = ModRegistry::from_mods(
+        vec![
+            mk_es_mod("ES1"),
+            mk_es_mod("ES2"),
+            mk_es_mod("ES3"),
+            mk_res_mod("FireRes1", "FireRes"),
+            mk_res_mod("ColdRes1", "ColdRes"),
+        ],
+        vec![],
+    );
     let resolver = DefaultCurrencyResolver::new();
     let rules = RuleSet::from_rules(poc2_rules::seed_rules());
     let strategies = StrategyRegistry::default();
