@@ -33,6 +33,24 @@ use smallvec::SmallVec;
 use tracing::{debug, info};
 
 use crate::error::{PipelineError, PipelineResult};
+
+/// Normalize an upstream item-class string to the codebase-wide
+/// PascalCase no-space convention.
+///
+/// RePoE-fork ships a few class names with embedded spaces
+/// (`"Body Armour"`, `"One Hand Sword"`, `"Two Hand Mace"`, etc.).
+/// Strategies, rules, training corpus, and curated fixtures all use
+/// the no-space form (`"BodyArmour"`, `"OneHandSword"`,
+/// `"TwoHandMace"`). The downstream consumers in this very file —
+/// [`class_caps`] and [`human_class_name`] — also implicitly assume
+/// the no-space form. Normalizing at ingestion keeps every downstream
+/// consumer in agreement.
+///
+/// Implementation: strip ASCII whitespace. RePoE-fork class names are
+/// already correctly capitalized, so removing spaces is sufficient.
+fn normalize_class_id(raw: &str) -> String {
+    raw.chars().filter(|c| !c.is_whitespace()).collect()
+}
 use crate::sources::repoe::{RepoeMod, RepoeSnapshot, RepoeStat};
 
 /// Apply a RePoE-fork snapshot to a bundle in place.
@@ -49,7 +67,10 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
     }
     info!("normalized {} tags", bundle.tags.len());
 
-    // 2. Bases — also collect item_class names along the way
+    // 2. Bases — also collect item_class names along the way.
+    // Class names are normalized at ingestion (`"Body Armour"` →
+    // `"BodyArmour"`) so all downstream consumers see one canonical
+    // form. See [`normalize_class_id`] for context.
     let mut item_classes_seen: AHashSet<String> = AHashSet::new();
     let mut bases_kept = 0usize;
     let mut bases_skipped = 0usize;
@@ -58,11 +79,12 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
             bases_skipped += 1;
             continue;
         }
-        item_classes_seen.insert(raw.item_class.clone());
+        let class_id = normalize_class_id(&raw.item_class);
+        item_classes_seen.insert(class_id.clone());
         bundle.base_items.push(BaseType {
             id: BaseTypeId::from(id.as_str()),
             name: raw.name.clone(),
-            item_class: ItemClassId::from(raw.item_class.as_str()),
+            item_class: ItemClassId::from(class_id.as_str()),
             attribute_pool: derive_attribute_pool(&raw.tags),
             drop_level: raw.drop_level,
             tags: raw
@@ -120,8 +142,16 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
 
     let mut mods_kept = 0usize;
     let mut mods_skipped = 0usize;
-    let known_classes: AHashSet<&str> = item_classes_seen.iter().map(String::as_str).collect();
     let known_tags: AHashSet<&str> = snapshot.tags.iter().map(String::as_str).collect();
+    // RePoE-fork mod `spawn_weights` reference base-tag names (e.g.
+    // `body_armour`, `str_armour`, `weapon`, `default`), not class ids.
+    // Build a `tag → {class_id}` map from the bases so
+    // `derive_allowed_classes` can resolve each spawn-weight tag to the
+    // class(es) that carry it. Without this map every mod would land
+    // with empty `allowed_item_classes` and the engine's
+    // `for_class_affix(...)` would never find them — every Transmute
+    // would fail with `NoEligibleMods`.
+    let tag_to_classes = build_tag_to_classes_index(&bundle.base_items);
     for (id, raw) in &snapshot.mods {
         let is_referenced_implicit = referenced_implicits.contains(id.as_str());
         if raw.domain != "item" && !is_referenced_implicit {
@@ -161,7 +191,7 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
             })
             .collect::<SmallVec<_>>();
 
-        let allowed_classes = derive_allowed_classes(&spawn_weights, &known_classes);
+        let allowed_classes = derive_allowed_classes(&spawn_weights, &tag_to_classes);
         let stats = raw
             .stats
             .iter()
@@ -430,24 +460,55 @@ fn concept_stem_of(id: &str) -> &str {
     }
 }
 
+/// Build the `tag → {class_id}` index from the bundle's bases.
+///
+/// For every `(base.item_class, tag in base.tags)` pair, register that
+/// the tag carries the class. RePoE-fork mod `spawn_weights` reference
+/// these tags (e.g. `body_armour`, `str_armour`, `weapon`,
+/// `default`); the index lets [`derive_allowed_classes`] expand a
+/// spawn-weight tag into the set of classes the mod can roll on.
+fn build_tag_to_classes_index(
+    bases: &[BaseType],
+) -> std::collections::HashMap<String, SmallVec<[ItemClassId; 8]>> {
+    let mut out: std::collections::HashMap<String, SmallVec<[ItemClassId; 8]>> =
+        std::collections::HashMap::new();
+    for b in bases {
+        for tag in &b.tags {
+            let entry = out.entry(tag.as_str().to_string()).or_default();
+            if !entry.iter().any(|c| c == &b.item_class) {
+                entry.push(b.item_class.clone());
+            }
+        }
+        // The class id itself also acts as a tag — some downstream
+        // consumers (and the v1 `derive_allowed_classes` behaviour)
+        // expected exact id matches. Keeping this synonym preserves
+        // back-compat for mods that reference the class name directly
+        // in their spawn_weights.
+        let class_str = b.item_class.as_str().to_string();
+        let entry = out.entry(class_str).or_default();
+        if !entry.iter().any(|c| c == &b.item_class) {
+            entry.push(b.item_class.clone());
+        }
+    }
+    out
+}
+
 fn derive_allowed_classes(
     weights: &[SpawnWeight],
-    known: &AHashSet<&str>,
+    tag_to_classes: &std::collections::HashMap<String, SmallVec<[ItemClassId; 8]>>,
 ) -> SmallVec<[ItemClassId; 8]> {
-    weights
-        .iter()
-        .filter(|sw| sw.weight > 0)
-        .filter_map(|sw| {
-            let tag = sw.tag.as_str();
-            // Common item-class tags map directly to class names.
-            // We accept any tag that's also a known item-class id.
-            if known.contains(tag) {
-                Some(ItemClassId::from(tag))
-            } else {
-                None
+    let mut out: SmallVec<[ItemClassId; 8]> = SmallVec::new();
+    for sw in weights.iter().filter(|sw| sw.weight > 0) {
+        let tag = sw.tag.as_str();
+        if let Some(classes) = tag_to_classes.get(tag) {
+            for c in classes {
+                if !out.iter().any(|existing| existing == c) {
+                    out.push(c.clone());
+                }
             }
-        })
-        .collect()
+        }
+    }
+    out
 }
 
 fn lookup_class_tags(_tags: &[String]) -> std::collections::HashMap<String, SmallVec<[TagId; 4]>> {

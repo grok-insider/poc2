@@ -125,7 +125,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "SpellBlock"
+concept = "Block"
 count = 1
 min_tier = 2
 
@@ -176,7 +176,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "AccuracyRating"
+concept = "Accuracy"
 count = 1
 min_tier = 2
 
@@ -224,7 +224,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "AttackBlock"
+concept = "Block"
 count = 1
 min_tier = 2
 
@@ -322,7 +322,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "StunRecovery"
+concept = "Stun"
 count = 1
 min_tier = 2
 
@@ -371,7 +371,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "AccuracyRating"
+concept = "Accuracy"
 count = 1
 min_tier = 2
 
@@ -464,7 +464,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "StunThreshold"
+concept = "Stun"
 count = 1
 min_tier = 2
 
@@ -506,7 +506,7 @@ ilvl = 82
 budget_div = 30.0
 
 [[goal.target.prefixes]]
-concept_any = ["FlaskEffect", "CharmEffect"]
+concept_any = ["Life", "Mana"]
 count = 1
 min_tier = 1
 
@@ -548,7 +548,7 @@ count = 1
 min_tier = 2
 
 [[goal.target.suffixes]]
-concept = "AccuracyRating"
+concept = "Accuracy"
 count = 1
 min_tier = 2
 
@@ -572,7 +572,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "StunBuildup"
+concept = "Stun"
 count = 1
 min_tier = 2
 
@@ -595,7 +595,7 @@ count = 1
 min_tier = 1
 
 [[goal.target.prefixes]]
-concept_any = ["BleedDamage", "AddedPhysicalDamage"]
+concept_any = ["AddedPhysicalDamage", "IncreasedPhysicalDamage"]
 count = 1
 min_tier = 1
 allow_hybrid = true
@@ -661,7 +661,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "StunBuildup"
+concept = "Stun"
 count = 1
 min_tier = 1
 
@@ -695,7 +695,7 @@ count = 1
 min_tier = 2
 
 [[goal.target.suffixes]]
-concept = "AccuracyRating"
+concept = "Accuracy"
 count = 1
 min_tier = 2
 
@@ -739,7 +739,7 @@ ilvl = 82
 budget_div = 120.0
 
 [[goal.target.prefixes]]
-concept_any = ["AddedColdDamage", "AddedLightningDamage", "AddedFireDamage", "ElementalDamage"]
+concept_any = ["AddedColdDamage", "AddedLightningDamage", "AddedFireDamage", "IncreasedElementalDamage"]
 count = 2
 min_tier = 1
 allow_hybrid = true
@@ -779,7 +779,7 @@ count = 1
 min_tier = 2
 
 [[goal.target.suffixes]]
-concept = "AccuracyRating"
+concept = "Accuracy"
 count = 1
 min_tier = 2
 
@@ -823,12 +823,12 @@ ilvl = 82
 budget_div = 150.0
 
 [[goal.target.prefixes]]
-concept = "SpellDamage"
+concept = "IncreasedSpellDamage"
 count = 1
 min_tier = 1
 
 [[goal.target.prefixes]]
-concept = "AddedSkillLevel"
+concept_any = ["AddedFireDamage", "AddedColdDamage", "AddedLightningDamage"]
 count = 1
 min_tier = 1
 
@@ -851,7 +851,7 @@ ilvl = 82
 budget_div = 100.0
 
 [[goal.target.prefixes]]
-concept_any = ["LightningSpellDamage", "ColdSpellDamage", "FireSpellDamage", "SpellDamage"]
+concept_any = ["IncreasedLightningDamage", "IncreasedColdDamage", "IncreasedFireDamage", "IncreasedSpellDamage"]
 count = 2
 min_tier = 1
 allow_hybrid = true
@@ -875,7 +875,7 @@ ilvl = 82
 budget_div = 120.0
 
 [[goal.target.prefixes]]
-concept_any = ["MinionDamage", "Spirit", "AddedSkillLevel"]
+concept_any = ["MinionDamage", "IncreasedSpellDamage"]
 count = 2
 min_tier = 1
 allow_hybrid = true
@@ -899,17 +899,17 @@ ilvl = 82
 budget_div = 130.0
 
 [[goal.target.prefixes]]
-concept = "SpellDamage"
+concept = "IncreasedSpellDamage"
 count = 1
 min_tier = 1
 
 [[goal.target.prefixes]]
-concept = "AddedSkillLevel"
+concept_any = ["AddedFireDamage", "AddedColdDamage", "AddedLightningDamage"]
 count = 1
 min_tier = 1
 
 [[goal.target.suffixes]]
-concept = "SpellBlock"
+concept = "Block"
 count = 1
 min_tier = 2
 
@@ -941,7 +941,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "AttackBlock"
+concept = "Block"
 count = 1
 min_tier = 1
 
@@ -965,7 +965,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept = "SpellBlock"
+concept = "Block"
 count = 1
 min_tier = 1
 
@@ -989,7 +989,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.prefixes]]
-concept_any = ["IncreasedPhysicalDamage", "ProjectileDamage"]
+concept_any = ["IncreasedPhysicalDamage", "AddedPhysicalDamage"]
 count = 1
 min_tier = 1
 allow_hybrid = true
@@ -1037,7 +1037,7 @@ ilvl = 82
 budget_div = 60.0
 
 [[goal.target.prefixes]]
-concept_any = ["EnergyShield", "Spirit", "ManaRegen"]
+concept_any = ["EnergyShield", "Mana"]
 count = 2
 min_tier = 1
 allow_hybrid = true
@@ -1112,7 +1112,7 @@ ilvl = 82
 budget_div = 70.0
 
 [[goal.target.prefixes]]
-concept = "SpellDamage"
+concept = "IncreasedSpellDamage"
 count = 1
 min_tier = 1
 
@@ -1141,7 +1141,7 @@ ilvl = 82
 budget_div = 30.0
 
 [[goal.target.prefixes]]
-concept = "ItemRarity"
+concept = "Life"
 count = 1
 min_tier = 1
 
@@ -1190,7 +1190,7 @@ ilvl = 82
 budget_div = 100.0
 
 [[goal.target.prefixes]]
-concept = "SpellDamage"
+concept = "IncreasedSpellDamage"
 count = 1
 min_tier = 1
 
@@ -1219,7 +1219,7 @@ ilvl = 82
 budget_div = 120.0
 
 [[goal.target.prefixes]]
-concept = "AddedSkillLevel"
+concept = "IncreasedAttackDamage"
 count = 1
 min_tier = 1
 
@@ -1269,7 +1269,7 @@ ilvl = 82
 budget_div = 60.0
 
 [[goal.target.prefixes]]
-concept_any = ["Life", "EnergyShield", "IncreasedPhysicalDamage", "SpellDamage"]
+concept_any = ["Life", "EnergyShield", "IncreasedPhysicalDamage", "IncreasedSpellDamage"]
 count = 1
 min_tier = 1
 allow_hybrid = true
@@ -1294,7 +1294,7 @@ min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept_any = ["AttackSpeed", "CritChance", "CritMultiplier"]
+concept_any = ["AttackSpeed", "CritChance", "CritDamage"]
 count = 2
 min_tier = 2
 
@@ -1307,12 +1307,12 @@ ilvl = 82
 budget_div = 40.0
 
 [[goal.target.prefixes]]
-concept_any = ["SpellDamage", "EnergyShield", "MinionDamage"]
+concept_any = ["IncreasedSpellDamage", "EnergyShield", "MinionDamage"]
 count = 2
 min_tier = 1
 allow_hybrid = true
 
 [[goal.target.suffixes]]
-concept_any = ["CastSpeed", "CritChance", "CritMultiplier"]
+concept_any = ["CastSpeed", "CritChance", "CritDamage"]
 count = 2
 min_tier = 2
