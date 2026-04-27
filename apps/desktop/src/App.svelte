@@ -3,6 +3,7 @@
   import AdvisorPanel from './lib/AdvisorPanel.svelte';
   import ClipboardImport from './lib/ClipboardImport.svelte';
   import ItemBuilder from './lib/ItemBuilder.svelte';
+  import RecipeLibrary from './lib/RecipeLibrary.svelte';
   import RecoveryPanel from './lib/RecoveryPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
   import TargetPanel from './lib/TargetPanel.svelte';
@@ -108,6 +109,14 @@
         {autoRefreshMinutes}
         onLeagueChange={(next) => (league = next)}
         onAutoRefreshChange={(next) => (autoRefreshMinutes = next)}
+      />
+      <RecipeLibrary
+        {item}
+        {goal}
+        onLoadRecipe={(loadedItem, loadedGoal) => {
+          item = loadedItem;
+          goal = loadedGoal;
+        }}
       />
     </div>
   </div>

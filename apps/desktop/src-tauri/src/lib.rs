@@ -527,6 +527,130 @@ fn recommend(
 }
 
 // ---------------------------------------------------------------------
+// Recipe library (Phase B.4) — TOML files in
+// $XDG_CONFIG_HOME/poc2/recipes/<name>.toml
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Recipe {
+    /// Slug used as the filename stem. Must be a single line of
+    /// `[A-Za-z0-9_-]+`.
+    name: String,
+    /// Optional human-readable description.
+    #[serde(default)]
+    description: String,
+    /// JSON-encoded Item — surfaced as a string so the recipe TOML
+    /// stays human-editable.
+    item_json: String,
+    /// JSON-encoded Goal — same rationale.
+    goal_json: String,
+    /// ISO-8601 creation timestamp.
+    created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RecipeSummary {
+    name: String,
+    description: String,
+    created_at: String,
+}
+
+fn recipes_dir() -> Option<PathBuf> {
+    if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
+        Some(Path::new(&xdg_config).join("poc2/recipes"))
+    } else {
+        std::env::var_os("HOME").map(|home| Path::new(&home).join(".config/poc2/recipes"))
+    }
+}
+
+fn validate_recipe_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("recipe name cannot be empty".into());
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("recipe name must be [A-Za-z0-9_-]+ (no spaces or path separators)".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn list_recipes() -> Result<Vec<RecipeSummary>, String> {
+    let Some(dir) = recipes_dir() else {
+        return Ok(Vec::new());
+    };
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(recipe) = toml::from_str::<Recipe>(&contents) else {
+            continue;
+        };
+        out.push(RecipeSummary {
+            name: recipe.name,
+            description: recipe.description,
+            created_at: recipe.created_at,
+        });
+    }
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(out)
+}
+
+#[tauri::command]
+fn save_recipe(recipe: Recipe) -> Result<(), String> {
+    validate_recipe_name(&recipe.name)?;
+    let Some(dir) = recipes_dir() else {
+        return Err("no $XDG_CONFIG_HOME or $HOME — cannot save recipe".into());
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.toml", recipe.name));
+    let serialized = toml::to_string_pretty(&recipe).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serialized).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn load_recipe(name: String) -> Result<Recipe, String> {
+    validate_recipe_name(&name)?;
+    let Some(dir) = recipes_dir() else {
+        return Err("no $XDG_CONFIG_HOME or $HOME".into());
+    };
+    let path = dir.join(format!("{name}.toml"));
+    let contents = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    toml::from_str(&contents).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_recipe(name: String) -> Result<(), String> {
+    validate_recipe_name(&name)?;
+    let Some(dir) = recipes_dir() else {
+        return Err("no $XDG_CONFIG_HOME or $HOME".into());
+    };
+    let path = dir.join(format!("{name}.toml"));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn export_recipe_toml(recipe: Recipe) -> Result<String, String> {
+    validate_recipe_name(&recipe.name)?;
+    toml::to_string_pretty(&recipe).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------
 // Recovery hints (Phase B.2)
 // ---------------------------------------------------------------------
 
@@ -856,6 +980,11 @@ pub fn run() {
             save_state,
             recovery_hints,
             list_leagues,
+            list_recipes,
+            save_recipe,
+            load_recipe,
+            delete_recipe,
+            export_recipe_toml,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

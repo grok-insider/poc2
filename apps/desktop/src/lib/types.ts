@@ -233,3 +233,22 @@ export interface LeagueInfo {
   divine_price_in_exalts: number;
   chaos_per_divine: number;
 }
+
+/// Recipe — saved (Item, Goal) pair. Lives in
+/// `~/.config/poc2/recipes/<name>.toml` (Phase B.4).
+export interface Recipe {
+  name: string;
+  description: string;
+  /// JSON-encoded Item.
+  item_json: string;
+  /// JSON-encoded Goal.
+  goal_json: string;
+  /// ISO-8601 / unix-epoch timestamp.
+  created_at: string;
+}
+
+export interface RecipeSummary {
+  name: string;
+  description: string;
+  created_at: string;
+}
