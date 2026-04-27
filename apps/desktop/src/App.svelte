@@ -13,15 +13,23 @@
   import BasePicker from './lib/BasePicker.svelte';
   import EligiblePanel from './lib/EligiblePanel.svelte';
   import HistoryPanel from './lib/HistoryPanel.svelte';
-  import type { BaseIconManifest, BaseSummary, HistoryEntry } from './lib/types';
+  import type {
+    AssetManifest,
+    BaseIconManifest,
+    BaseSummary,
+    Goal,
+    HistoryEntry,
+    Item,
+    PersistedState,
+    Recommendation,
+    TrainedModelStatus,
+  } from './lib/types';
   import { FRESH_BODY_ARMOUR, WORKED_EXAMPLE_GOAL } from './lib/fixtures';
-  import type { AssetManifest, Goal, Item, PersistedState, Recommendation } from './lib/types';
 
 
 
   type DrawerView = 'item' | 'target' | 'tools' | null;
 
-  let pingResponse = $state<string>('');
   let item = $state<Item>(structuredClone(FRESH_BODY_ARMOUR));
   let goal = $state<Goal>(structuredClone(WORKED_EXAMPLE_GOAL));
   let stateLoaded = $state(false);
@@ -39,6 +47,9 @@
   let basePickerInitialClass = $state<string | null>(null);
   let rightTab = $state<'preview' | 'eligible' | 'history'>('preview');
   let history = $state<HistoryEntry[]>([]);
+  /** M16.4 — trained-model cache status, refreshed on startup and on
+   * every `reload_bundle`. `null` until the first IPC roundtrip. */
+  let trainedStatus = $state<TrainedModelStatus | null>(null);
   /** Phase D.3 — animate the affected mod row in Item Preview when a
    * `record_outcome` event lands. Cleared after the animation duration
    * (1500 ms). The id matches the mod row's `mod_id`; if the change
@@ -125,7 +136,16 @@
     void loadBaseIconManifest().then((m) => {
       baseIconManifest = m;
     });
+    void refreshTrainedStatus();
   });
+
+  async function refreshTrainedStatus() {
+    try {
+      trainedStatus = await invoke<TrainedModelStatus>('trained_model_status');
+    } catch {
+      trainedStatus = null;
+    }
+  }
 
   $effect(() => {
     if (!stateLoaded) return;
@@ -145,14 +165,6 @@
       assetError = String(err);
     } finally {
       assetsLoading = false;
-    }
-  }
-
-  async function ping() {
-    try {
-      pingResponse = await invoke<string>('ping');
-    } catch (err) {
-      pingResponse = `error: ${String(err)}`;
     }
   }
 
@@ -318,14 +330,17 @@
       </button>
     </nav>
     <div class="sidebar-footer">
-      <div class="sidebar-card">
-        <span class="card-eyebrow">Remote Art</span>
+      <button
+        type="button"
+        class="art-line"
+        onclick={loadAssets}
+        disabled={assetsLoading}
+        title="Click to reload remote art manifest"
+      >
+        <span class="art-eye">Art</span>
         <strong>{remoteArtCount}/{assetManifest?.entries.length ?? 0}</strong>
-        <small>Using poe2db / poecdn URLs.</small>
-        <button class="ghost compact" onclick={loadAssets} disabled={assetsLoading}>
-          {assetsLoading ? 'Loading…' : 'Reload art list'}
-        </button>
-      </div>
+        {#if assetsLoading}<span class="art-spinner">…</span>{/if}
+      </button>
       <div class="brand-footer">PoC 2 · v0.4</div>
     </div>
   </aside>
@@ -338,22 +353,39 @@
           <h1>{itemTitle}</h1>
         </div>
         <div class="title-pills">
-          <span class="pill">Level {item.ilvl}+</span>
-          <span class="pill">{displayId(item.base)} Base</span>
-          <span class="pill emphasis">Energy Shield Goal</span>
+          <span class="pill">ilvl {item.ilvl}+</span>
+          {#if targetConcepts.length > 0}
+            <span class="pill emphasis" title={targetConcepts.join(', ')}>
+              {targetConcepts.length === 1
+                ? targetConcepts[0]
+                : `${targetConcepts[0]} + ${targetConcepts.length - 1}`} Goal
+            </span>
+          {/if}
         </div>
       </div>
       <div class="top-actions">
-        <button class="ghost" onclick={ping}>⚙ Settings</button>
-        <button class="ghost" onclick={loadAssets} disabled={assetsLoading}>? Help</button>
+        {#if trainedStatus}
+          <button
+            type="button"
+            class="policy-pill"
+            class:active={trainedStatus.models_loaded > 0}
+            onclick={refreshTrainedStatus}
+            title={trainedStatus.models_loaded > 0
+              ? `${trainedStatus.models_loaded} trained Q-table${trainedStatus.models_loaded === 1 ? '' : 's'} active. Cache: ${trainedStatus.cache_dir}`
+              : `No trained models loaded. Cache dir: ${trainedStatus.cache_dir} (${trainedStatus.cache_dir_exists ? 'exists' : 'missing'}). Run train-advisor to populate.`}
+          >
+            <span class="dot" aria-hidden="true"></span>
+            <span class="label">policy</span>
+            <strong>{trainedStatus.models_loaded}</strong>
+          </button>
+        {/if}
         <span class="patch-pill">PoE 2 v0.4</span>
       </div>
     </header>
 
-    {#if pingResponse || assetError}
+    {#if assetError}
       <div class="notice">
-        {#if pingResponse}<span>{pingResponse}</span>{/if}
-        {#if assetError}<span class="danger">{assetError}</span>{/if}
+        <span class="danger">{assetError}</span>
       </div>
     {/if}
 
@@ -374,22 +406,47 @@
             <span class="ilvl-badge">ilvl {item.ilvl}</span>
           </div>
           <h2 class="base-name">{displayId(item.base)}</h2>
-          <dl class="stat-list">
-            <div><dt>Item Level</dt><dd>{item.ilvl}</dd></div>
+          <dl class="stat-list compact">
             <div><dt>Rarity</dt><dd class="cap">{item.rarity}</dd></div>
             <div><dt>Quality</dt><dd>{item.quality}%</dd></div>
+            <div><dt>Implicit</dt>
+              <dd class="implicit-val">
+                {item.implicits[0]?.mod_id ? modLabel(item.implicits[0].mod_id) : '—'}
+              </dd>
+            </div>
           </dl>
-          <p class="implicit-text">
-            Implicit:
-            <span>
-              {item.implicits[0]?.mod_id ? modLabel(item.implicits[0].mod_id) : 'none'}
-            </span>
-          </p>
-          <div class="flag-row">
-            <span class:lit={item.corrupted}>Corrupted</span>
-            <span class:lit={item.sanctified}>Sanctified</span>
-            <span class:lit={item.hinekora_lock !== null}>Lock</span>
-          </div>
+          {#if item.corrupted || item.sanctified || item.hinekora_lock !== null}
+            <div class="flag-row">
+              {#if item.corrupted}<span class="lit">Corrupted</span>{/if}
+              {#if item.sanctified}<span class="lit">Sanctified</span>{/if}
+              {#if item.hinekora_lock !== null}<span class="lit">Lock</span>{/if}
+            </div>
+          {/if}
+          {#if targetConcepts.length > 0}
+            <div class="target-progress" title="Target concept progress">
+              <header>
+                <span>Target Progress</span>
+                <strong>{
+                  targetConcepts.filter((c) =>
+                    [...item.prefixes, ...item.suffixes].some((m) =>
+                      modSatisfiesTarget(m.mod_id, [c]),
+                    ),
+                  ).length
+                }/{targetConcepts.length}</strong>
+              </header>
+              <ul class="target-list">
+                {#each targetConcepts as c (c)}
+                  {@const satisfied = [...item.prefixes, ...item.suffixes].some((m) =>
+                    modSatisfiesTarget(m.mod_id, [c]),
+                  )}
+                  <li class:satisfies={satisfied}>
+                    <span class="tick" aria-hidden="true">{satisfied ? '✓' : '○'}</span>
+                    <span class="concept">{c}</span>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
           <button class="ghost wide" onclick={() => openBasePicker(item.base)}>Change Base</button>
         </div>
       </section>
@@ -571,10 +628,6 @@
                   {#if item.suffixes.length === 0}<span class="muted">empty</span>{/if}
                 </div>
               </div>
-              <div class="prediction">
-                <span>Predicted Success</span>
-                <strong>{successChance.toFixed(1)}%</strong>
-              </div>
             {:else if rightTab === 'eligible'}
               <EligiblePanel {item} {targetConcepts} />
             {:else if rightTab === 'history'}
@@ -596,9 +649,11 @@
     <section class="cost-dock">
       <div class="dock-header">
         <span class="dock-title">Currency Cost Estimate</span>
-        <span class="dock-meta">
-          {costCards.length} step{costCards.length === 1 ? '' : 's'} ·
-          ~{totalCost.toFixed(1)} div total
+        <span class="dock-total">
+          ~<strong>{totalCost.toFixed(1)}</strong> div
+          <span class="dock-meta">
+            · {costCards.length} step{costCards.length === 1 ? '' : 's'}
+          </span>
         </span>
       </div>
       <div class="cost-cards">
@@ -613,23 +668,24 @@
             {:else}
               <div class="mini-fallback">{initials(displayId(card.id))}</div>
             {/if}
-            <span>{displayId(card.id)}</span>
-            <strong>× 1</strong>
-            <small>~{card.cost.toFixed(2)} div · {(card.probability * 100).toFixed(1)}%</small>
+            <div class="cost-card-body">
+              <span class="cc-name">{displayId(card.id)}</span>
+              <small class="cc-meta">
+                ~{card.cost.toFixed(2)} div
+                · {(card.probability * 100).toFixed(0)}%
+              </small>
+            </div>
           </article>
         {/each}
         {#if costCards.length === 0}
           <article class="cost-card empty">
             <div class="mini-fallback">?</div>
-            <span class="muted">No currency steps yet</span>
-            <small>Start the advisor to see cost cards.</small>
+            <div class="cost-card-body">
+              <span class="cc-name muted">No currency steps yet</span>
+              <small class="cc-meta">Start the advisor to populate.</small>
+            </div>
           </article>
         {/if}
-        <article class="cost-total">
-          <span>Total</span>
-          <strong>~{totalCost.toFixed(1)}</strong>
-          <small>Divine Orbs</small>
-        </article>
       </div>
     </section>
 
@@ -748,9 +804,7 @@
   }
 
   .brand-mark span,
-  .sidebar-card small,
   .eyebrow,
-  .card-eyebrow,
   .muted {
     color: var(--fg-muted);
   }
@@ -804,20 +858,44 @@
     flex-shrink: 0;
   }
 
-  .sidebar-card {
+  .art-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
     border: 1px solid var(--border-strong);
     border-radius: 4px;
-    padding: 0.55rem;
-    display: grid;
-    gap: 0.25rem;
+    padding: 0.32rem 0.55rem;
     background: rgba(0, 0, 0, 0.4);
-    font-size: 0.78rem;
+    color: var(--fg-soft);
+    font-size: 0.72rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
-  .sidebar-card strong {
+  .art-line:hover:not(:disabled) {
+    border-color: var(--border-gold);
+    color: var(--gold);
+  }
+
+  .art-line:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+
+  .art-eye {
+    color: var(--fg-muted);
+  }
+
+  .art-line strong {
     color: var(--gold-bright);
-    font-size: 1.2rem;
     font-family: Georgia, 'Times New Roman', serif;
+    font-size: 0.92rem;
+  }
+
+  .art-spinner {
+    color: var(--gold);
   }
 
   .brand-footer {
@@ -909,6 +987,57 @@
     display: flex;
     gap: 0.45rem;
     align-items: center;
+  }
+
+  .policy-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 0.25rem 0.65rem;
+    background: rgba(0, 0, 0, 0.4);
+    color: var(--fg-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+  }
+
+  .policy-pill .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(160, 60, 60, 0.7);
+    box-shadow: 0 0 0 2px rgba(160, 60, 60, 0.18);
+  }
+
+  .policy-pill.active {
+    color: var(--gold);
+    border-color: var(--border-gold);
+  }
+
+  .policy-pill.active .dot {
+    background: #6cd76a;
+    box-shadow: 0 0 0 2px rgba(108, 215, 106, 0.22);
+  }
+
+  .policy-pill .label {
+    color: var(--fg-muted);
+  }
+
+  .policy-pill.active .label {
+    color: var(--fg-soft);
+  }
+
+  .policy-pill strong {
+    color: var(--gold-bright);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 0.92rem;
+  }
+
+  .policy-pill:hover {
+    background: rgba(197, 143, 61, 0.08);
   }
 
   .notice {
@@ -1055,7 +1184,7 @@
 
   .stat-list {
     display: grid;
-    gap: 0.25rem;
+    gap: 0.2rem;
     margin: 0;
   }
 
@@ -1063,34 +1192,39 @@
     display: flex;
     justify-content: space-between;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    padding-bottom: 0.15rem;
+    padding-bottom: 0.12rem;
+    gap: 0.5rem;
+  }
+
+  .stat-list.compact div:last-child {
+    border-bottom: none;
   }
 
   dt {
     color: var(--fg-muted);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
   }
 
   dd {
     margin: 0;
     color: var(--fg);
-    font-size: 0.85rem;
+    font-size: 0.82rem;
   }
 
   .cap {
     text-transform: capitalize;
   }
 
-  .implicit-text {
-    margin: 0;
-    color: var(--fg-muted);
-    font-size: 0.78rem;
-  }
-
-  .implicit-text span {
+  .implicit-val {
     color: #a98dff;
+    font-size: 0.76rem;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 9rem;
   }
 
   .flag-row {
@@ -1104,15 +1238,72 @@
     font-size: 0.65rem;
   }
 
-  .preview-card,
-  .breakdown-card,
-  .summary-card {
-    flex-shrink: 0;
-  }
-
-  .preview-card {
+  .target-progress {
+    border: 1px solid rgba(197, 143, 61, 0.32);
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 4px;
+    padding: 0.45rem 0.55rem;
     display: grid;
     gap: 0.4rem;
+  }
+
+  .target-progress header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.68rem;
+    border-bottom: 1px solid rgba(197, 143, 61, 0.2);
+    padding-bottom: 0.25rem;
+  }
+
+  .target-progress header strong {
+    color: var(--gold-bright);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 0.95rem;
+  }
+
+  .target-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.18rem;
+  }
+
+  .target-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.74rem;
+    color: var(--fg-muted);
+  }
+
+  .target-list li .tick {
+    width: 0.85rem;
+    text-align: center;
+    color: var(--fg-muted);
+    font-family: ui-monospace, 'Fira Code', monospace;
+  }
+
+  .target-list li.satisfies {
+    color: #b2ffa2;
+  }
+
+  .target-list li.satisfies .tick {
+    color: #72ff58;
+  }
+
+  .target-list li .concept {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .summary-card {
+    flex-shrink: 0;
   }
 
   .rare-title {
@@ -1156,29 +1347,6 @@
 
   .mod-lines .implicit {
     color: #a98dff;
-  }
-
-  .prediction {
-    margin-top: 0.3rem;
-    display: grid;
-    place-items: center;
-    color: #72ff58;
-    border: 1px solid rgba(114, 255, 88, 0.45);
-    border-radius: 4px;
-    padding: 0.5rem;
-    background: radial-gradient(circle, rgba(47, 123, 18, 0.28), rgba(0, 0, 0, 0.4));
-  }
-
-  .prediction span {
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.7rem;
-    color: rgba(178, 255, 162, 0.8);
-  }
-
-  .prediction strong {
-    font-size: 1.9rem;
-    font-family: Georgia, 'Times New Roman', serif;
   }
 
   .breakdown-grid {
@@ -1274,9 +1442,9 @@
     background:
       linear-gradient(90deg, rgba(15, 11, 4, 0.85), rgba(5, 8, 10, 0.92)),
       rgba(5, 8, 10, 0.92);
-    padding: 0.5rem 0.6rem;
+    padding: 0.45rem 0.6rem 0.5rem;
     display: grid;
-    gap: 0.4rem;
+    gap: 0.35rem;
     min-height: 0;
   }
 
@@ -1294,34 +1462,48 @@
     letter-spacing: 0.1em;
     font-family: Georgia, 'Times New Roman', serif;
     font-size: 0.78rem;
+    margin: 0;
+  }
+
+  .dock-total {
+    color: var(--fg-soft);
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.25rem;
+  }
+
+  .dock-total strong {
+    color: var(--gold-bright);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 1.05rem;
   }
 
   .dock-meta {
     color: var(--fg-muted);
-    font-size: 0.75rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   .cost-cards {
     display: flex;
-    gap: 0.5rem;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 0.2rem;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    overflow: hidden;
   }
 
-  .cost-card,
-  .cost-total {
-    min-width: 130px;
-    border: 1px solid rgba(197, 143, 61, 0.4);
+  .cost-card {
+    min-width: 0;
+    flex: 0 1 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid rgba(197, 143, 61, 0.32);
     background: linear-gradient(180deg, rgba(20, 24, 27, 0.92), rgba(6, 8, 9, 0.92));
-    padding: 0.5rem;
-    display: grid;
-    place-items: center;
-    gap: 0.18rem;
+    padding: 0.32rem 0.55rem;
     color: var(--fg-soft);
     border-radius: 4px;
-    text-align: center;
-    flex-shrink: 0;
   }
 
   .cost-card.empty {
@@ -1331,39 +1513,36 @@
 
   .cost-card img,
   .mini-fallback {
-    width: 38px;
-    height: 38px;
+    width: 28px;
+    height: 28px;
     object-fit: contain;
+    flex-shrink: 0;
   }
 
   .mini-fallback {
     border-radius: 999px;
-    font-size: 0.85rem;
-  }
-
-  .cost-card span {
     font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
   }
 
-  .cost-card strong,
-  .cost-total strong {
-    color: var(--gold-bright);
-    font-size: 1.1rem;
-    font-family: Georgia, 'Times New Roman', serif;
+  .cost-card-body {
+    display: grid;
+    gap: 0.05rem;
+    min-width: 0;
   }
 
-  .cost-card small,
-  .cost-total small {
+  .cc-name {
+    font-size: 0.74rem;
+    color: var(--fg-soft);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 14rem;
+  }
+
+  .cc-meta {
     color: var(--fg-muted);
     font-size: 0.68rem;
-  }
-
-  .cost-total {
-    background: linear-gradient(180deg, rgba(50, 30, 8, 0.85), rgba(15, 11, 4, 0.92));
-    border-color: var(--gold);
-    color: var(--gold-bright);
+    font-family: ui-monospace, 'Fira Code', monospace;
   }
 
   .ghost {

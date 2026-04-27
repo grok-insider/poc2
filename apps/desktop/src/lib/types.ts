@@ -192,6 +192,22 @@ export interface StreamingProgressEvent {
 /// Topic the streaming planner emits to.
 export const ADVISOR_PROGRESS_EVENT = 'advisor://progress';
 
+/// M16.4 — trained-model cache status surfaced via the
+/// `trained_model_status` Tauri command. The desktop UI reads this on
+/// startup (and after `reload_bundle`) to render a topbar badge that
+/// tells the user whether the planner is consulting trained Q-tables
+/// or running pure heuristic ranking.
+export interface TrainedModelStatus {
+  /** Number of `(goal × class)` models loaded into the planner cache. */
+  models_loaded: number;
+  /** Number of artefact files the loader skipped (parse errors, etc.). */
+  files_skipped: number;
+  /** Directory the loader scanned. Surfaced for the rebuild dialog. */
+  cache_dir: string;
+  /** True iff `cache_dir` exists on disk. */
+  cache_dir_exists: boolean;
+}
+
 /// Phase F — Wasm plugin info surfaced by the plugin host.
 export interface PluginInfo {
   id: string;

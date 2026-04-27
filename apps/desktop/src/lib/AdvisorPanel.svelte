@@ -364,16 +364,13 @@
 
 <section class="panel advisor">
   <header class="advisor-head">
-    <div>
-      <span class="kicker">Crafting Steps</span>
-      <h2>Step-by-Step Guide</h2>
-    </div>
-    <div class="success-box">
-      <span>Success Chance</span>
+    <h2>Step-by-Step Guide</h2>
+    <div class="success-box" title="Top recommendation's MC-aggregated success probability">
+      <span>Success</span>
       <strong>
         {recommendations[0]
           ? (recommendations[0].expected_prob * 100).toFixed(1)
-          : '0.0'}%
+          : '—'}{recommendations[0] ? '%' : ''}
       </strong>
     </div>
   </header>
@@ -418,7 +415,9 @@
       patch {meta.patch} · {meta.rule_count} rules · {meta.strategy_count} strategies ·
       {meta.mod_count} mods
       {#if meta.bundle_path}
-        · bundle: {meta.bundle_path}
+        · bundle <span class="bundle-name" title={meta.bundle_path}>
+          {meta.bundle_path.split('/').pop() ?? meta.bundle_path}
+        </span>
       {:else}
         · <span class="warn">no bundle loaded</span>
       {/if}
@@ -470,11 +469,12 @@
           <div class="meta-row">
             <span class="cost">{fmtDiv(r.expected_cost)}</span>
             <span class="dot">·</span>
-            <span class="depth">depth {r.depth}</span>
+            <span class="depth">d{r.depth}</span>
             <span class="dot">·</span>
-            <span class="score">score {r.score.toFixed(3)}</span>
+            <span class="score" title="Planner score (Q-uplift × heuristic)">
+              {r.score.toFixed(2)}
+            </span>
             {#if cannotApplyReason(r.action)}
-              <span class="dot">·</span>
               <span class="cannot-badge">cannot apply · {cannotApplyReason(r.action)}</span>
             {/if}
           </div>
@@ -530,7 +530,7 @@
             </p>
           </details>
           <div class="step-footer">
-            <span class="source">{describeSource(r)}</span>
+            <span class="source" title={describeSource(r)}>{describeSource(r)}</span>
             <button
               class="step-cta"
               type="button"
@@ -568,73 +568,67 @@
   .advisor-head {
     display: flex;
     justify-content: space-between;
-    gap: 1rem;
+    gap: 0.8rem;
     align-items: center;
     border-bottom: 1px solid rgba(197, 143, 61, 0.25);
-    padding-bottom: 0.6rem;
-  }
-
-  .kicker {
-    color: var(--gold);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-family: Georgia, 'Times New Roman', serif;
-    font-size: 0.78rem;
+    padding-bottom: 0.5rem;
   }
 
   h2 {
-    margin: 0.1rem 0 0;
+    margin: 0;
     color: var(--gold-bright);
     font-family: Georgia, 'Times New Roman', serif;
     font-weight: 500;
     letter-spacing: 0.04em;
-    font-size: 1.6rem;
+    font-size: 1.05rem;
+    text-transform: uppercase;
   }
 
   .success-box {
-    min-width: 160px;
+    min-width: 110px;
     border: 1px solid rgba(114, 255, 88, 0.42);
-    background: radial-gradient(circle, rgba(47, 123, 18, 0.28), rgba(0, 0, 0, 0.35));
+    background: radial-gradient(circle, rgba(47, 123, 18, 0.22), rgba(0, 0, 0, 0.35));
     color: #72ff58;
-    padding: 0.55rem 0.8rem;
-    display: grid;
-    text-align: center;
-    border-radius: 4px;
+    padding: 0.3rem 0.7rem;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    border-radius: 999px;
   }
 
   .success-box span {
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: rgba(178, 255, 162, 0.75);
   }
 
   .success-box strong {
-    font-size: 1.9rem;
+    font-size: 1.15rem;
     font-family: Georgia, 'Times New Roman', serif;
     line-height: 1;
   }
 
   .controls {
     display: flex;
-    gap: 0.65rem;
+    gap: 0.55rem;
     align-items: center;
     flex-wrap: wrap;
     background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(197, 143, 61, 0.25);
-    padding: 0.55rem 0.7rem;
+    border: 1px solid rgba(197, 143, 61, 0.22);
+    padding: 0.4rem 0.55rem;
     border-radius: 4px;
   }
 
   .controls label.slider {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
-    font-size: 0.75rem;
+    gap: 0.15rem;
+    font-size: 0.7rem;
     color: var(--fg-muted);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    min-width: 130px;
+    min-width: 110px;
   }
 
   .controls label.slider em {
@@ -663,10 +657,23 @@
   }
 
   .meta {
-    font-size: 0.8rem;
+    font-size: 0.74rem;
     color: var(--fg-muted);
     margin: 0;
-    word-break: break-all;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    align-items: baseline;
+  }
+
+  .bundle-name {
+    color: var(--fg-soft);
+    font-family: ui-monospace, 'Fira Code', monospace;
+    font-size: 0.72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 18rem;
   }
 
   .price-meta {
@@ -731,13 +738,13 @@
   .recommendations li {
     position: relative;
     display: grid;
-    grid-template-columns: 36px 60px minmax(0, 1fr);
-    gap: 0.7rem;
+    grid-template-columns: 30px 48px minmax(0, 1fr);
+    gap: 0.6rem;
     align-items: stretch;
     background: linear-gradient(90deg, rgba(15, 20, 19, 0.98), rgba(6, 9, 11, 0.98));
-    border: 1px solid rgba(197, 143, 61, 0.35);
+    border: 1px solid rgba(197, 143, 61, 0.32);
     border-radius: 4px;
-    padding: 0.7rem 0.85rem;
+    padding: 0.55rem 0.7rem;
   }
 
   .recommendations li.current {
@@ -755,8 +762,8 @@
   }
 
   .step-index {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     display: grid;
     place-items: center;
@@ -764,6 +771,7 @@
     border: 1px solid var(--border-gold);
     background: #050505;
     font-family: Georgia, 'Times New Roman', serif;
+    font-size: 0.85rem;
   }
 
   .recommendations li.current .step-index {
@@ -779,18 +787,18 @@
   }
 
   .step-icon {
-    width: 60px;
-    height: 60px;
+    width: 48px;
+    height: 48px;
     display: grid;
     place-items: center;
-    border: 1px solid rgba(197, 143, 61, 0.32);
-    background: radial-gradient(circle, rgba(197, 143, 61, 0.18), rgba(0, 0, 0, 0.5));
+    border: 1px solid rgba(197, 143, 61, 0.28);
+    background: radial-gradient(circle, rgba(197, 143, 61, 0.15), rgba(0, 0, 0, 0.5));
     border-radius: 4px;
   }
 
   .step-icon img {
-    max-width: 52px;
-    max-height: 52px;
+    max-width: 40px;
+    max-height: 40px;
     object-fit: contain;
   }
 
@@ -831,10 +839,11 @@
     text-align: right;
     color: #72ff58;
     font-family: Georgia, 'Times New Roman', serif;
+    flex-shrink: 0;
   }
 
   .step-prob strong {
-    font-size: 1.3rem;
+    font-size: 1.05rem;
   }
 
   .step-prob small {
@@ -884,9 +893,15 @@
   }
 
   .source {
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     color: var(--fg-muted);
     font-family: ui-monospace, 'Fira Code', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 22rem;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .step-footer {
