@@ -854,6 +854,96 @@ async fn list_leagues() -> Result<Vec<LeagueInfo>, String> {
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
+// Simulation runner (Phase C.3) — bulk Monte-Carlo of one action.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct RunNTrialsArgs {
+    item: Item,
+    action: poc2_advisor::AdvisorAction,
+    /// Number of independent trials. Clamped to [1, 10_000].
+    n_trials: u32,
+    /// RNG seed base. Default 0.
+    #[serde(default)]
+    seed: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct TrialDistribution {
+    /// Number of trials actually run.
+    n_trials: u32,
+    /// Fraction of trials where the action succeeded.
+    success_rate: f64,
+    /// sqrt(p(1-p)/n) — confidence on the rate estimate.
+    success_rate_stderr: f64,
+    /// Mean number of mod-affecting changes per trial.
+    mean_change_count: f64,
+    /// Histogram of `change_count` values: `bucket -> count`.
+    change_count_histogram: std::collections::BTreeMap<u32, u32>,
+    /// Estimated divine-equivalent cost per trial (constant — we use
+    /// the action's cost band's expected value).
+    cost_per_trial_div: f64,
+    /// Estimated total cost across n_trials at the expected per-trial
+    /// cost.
+    total_cost_div_expected: f64,
+}
+
+#[tauri::command]
+fn run_n_trials(
+    args: RunNTrialsArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<TrialDistribution, String> {
+    use poc2_engine::omen::OmenSet;
+    let n = args.n_trials.clamp(1, 10_000);
+    let bundle = state.bundle.read().expect("bundle rwlock poisoned");
+    let valuator = state.valuator.lock().expect("valuator mutex poisoned");
+    let patch = bundle.bundle_patch.unwrap_or(PatchVersion::PATCH_0_4_0);
+    let omens = OmenSet::new();
+
+    let mut successes = 0_u32;
+    let mut total_change_count = 0_u32;
+    let mut histogram: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+    for i in 0..n {
+        let seed = args
+            .seed
+            .wrapping_add(u64::from(i).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let outcome = poc2_advisor::simulate(
+            &args.item,
+            &args.action,
+            &omens,
+            bundle.registry.as_ref(),
+            bundle.resolver.as_ref(),
+            patch,
+            seed,
+        );
+        if outcome.success {
+            successes += 1;
+        }
+        total_change_count = total_change_count.saturating_add(outcome.change_count);
+        *histogram.entry(outcome.change_count).or_insert(0) += 1;
+    }
+    let n_f = f64::from(n);
+    let p = f64::from(successes) / n_f;
+    let stderr = if n <= 1 {
+        0.0
+    } else {
+        (p * (1.0 - p) / n_f).sqrt()
+    };
+    let cost_per_trial = poc2_advisor::action_cost(&args.action, &valuator).expected;
+    drop(valuator);
+    drop(bundle);
+    Ok(TrialDistribution {
+        n_trials: n,
+        success_rate: p,
+        success_rate_stderr: stderr,
+        mean_change_count: f64::from(total_change_count) / n_f,
+        change_count_histogram: histogram,
+        cost_per_trial_div: cost_per_trial,
+        total_cost_div_expected: cost_per_trial * n_f,
+    })
+}
+
+// ---------------------------------------------------------------------
 // Streaming recommendations (Phase C.2)
 // ---------------------------------------------------------------------
 
@@ -1085,6 +1175,7 @@ pub fn run() {
             ping,
             recommend,
             recommend_streaming,
+            run_n_trials,
             parse_item_text,
             read_clipboard_item,
             refresh_prices,

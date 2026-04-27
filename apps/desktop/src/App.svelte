@@ -6,6 +6,7 @@
   import RecipeLibrary from './lib/RecipeLibrary.svelte';
   import RecoveryPanel from './lib/RecoveryPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
+  import SimulationRunner from './lib/SimulationRunner.svelte';
   import TargetPanel from './lib/TargetPanel.svelte';
   import { FRESH_BODY_ARMOUR, WORKED_EXAMPLE_GOAL } from './lib/fixtures';
   import type { Goal, Item, PersistedState, Recommendation } from './lib/types';
@@ -110,6 +111,7 @@
         onLeagueChange={(next) => (league = next)}
         onAutoRefreshChange={(next) => (autoRefreshMinutes = next)}
       />
+      <SimulationRunner {item} action={recommendations[0]?.action ?? null} />
       <RecipeLibrary
         {item}
         {goal}

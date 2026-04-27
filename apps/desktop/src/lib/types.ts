@@ -153,6 +153,18 @@ export interface StreamingProgressEvent {
 /// Topic the streaming planner emits to.
 export const ADVISOR_PROGRESS_EVENT = 'advisor://progress';
 
+/// Phase C.3 — bulk simulation distribution.
+export interface TrialDistribution {
+  n_trials: number;
+  success_rate: number;
+  success_rate_stderr: number;
+  mean_change_count: number;
+  /// Histogram of change_count values: bucket → count.
+  change_count_histogram: Record<number, number>;
+  cost_per_trial_div: number;
+  total_cost_div_expected: number;
+}
+
 export interface ModLine {
   text: string;
   fractured: boolean;
