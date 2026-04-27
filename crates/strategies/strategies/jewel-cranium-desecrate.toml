@@ -1,0 +1,94 @@
+# Jewel: Cranium-only desecrate chain (Lightless / of-the-Abyss pool)
+# M15.1 — Jewel desecration template. Cranium bones target Jewels
+# exclusively per BoneSubtype::valid_classes (M14.6); the reveal
+# pool is Lightless / of-the-Abyss, NOT the lord-named pool.
+
+id = "jewel-cranium-desecrate"
+name = "Jewel: Cranium Desecrate Chain"
+patch_min = "0.4.0"
+item_classes = ["Jewel"]
+attribute_pools = ["str", "dex", "int", "str_dex", "str_int", "dex_int"]
+expected_cost_div = [10, 60]
+expected_success_prob = [0.08, 0.25]
+confidence = "community"
+note = "Jewel desecrate: build Magic→Rare via Transmute/Aug/Regal, then Preserved Cranium reveals from the Lightless/of-the-Abyss pool. Lord-targeting omens are illegal on jewels."
+
+[source]
+kind = "user"
+credit = "project-author"
+reference = "M15.1"
+
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+[[target.prefixes]]
+concept_any = ["Life", "EnergyShield", "IncreasedPhysicalDamage", "SpellDamage"]
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 1
+min_tier = 2
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+on_success = "S2-perfect-augment"
+on_failure = "S2-perfect-augment"
+
+[[steps]]
+id = "S2-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+on_success = "S3-perfect-regal"
+on_failure = "S3-perfect-regal"
+
+[[steps]]
+id = "S3-perfect-regal"
+action = { kind = "apply_currency", currency = "PerfectRegalOrb" }
+target_check = { rarity = "rare" }
+on_success = "S4-cranium-reveal"
+on_failure = "S4-cranium-reveal"
+
+[[steps]]
+id = "S4-cranium-reveal"
+action = { kind = "apply_currency", currency = "PreservedCranium" }
+target_check = { has_hidden_desecrated = true }
+on_success = "S5-reveal"
+on_failure = "S4-cranium-reveal"
+note = "Lord-targeting omens (Liege/Sovereign/Blackblooded) are illegal on jewels; M14.6 rejects them. Use a plain Cranium reveal."
+
+[[steps]]
+id = "S5-reveal"
+action = { kind = "reveal", prefer = ["AllResistances", "FireResistance", "ChaosResistance"] }
+on_success = "S6-exalt-fill"
+on_failure = "S6-exalt-fill"
+
+[[steps]]
+id = "S6-exalt-fill"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb" }
+on_success = "S7-vaal-finish"
+on_failure = "S7-vaal-finish"
+
+[[steps]]
+id = "S7-vaal-finish"
+action = { kind = "apply_currency", currency = "VaalOrb", omens = ["OmenOfCorruption"] }
+on_success = "S8-done"
+on_failure = "S8-done"
+
+[[steps]]
+id = "S8-done"
+action = { kind = "done" }

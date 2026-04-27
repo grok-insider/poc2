@@ -1,0 +1,92 @@
+# Time-lost Jewel: Lightless / of-the-Abyss prefix focus
+# M15.1 — Time-lost jewel template focused on the Lightless mod pool.
+
+id = "timelost-lightless-prefix"
+name = "Time-lost Jewel: Lightless Prefix"
+patch_min = "0.4.0"
+item_classes = ["Jewel"]
+attribute_pools = ["str", "dex", "int", "str_dex", "str_int", "dex_int"]
+expected_cost_div = [15, 80]
+expected_success_prob = [0.05, 0.18]
+confidence = "community"
+note = "Time-lost jewel chain prioritising the Lightless prefix pool via repeated Cranium-bone reveals."
+
+[source]
+kind = "user"
+credit = "project-author"
+reference = "M15.1"
+
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+[[target.prefixes]]
+concept_any = ["IncreasedPhysicalDamage", "SpellDamage", "EnergyShield", "Life"]
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[target.suffixes]]
+concept_any = ["AllResistances", "FireResistance", "ColdResistance", "LightningResistance"]
+count = 1
+min_tier = 2
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+on_success = "S2-perfect-augment"
+on_failure = "S2-perfect-augment"
+
+[[steps]]
+id = "S2-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+on_success = "S3-perfect-regal"
+on_failure = "S3-perfect-regal"
+
+[[steps]]
+id = "S3-perfect-regal"
+action = { kind = "apply_currency", currency = "PerfectRegalOrb" }
+target_check = { rarity = "rare" }
+on_success = "S4-cranium-with-sinistral-necromancy"
+on_failure = "S4-cranium-with-sinistral-necromancy"
+
+[[steps]]
+id = "S4-cranium-with-sinistral-necromancy"
+action = { kind = "apply_currency", currency = "PreservedCranium", omens = ["OmenOfSinistralNecromancy"] }
+target_check = { has_hidden_desecrated = true }
+on_success = "S5-reveal"
+on_failure = "S4-cranium-with-sinistral-necromancy"
+note = "Sinistral Necromancy targets the prefix slot for the Lightless pool draw."
+
+[[steps]]
+id = "S5-reveal"
+action = { kind = "reveal", prefer = ["IncreasedPhysicalDamage", "SpellDamage", "EnergyShield"], use_abyssal_echoes = true }
+on_success = "S6-divine"
+on_failure = "S6-divine"
+
+[[steps]]
+id = "S6-divine"
+action = { kind = "apply_currency", currency = "DivineOrb" }
+on_success = "S7-vaal-finish"
+on_failure = "S7-vaal-finish"
+
+[[steps]]
+id = "S7-vaal-finish"
+action = { kind = "apply_currency", currency = "VaalOrb", omens = ["OmenOfCorruption"] }
+on_success = "S8-done"
+on_failure = "S8-done"
+
+[[steps]]
+id = "S8-done"
+action = { kind = "done" }

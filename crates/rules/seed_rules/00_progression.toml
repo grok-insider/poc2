@@ -74,3 +74,22 @@ priority = 190
 kind = "apply_currency"
 currency = "PerfectRegalOrb"
 omens = []
+
+# ---------------------------------------------------------------------
+# M15.3 / R231 — Greater / Perfect tier required-level floors
+[[rule]]
+id = "R231-greater-perfect-orb-tier-required-levels"
+category = "other"
+explanation = "Engine Greater / Perfect tier orbs filter out mods below their min_required_level threshold. Greater Aug = 55, Greater Regal / Greater Exalt / Greater Chaos = 50, Perfect tiers = 70. Items with ilvl below the threshold cannot benefit from the tier upgrade."
+source = "/docs/34 §0.x (M15.3 R231) + engine sample_eligible_mod min_required_level"
+confidence = "verified"
+
+[rule.when]
+ilvl = { op = "lte", value = 49 }
+
+[[rule.then]]
+note = "Item ilvl ≤ 49: Greater / Perfect tier orbs filter out all eligible mods (their min_required_level cuts in at 50/55/70). Use base-tier orbs only on this base."
+priority = 20
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

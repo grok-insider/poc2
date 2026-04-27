@@ -40,7 +40,7 @@
 //! ...
 //! ```
 
-use poc2_engine::ids::{ConceptId, CurrencyId, ItemClassId, OmenId};
+use poc2_engine::ids::{ConceptId, CurrencyId, ItemClassId, ModId, OmenId};
 use poc2_engine::item::{AffixType, Rarity};
 use poc2_engine::item_class::AttributePool;
 use poc2_engine::patch::PatchVersion;
@@ -249,6 +249,85 @@ pub enum ItemPredicate {
         #[serde(default)]
         args: serde_json::Value,
     },
+
+    // -----------------------------------------------------------------
+    // M15.2 — mod-pool predicate primitives.
+    //
+    // The following six variants extend the DSL with the predicates
+    // surfaced by per-class strategy authoring (M15.1). Each is a
+    // self-contained generalisation of the existing primitives so
+    // strategies don't need to compose verbose `All { ... }` trees.
+    // -----------------------------------------------------------------
+    /// Count of mods on the item satisfying any of `concepts` matches
+    /// `count`. A "keeper" is a mod whose `concept_set` intersects the
+    /// list. Restrict to a single affix slot via `affix`. `min_tier` is
+    /// reserved for future tier-aware filtering (the engine doesn't
+    /// expose mod-tier ordering yet — predicates with `min_tier ==
+    /// Some(_)` ignore the constraint and behave as if it were `None`).
+    HasKeeperCount {
+        concepts: Vec<ConceptId>,
+        #[serde(default)]
+        affix: Option<AffixType>,
+        count: ValuePredicate,
+        #[serde(default)]
+        min_tier: Option<u8>,
+    },
+    /// Pure slot-availability check: true iff `prefix_count < max_slots`
+    /// (or `suffix_count < max_slots`). `max_slots` defaults to `3`,
+    /// the Rare-rarity cap. Set lower to gate Magic-only steps.
+    HasOpenSlot {
+        affix: AffixType,
+        #[serde(default = "default_max_slots")]
+        max_slots: u8,
+    },
+    /// True iff at least one mod whose `concept_set` contains `concept`
+    /// rolled at-or-above `threshold_pct` of its stat range. Useful for
+    /// the "did the divine roll land high enough" surgical check that
+    /// strategy steps reach for after a finishing Divine. `threshold_pct`
+    /// defaults to `0.95` (top 5% of range).
+    KeeperAtMaxRoll {
+        concept: ConceptId,
+        #[serde(default = "default_max_roll_threshold")]
+        threshold_pct: f64,
+    },
+    /// True iff a specific mod by `mod_id` is on the item AND the
+    /// stat at `stat_index` satisfies the (`op`, `value`) comparison.
+    /// `stat_index` is the position into the mod's `stats` array
+    /// (most mods have one stat at index 0; added-damage mods have two).
+    /// The predicate evaluates to false when the mod isn't on the item
+    /// or the stat index is out of bounds.
+    ModValueWithin {
+        mod_id: ModId,
+        #[serde(default)]
+        stat_index: usize,
+        op: CmpOp,
+        value: f64,
+    },
+    /// True iff at least one mod's `concept_set` intersects the supplied
+    /// `concepts` list (OR semantics). Generalises [`HasConcept`] to
+    /// the multi-concept case without forcing strategy authors to
+    /// nest `Any { ... }` predicates by hand.
+    ConceptSetContainsAny {
+        concepts: Vec<ConceptId>,
+        #[serde(default)]
+        affix: Option<AffixType>,
+        #[serde(default)]
+        min_tier: Option<u8>,
+    },
+    /// True iff the mod's registry weight on the item's base/class
+    /// exceeds `threshold`. Used by strategy steps that want to short
+    /// circuit "this mod has effectively-zero weight on the current
+    /// base — abandon the chain". Returns false when the registry has
+    /// no entry for the mod.
+    BundleWeightAbove { mod_id: ModId, threshold: f64 },
+}
+
+fn default_max_slots() -> u8 {
+    3
+}
+
+fn default_max_roll_threshold() -> f64 {
+    0.95
 }
 
 // ---------------------------------------------------------------------------

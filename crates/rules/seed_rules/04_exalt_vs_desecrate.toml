@@ -226,3 +226,204 @@ priority = 30
 tag = "league_advice"
 [rule.then.action]
 kind = "guidance"
+
+# =====================================================================
+# M15.3 — Hard mechanics rules added in v3 (verified-confidence).
+# =====================================================================
+
+# R215 — Sceptres have no exclusive desecrated mods
+[[rule]]
+id = "R215-no-exclusive-desecrated-on-sceptres"
+category = "exalt_vs_desecrate"
+explanation = "poe2db Desecrated Modifier table documents that Sceptres carry no exclusive desecrated prefixes or suffixes. Boning a sceptre wastes the bone — only organic prefixes/suffixes get added, identical to a vanilla bone."
+source = "/docs/34 §4.x (M15.3 R215) + poe2db Desecrated Modifier table"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class = "Sceptre" },
+    { rarity = "rare" },
+    { has_hidden_desecrated = false },
+]
+
+[[rule.then]]
+note = "Sceptres have no exclusive desecrated mods. Bone-then-reveal here only adds organic prefixes/suffixes — same as a regular Exalt with no exclusivity gate. Strongly prefer Exalt instead."
+priority = 70
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R216 — Body / Helmet / Gloves / Boots have no exclusive desecrated prefixes
+[[rule]]
+id = "R216-armour-pieces-no-exclusive-desecrated-prefix"
+category = "exalt_vs_desecrate"
+explanation = "Per poe2db, BodyArmour / Helmet / Gloves / Boots have no exclusive desecrated prefixes. Boning these classes for a prefix only adds organic prefixes from the regular pool. Suffixes still benefit from desecrated exclusives (lord-pool mods)."
+source = "/docs/34 §4.x (M15.3 R216) + poe2db Desecrated Modifier table"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class_any = ["BodyArmour", "Helmet", "Gloves", "Boots"] },
+    { rarity = "rare" },
+    { has_hidden_desecrated = false },
+]
+
+[[rule.then]]
+note = "Armour pieces have no exclusive desecrated prefixes. Reserve bones-with-Sinistral-Necromancy for armour when targeting a SUFFIX (lord pool); for prefixes use Exalt."
+priority = 60
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R217 — Jewels desecrate via Lightless / of-the-Abyss (NOT lord-named pool)
+[[rule]]
+id = "R217-jewels-use-lightless-pool-not-lord-pool"
+category = "exalt_vs_desecrate"
+explanation = "Jewels desecrate via the `Lightless` / `of the Abyss` exclusive pool, not the Lich-named lord pool. Liege / Sovereign / Blackblooded omens are mechanically illegal on jewels and rejected by Bone::apply (M14.6)."
+source = "/docs/34 §4.x (M15.3 R217) + engine Bone::apply lord-pool gate"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class = "Jewel" },
+    { rarity = "rare" },
+]
+
+[[rule.then]]
+note = "Jewels use the Lightless / of-the-Abyss pool. Lord-targeting omens (Liege / Sovereign / Blackblooded) are illegal on jewels and will error at apply time. Use a plain Cranium reveal instead."
+priority = 80
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R219 — Mark of the Abyss swap mechanics
+[[rule]]
+id = "R219-mark-of-the-abyss-swap-eligibility"
+category = "exalt_vs_desecrate"
+explanation = "Mark of the Abyss is only legal on items already carrying a Mark; it replaces the existing Mark with a higher-tier desecrated mod from the abyss pool. Without an existing Mark on the item, the swap has nothing to upgrade."
+source = "/docs/34 §4.x (M15.3 R219) + poe2db Abyss Mark mechanics"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_desecrated_revealed = false },
+]
+
+[[rule.then]]
+note = "Mark of the Abyss only works on items already carrying a Mark. Without an existing abyss mark, this is a no-op — apply a regular bone first to seed a Mark."
+priority = 30
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R223 — Greater Essence on Magic locks one mod, fills to 4 mods total
+[[rule]]
+id = "R223-greater-essence-on-magic-fills-to-rare"
+category = "exalt_vs_desecrate"
+explanation = "Greater Essence on a Magic item promotes it to Rare with the essence's specific mod added; existing Magic mods are preserved as-is, and the Rare item carries 4 explicit mods total (the 1-2 Magic mods + the essence mod + filler from the rare-promotion path)."
+source = "/docs/34 §4.x (M15.3 R223) + engine Essence::apply_promoting"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "magic" },
+    { has_hidden_desecrated = false },
+]
+
+[[rule.then]]
+note = "Greater Essence on Magic = Rare with one locked mod. Use this when you've already secured one Magic mod you want to keep — Greater Essence locks in a second, deterministically."
+priority = 75
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R224 — Perfect Exalted requires open affix slot (≤ 5 mods on Rare)
+[[rule]]
+id = "R224-perfect-exalt-requires-open-slot"
+category = "exalt_vs_desecrate"
+explanation = "PerfectExaltedOrb requires Rare-rarity input AND ≥1 open affix slot (≤ 5 explicit mods total). On a 6-mod item, every slot is occupied — exalt has nothing to add and errors at apply time."
+source = "/docs/34 §4.x (M15.3 R224) + engine ExaltedOrb::apply slot-gate"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "gte", value = 6 } },
+]
+
+[[rule.then]]
+note = "6 explicit mods = no open slot. Exalts (any tier) cannot apply. Annul a non-keeper first to free a slot, or finish via Divine + Vaal."
+priority = 90
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R228 — Bone subtype-class restriction (engine M14.6 gate)
+[[rule]]
+id = "R228-bone-subtype-class-restriction"
+category = "exalt_vs_desecrate"
+explanation = "Each bone subtype targets a specific class group (Rib → armour, Jawbone → weapons + Quiver, Collarbone → jewellery + Talisman, Cranium → Jewel). Mismatched subtypes error at apply time per M14.6's class-aware gate."
+source = "/docs/34 §4.x (M15.3 R228) + engine BoneSubtype::valid_classes"
+confidence = "verified"
+
+[[rule.then]]
+note = "Bone subtype must match the item class: Rib for armour, Jawbone for weapons+Quiver, Collarbone for jewellery+Talisman, Cranium for Jewel."
+priority = 30
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_hidden_desecrated = false },
+]
+
+# ---------------------------------------------------------------------
+# R232 — Trans/Aug/Regal/Exalt/Chaos cannot roll essence-only mods
+[[rule]]
+id = "R232-basic-orbs-exclude-essence-only-mods"
+category = "exalt_vs_desecrate"
+explanation = "Engine sample_eligible_mod (M14.3) filters mods flagged ESSENCE_ONLY / DESECRATED_ONLY / CORRUPTED_ONLY for every basic-orb path. Even when an essence-only mod's spawn-weight is positive on the base, Trans/Aug/Regal/Exalt/Chaos will not produce it — only essences add ESSENCE_ONLY-flagged mods."
+source = "/docs/34 §4.x (M15.3 R232) + engine BASIC_ORB_EXCLUDES"
+confidence = "verified"
+
+[[rule.then]]
+note = "Essence-only mods cannot leak into Trans/Aug/Regal/Exalt/Chaos pools (engine M14.3 enforces this). To add an essence-flagged mod, use the corresponding essence."
+priority = 25
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+[rule.when]
+mod_count = { op = "gte", value = 0 }
+
+# ---------------------------------------------------------------------
+# R235 — Bone reveal pool: ilvl 65+ guarantees ≥1 exclusive desecrated
+[[rule]]
+id = "R235-bone-reveal-guarantees-exclusive-at-ilvl-65"
+category = "exalt_vs_desecrate"
+explanation = "At item-level 65+ the reveal pool guarantees at least one exclusive desecrated mod option among the three offered at the Well of Souls. Below ilvl 65 the pool is regular-affix-weighted and exclusivity is probabilistic."
+source = "/docs/34 §4.x (M15.3 R235) + poe2db Well of Souls reveal mechanics"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_hidden_desecrated = true },
+    { ilvl = { op = "gte", value = 65 } },
+]
+
+[[rule.then]]
+note = "ilvl 65+ guarantees at least one exclusive desecrated option in the 3-option Well of Souls reveal. Lower ilvl items roll regular weights — exclusivity is not guaranteed."
+priority = 60
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

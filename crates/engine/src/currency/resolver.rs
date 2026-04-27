@@ -94,6 +94,11 @@ impl DefaultCurrencyResolver {
     /// strategies / rules referring to `FleshCatalyst`, `ReaverCatalyst`,
     /// etc. resolve out of the box. Production callers can extend with
     /// the full bundle catalogue via [`with_catalysts`].
+    ///
+    /// `AdaptiveCatalyst` is included with the default `breach` tag —
+    /// the canonical 0.4 use case (R093) and the dominant Breach-reward
+    /// flavour. Bundles that ship richer catalyst catalogues override
+    /// this entry via [`Self::with_catalysts`].
     fn register_default_catalyst_presets(&mut self) {
         self.catalysts.extend([
             Catalyst::flesh(),
@@ -101,6 +106,7 @@ impl DefaultCurrencyResolver {
             Catalyst::reaver(),
             Catalyst::carapace(),
             Catalyst::unstable(),
+            Catalyst::adaptive("breach"),
         ]);
     }
 }

@@ -1,0 +1,102 @@
+# Caster Weapon (Staff/Sceptre/Wand): %SpellDamage + +SkillLevel + CastSpeed
+# M15.1 — caster weapon template.
+
+id = "caster-weapon-spell-skill"
+name = "Caster Weapon: %SpellDamage + +Skill + Cast Speed"
+patch_min = "0.4.0"
+item_classes = ["Staff", "Sceptre", "Wand"]
+attribute_pools = ["int", "str_int", "dex_int"]
+expected_cost_div = [25, 150]
+expected_success_prob = [0.06, 0.22]
+confidence = "community"
+note = "Caster weapon: %SpellDamage prefix + +SkillLevel prefix + Cast Speed suffix + secondary prefix concept."
+
+[source]
+kind = "user"
+credit = "project-author"
+reference = "M15.1"
+
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+[[target.prefixes]]
+concept = "SpellDamage"
+count = 1
+min_tier = 1
+
+[[target.prefixes]]
+concept = "AddedSkillLevel"
+count = 1
+min_tier = 1
+
+[[target.suffixes]]
+concept = "CastSpeed"
+count = 1
+min_tier = 2
+
+[[target.suffixes]]
+concept = "Intelligence"
+count = 1
+min_tier = 2
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+target_check = { any = [
+    { has_concept = { concept = "SpellDamage", affix = "prefix" } },
+    { has_concept = { concept = "AddedSkillLevel", affix = "prefix" } },
+] }
+on_success = "S2-perfect-augment"
+on_failure = "S1b-restart"
+
+[[steps]]
+id = "S1b-restart"
+action = { kind = "abandon", reason = "Transmute missed both spell prefixes; restart cheaper." }
+
+[[steps]]
+id = "S2-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+on_success = "S3-greater-essence"
+on_failure = "S3-greater-essence"
+
+[[steps]]
+id = "S3-greater-essence"
+action = { kind = "apply_currency", currency = "GreaterEssenceOfTheMind" }
+target_check = { rarity = "rare" }
+on_success = "S4-exalt-fill"
+on_failure = "S4-exalt-fill"
+
+[[steps]]
+id = "S4-exalt-fill"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb" }
+target_check = { mod_count = { op = "gte", value = 5 } }
+on_success = "S5-divine"
+on_failure = "S4-exalt-fill"
+
+[[steps]]
+id = "S5-divine"
+action = { kind = "apply_currency", currency = "DivineOrb" }
+on_success = "S6-vaal-finish"
+on_failure = "S6-vaal-finish"
+
+[[steps]]
+id = "S6-vaal-finish"
+action = { kind = "apply_currency", currency = "VaalOrb", omens = ["OmenOfCorruption"] }
+on_success = "S7-done"
+on_failure = "S7-done"
+
+[[steps]]
+id = "S7-done"
+action = { kind = "done" }

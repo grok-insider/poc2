@@ -1,0 +1,103 @@
+# Two-hand weapon: %IncreasedPhys + AddedPhys + AttackSpeed + CritChance
+# M15.1 — physical 2h weapon template.
+
+id = "2h-attack-physical-crit"
+name = "2H Weapon: %Phys + Added Phys + AS + Crit"
+patch_min = "0.4.0"
+item_classes = ["TwoHandSword", "TwoHandAxe", "TwoHandMace"]
+attribute_pools = ["str", "str_dex"]
+expected_cost_div = [30, 180]
+expected_success_prob = [0.05, 0.18]
+confidence = "community"
+note = "2h physical: %Phys + AddedPhys prefixes + AS + Crit suffixes. Higher-budget than 1h variants."
+
+[source]
+kind = "user"
+credit = "project-author"
+reference = "M15.1"
+
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+[[target.prefixes]]
+concept = "IncreasedPhysicalDamage"
+count = 1
+min_tier = 1
+
+[[target.prefixes]]
+concept = "AddedPhysicalDamage"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[target.suffixes]]
+concept = "AttackSpeed"
+count = 1
+min_tier = 2
+
+[[target.suffixes]]
+concept = "CriticalChance"
+count = 1
+min_tier = 2
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+target_check = { any = [
+    { has_concept = { concept = "IncreasedPhysicalDamage", affix = "prefix" } },
+    { has_concept = { concept = "AddedPhysicalDamage", affix = "prefix" } },
+] }
+on_success = "S2-perfect-augment"
+on_failure = "S1b-restart"
+
+[[steps]]
+id = "S1b-restart"
+action = { kind = "abandon", reason = "Transmute missed both phys prefixes; restart cheaper." }
+
+[[steps]]
+id = "S2-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+on_success = "S3-greater-essence"
+on_failure = "S3-greater-essence"
+
+[[steps]]
+id = "S3-greater-essence"
+action = { kind = "apply_currency", currency = "GreaterEssenceOfBattle" }
+target_check = { rarity = "rare" }
+on_success = "S4-exalt-fill"
+on_failure = "S4-exalt-fill"
+
+[[steps]]
+id = "S4-exalt-fill"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb" }
+target_check = { mod_count = { op = "gte", value = 5 } }
+on_success = "S5-divine"
+on_failure = "S4-exalt-fill"
+
+[[steps]]
+id = "S5-divine"
+action = { kind = "apply_currency", currency = "DivineOrb" }
+on_success = "S6-vaal-finish"
+on_failure = "S6-vaal-finish"
+
+[[steps]]
+id = "S6-vaal-finish"
+action = { kind = "apply_currency", currency = "VaalOrb", omens = ["OmenOfCorruption"] }
+on_success = "S7-done"
+on_failure = "S7-done"
+
+[[steps]]
+id = "S7-done"
+action = { kind = "done" }

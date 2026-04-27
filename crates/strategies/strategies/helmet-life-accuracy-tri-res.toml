@@ -1,0 +1,97 @@
+# Helmet: Life + Accuracy + Tri-resistance
+# M15.1 — per-class strategy template; refines the v1 BodyArmour template
+# for str-based / str-dex-based helmets that prioritize Life + Accuracy
+# (suffix) + tri-resistance suffix coverage.
+
+id = "helmet-life-accuracy-tri-res"
+name = "Helmet: Life + Accuracy + Tri-Res"
+patch_min = "0.4.0"
+item_classes = ["Helmet"]
+attribute_pools = ["str", "str_dex", "str_int"]
+expected_cost_div = [15, 80]
+expected_success_prob = [0.10, 0.30]
+confidence = "community"
+note = "Helmet finishing chain. Greater Essence locks the Life prefix; Exalt fills toward tri-res suffix coverage."
+
+[source]
+kind = "user"
+credit = "project-author"
+reference = "M15.1"
+
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+[[target.prefixes]]
+concept = "Life"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[target.suffixes]]
+concept = "AccuracyRating"
+count = 1
+min_tier = 2
+
+[[target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 3
+min_tier = 2
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+target_check = { has_concept = { concept = "Life", affix = "prefix" } }
+on_success = "S2-perfect-augment"
+on_failure = "S1b-restart"
+
+[[steps]]
+id = "S1b-restart"
+action = { kind = "abandon", reason = "Transmute did not hit Life prefix; cheaper to restart." }
+
+[[steps]]
+id = "S2-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+on_success = "S3-greater-essence"
+on_failure = "S3-greater-essence"
+
+[[steps]]
+id = "S3-greater-essence"
+action = { kind = "apply_currency", currency = "GreaterEssenceOfTheBody" }
+target_check = { rarity = "rare" }
+on_success = "S4-exalt-fill"
+on_failure = "S4-exalt-fill"
+
+[[steps]]
+id = "S4-exalt-fill"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb", omens = ["OmenOfDextralExaltation"] }
+target_check = { affix_count = { affix = "suffix", count = { op = "gte", value = 3 } } }
+on_success = "S5-divine"
+on_failure = "S4-exalt-fill"
+
+[[steps]]
+id = "S5-divine"
+action = { kind = "apply_currency", currency = "DivineOrb" }
+on_success = "S6-vaal-finish"
+on_failure = "S6-vaal-finish"
+
+[[steps]]
+id = "S6-vaal-finish"
+action = { kind = "apply_currency", currency = "VaalOrb", omens = ["OmenOfCorruption"] }
+on_success = "S7-done"
+on_failure = "S7-done"
+
+[[steps]]
+id = "S7-done"
+action = { kind = "done" }

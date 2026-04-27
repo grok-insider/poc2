@@ -139,3 +139,26 @@ priority = 60
 tag = "meta"
 [rule.then.action]
 kind = "stop_and_sell"
+
+# ---------------------------------------------------------------------
+# M15.3 / R222 — Specific essence + perfect tier requires Magic input
+[[rule]]
+id = "R222-specific-essence-perfect-requires-magic"
+category = "stop_vs_continue"
+explanation = "Perfect-tier specific essences (e.g., Perfect Essence of Seeking) follow the remove+add semantics on Rare items per engine EssenceQuality::is_remove_add. Lesser/Normal/Greater specific essences promote Magic→Rare. Applying a Greater essence to an already-Rare item errors at the rarity gate."
+source = "/docs/34 §6.x (M15.3 R222) + engine Essence::valid_rarities"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_hidden_desecrated = false },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "Greater Essences require Magic input; Perfect Essences require Rare input. On a Rare item, Greater essences error — switch to a Perfect essence (which removes one mod and adds the essence's mod) or step back to Magic via Annul."
+priority = 60
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

@@ -17,14 +17,14 @@
 //! depends on it. This keeps existing callers (executor, registry-only
 //! tests) working unchanged.
 
-use poc2_engine::ids::{ConceptId, CurrencyId, ItemClassId};
+use poc2_engine::ids::{ConceptId, CurrencyId, ItemClassId, ModId};
 use poc2_engine::item::{AffixType, Item};
 use poc2_engine::item_class::AttributePool;
 use poc2_engine::mods::{ModFlags, ModKind};
 use poc2_engine::registry::ModRegistry;
 use poc2_market::Valuator;
 
-use crate::dsl::ItemPredicate;
+use crate::dsl::{CmpOp, ItemPredicate};
 
 /// Read-only stash interface used by [`ItemPredicate::StashHas`].
 ///
@@ -202,7 +202,185 @@ pub fn eval(predicate: &ItemPredicate, item: &Item, ctx: &PredicateContext<'_>) 
                 .unwrap_or(false),
             None => false,
         },
+
+        // M15.2 — mod-pool predicate primitives.
+        ItemPredicate::HasKeeperCount {
+            concepts,
+            affix,
+            count,
+            min_tier: _,
+        } => {
+            let n = keeper_count(item, ctx.registry, concepts, affix.as_ref());
+            count.matches(i64::try_from(n).unwrap_or(i64::MAX))
+        }
+        ItemPredicate::HasOpenSlot { affix, max_slots } => {
+            let n = affix_slot_count(item, *affix);
+            n < usize::from(*max_slots)
+        }
+        ItemPredicate::KeeperAtMaxRoll {
+            concept,
+            threshold_pct,
+        } => keeper_at_max_roll(item, ctx.registry, concept, *threshold_pct),
+        ItemPredicate::ModValueWithin {
+            mod_id,
+            stat_index,
+            op,
+            value,
+        } => mod_value_within(item, ctx.registry, mod_id, *stat_index, *op, *value),
+        ItemPredicate::ConceptSetContainsAny {
+            concepts,
+            affix,
+            min_tier: _,
+        } => concept_set_contains_any(item, ctx.registry, concepts, affix.as_ref()),
+        ItemPredicate::BundleWeightAbove { mod_id, threshold } => {
+            bundle_weight_above(item, ctx.registry, mod_id, *threshold)
+        }
     }
+}
+
+/// Count of mods whose `concept_set` intersects `concepts`. Restricts
+/// to the given affix slot when present.
+fn keeper_count(
+    item: &Item,
+    registry: &ModRegistry,
+    concepts: &[ConceptId],
+    affix: Option<&AffixType>,
+) -> usize {
+    let mut count = 0usize;
+    let count_in = |slot: &[poc2_engine::ModRoll], count: &mut usize| {
+        for roll in slot {
+            let Some(def) = registry.get(&roll.mod_id) else {
+                continue;
+            };
+            if def.concept_set.iter().any(|c| concepts.contains(c)) {
+                *count += 1;
+            }
+        }
+    };
+    match affix {
+        Some(AffixType::Prefix) => count_in(&item.prefixes, &mut count),
+        Some(AffixType::Suffix) => count_in(&item.suffixes, &mut count),
+        Some(AffixType::Implicit) => count_in(&item.implicits, &mut count),
+        Some(AffixType::Enchantment) => count_in(&item.enchantments, &mut count),
+        None => {
+            count_in(&item.prefixes, &mut count);
+            count_in(&item.suffixes, &mut count);
+        }
+    }
+    count
+}
+
+/// True iff at least one mod whose `concept_set` contains `concept`
+/// rolled at-or-above `threshold_pct` of its stat range. Stats with
+/// zero range are skipped (their `roll` value carries no information).
+fn keeper_at_max_roll(
+    item: &Item,
+    registry: &ModRegistry,
+    concept: &ConceptId,
+    threshold_pct: f64,
+) -> bool {
+    let pct = threshold_pct.clamp(0.0, 1.0);
+    for roll in item.prefixes.iter().chain(item.suffixes.iter()) {
+        let Some(def) = registry.get(&roll.mod_id) else {
+            continue;
+        };
+        if !def.concept_set.iter().any(|c| c == concept) {
+            continue;
+        }
+        for (stat_idx, stat) in def.stats.iter().enumerate() {
+            let range = stat.range_size();
+            if range.abs() < f64::EPSILON {
+                continue;
+            }
+            let Some(value) = roll.values.get(stat_idx).copied() else {
+                continue;
+            };
+            let normalized = (value - stat.min) / range;
+            if normalized >= pct {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Float-comparison tolerance used by [`mod_value_within`] for `Eq`/`Ne`.
+const MOD_VALUE_WITHIN_TOL: f64 = 1e-9;
+
+/// True iff `mod_id` is on the item AND the stat at `stat_index`
+/// satisfies the comparison.
+fn mod_value_within(
+    item: &Item,
+    registry: &ModRegistry,
+    mod_id: &ModId,
+    stat_index: usize,
+    op: CmpOp,
+    target: f64,
+) -> bool {
+    if registry.get(mod_id).is_none() {
+        return false;
+    }
+    for roll in item.prefixes.iter().chain(item.suffixes.iter()) {
+        if &roll.mod_id != mod_id {
+            continue;
+        }
+        let Some(value) = roll.values.get(stat_index).copied() else {
+            continue;
+        };
+        let satisfied = match op {
+            CmpOp::Eq => (value - target).abs() < MOD_VALUE_WITHIN_TOL,
+            CmpOp::Ne => (value - target).abs() >= MOD_VALUE_WITHIN_TOL,
+            CmpOp::Lt => value < target,
+            CmpOp::Lte => value <= target,
+            CmpOp::Gt => value > target,
+            CmpOp::Gte => value >= target,
+        };
+        if satisfied {
+            return true;
+        }
+    }
+    false
+}
+
+/// True iff at least one mod's `concept_set` intersects `concepts`.
+/// Restricts to a single affix slot when present.
+fn concept_set_contains_any(
+    item: &Item,
+    registry: &ModRegistry,
+    concepts: &[ConceptId],
+    affix: Option<&AffixType>,
+) -> bool {
+    let check = |slot: &[poc2_engine::ModRoll]| -> bool {
+        slot.iter().any(|roll| {
+            registry
+                .get(&roll.mod_id)
+                .is_some_and(|def| def.concept_set.iter().any(|c| concepts.contains(c)))
+        })
+    };
+    match affix {
+        Some(AffixType::Prefix) => check(&item.prefixes),
+        Some(AffixType::Suffix) => check(&item.suffixes),
+        Some(AffixType::Implicit) => check(&item.implicits),
+        Some(AffixType::Enchantment) => check(&item.enchantments),
+        None => check(&item.prefixes) || check(&item.suffixes),
+    }
+}
+
+/// True iff `registry.weight_for(mod_id, item.base, item.ilvl, class)`
+/// exceeds `threshold`. Returns false when the registry doesn't know
+/// the mod.
+fn bundle_weight_above(
+    item: &Item,
+    registry: &ModRegistry,
+    mod_id: &ModId,
+    threshold: f64,
+) -> bool {
+    if registry.get(mod_id).is_none() {
+        return false;
+    }
+    let class = ItemClassId::from(item.base.as_str());
+    let weight = registry.weight_for(mod_id, &item.base, item.ilvl, &class);
+    weight > threshold
 }
 
 fn affix_slot_count(item: &Item, affix: AffixType) -> usize {
@@ -716,6 +894,279 @@ mod tests {
                 op: CmpOp::Gte,
                 value: 10.0
             }),
+            &item,
+            &ctx
+        ));
+    }
+
+    // -----------------------------------------------------------------
+    // M15.2 — mod-pool predicate primitives.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn eval_has_keeper_count_counts_concept_matches() {
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        // The fixture has 1 ES prefix; HasKeeperCount with count >= 1 passes.
+        assert!(eval(
+            &ItemPredicate::HasKeeperCount {
+                concepts: vec![ConceptId::from("EnergyShield")],
+                affix: None,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 1
+                },
+                min_tier: None,
+            },
+            &item,
+            &ctx
+        ));
+        assert!(!eval(
+            &ItemPredicate::HasKeeperCount {
+                concepts: vec![ConceptId::from("EnergyShield")],
+                affix: None,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 2
+                },
+                min_tier: None,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_has_keeper_count_supports_concept_or() {
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        // Multiple concepts in the list — any match counts.
+        assert!(eval(
+            &ItemPredicate::HasKeeperCount {
+                concepts: vec![ConceptId::from("Life"), ConceptId::from("EnergyShield")],
+                affix: None,
+                count: ValuePredicate {
+                    op: CmpOp::Gte,
+                    value: 1
+                },
+                min_tier: None,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_has_open_slot_reflects_affix_capacity() {
+        let (mut item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        // 1 prefix; default max_slots = 3 → open.
+        assert!(eval(
+            &ItemPredicate::HasOpenSlot {
+                affix: AffixType::Prefix,
+                max_slots: 3,
+            },
+            &item,
+            &ctx
+        ));
+        // No suffixes; open.
+        assert!(eval(
+            &ItemPredicate::HasOpenSlot {
+                affix: AffixType::Suffix,
+                max_slots: 3,
+            },
+            &item,
+            &ctx
+        ));
+        // Fill all 3 prefix slots; HasOpenSlot is now false.
+        for id in ["P2", "P3"] {
+            item.prefixes.push(ModRoll {
+                mod_id: ModId::from(id),
+                affix_type: AffixType::Prefix,
+                kind: ModKind::Explicit,
+                values: smallvec![],
+                is_fractured: false,
+            });
+        }
+        assert!(!eval(
+            &ItemPredicate::HasOpenSlot {
+                affix: AffixType::Prefix,
+                max_slots: 3,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_keeper_at_max_roll_detects_top_pct_rolls() {
+        // Fixture's ES mod has range 50.0..=80.0. Roll value = 60.0
+        // → normalized = (60-50)/30 ≈ 0.333. Below 0.95 threshold.
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        assert!(!eval(
+            &ItemPredicate::KeeperAtMaxRoll {
+                concept: ConceptId::from("EnergyShield"),
+                threshold_pct: 0.95,
+            },
+            &item,
+            &ctx
+        ));
+        // Lower threshold to 0.30 → normalized 0.333 passes.
+        assert!(eval(
+            &ItemPredicate::KeeperAtMaxRoll {
+                concept: ConceptId::from("EnergyShield"),
+                threshold_pct: 0.30,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_keeper_at_max_roll_passes_on_top_roll() {
+        let (mut item, reg) = fixture_es_armour_with_es_prefix();
+        item.prefixes[0].values = smallvec![79.0]; // 29/30 ≈ 0.967, above 0.95.
+        let ctx = PredicateContext::new(&reg);
+        assert!(eval(
+            &ItemPredicate::KeeperAtMaxRoll {
+                concept: ConceptId::from("EnergyShield"),
+                threshold_pct: 0.95,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_mod_value_within_compares_specific_stat() {
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        // value = 60.0; Gte 50 passes, Gte 70 fails.
+        assert!(eval(
+            &ItemPredicate::ModValueWithin {
+                mod_id: ModId::from("EsPrefix1"),
+                stat_index: 0,
+                op: CmpOp::Gte,
+                value: 50.0,
+            },
+            &item,
+            &ctx
+        ));
+        assert!(!eval(
+            &ItemPredicate::ModValueWithin {
+                mod_id: ModId::from("EsPrefix1"),
+                stat_index: 0,
+                op: CmpOp::Gte,
+                value: 70.0,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_mod_value_within_returns_false_for_unknown_mod() {
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        assert!(!eval(
+            &ItemPredicate::ModValueWithin {
+                mod_id: ModId::from("Ghost"),
+                stat_index: 0,
+                op: CmpOp::Gte,
+                value: 0.0,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_concept_set_contains_any_or_logic() {
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        // Concept list includes ES → match.
+        assert!(eval(
+            &ItemPredicate::ConceptSetContainsAny {
+                concepts: vec![ConceptId::from("Life"), ConceptId::from("EnergyShield")],
+                affix: None,
+                min_tier: None,
+            },
+            &item,
+            &ctx
+        ));
+        // Concept list excludes ES → no match.
+        assert!(!eval(
+            &ItemPredicate::ConceptSetContainsAny {
+                concepts: vec![ConceptId::from("Life"), ConceptId::from("Mana")],
+                affix: None,
+                min_tier: None,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_concept_set_contains_any_respects_affix_filter() {
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        // ES is in the prefix slot.
+        assert!(eval(
+            &ItemPredicate::ConceptSetContainsAny {
+                concepts: vec![ConceptId::from("EnergyShield")],
+                affix: Some(AffixType::Prefix),
+                min_tier: None,
+            },
+            &item,
+            &ctx
+        ));
+        // No ES in the suffix slot.
+        assert!(!eval(
+            &ItemPredicate::ConceptSetContainsAny {
+                concepts: vec![ConceptId::from("EnergyShield")],
+                affix: Some(AffixType::Suffix),
+                min_tier: None,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_bundle_weight_above_uses_registry_weight() {
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        // Fixture mod has spawn_weights with non-zero entry, no per-base
+        // observation → registry returns 1.0 via eligibility fallback.
+        assert!(eval(
+            &ItemPredicate::BundleWeightAbove {
+                mod_id: ModId::from("EsPrefix1"),
+                threshold: 0.5,
+            },
+            &item,
+            &ctx
+        ));
+        // Threshold above the eligibility fallback's 1.0.
+        assert!(!eval(
+            &ItemPredicate::BundleWeightAbove {
+                mod_id: ModId::from("EsPrefix1"),
+                threshold: 5.0,
+            },
+            &item,
+            &ctx
+        ));
+    }
+
+    #[test]
+    fn eval_bundle_weight_above_returns_false_for_unknown_mod() {
+        let (item, reg) = fixture_es_armour_with_es_prefix();
+        let ctx = PredicateContext::new(&reg);
+        assert!(!eval(
+            &ItemPredicate::BundleWeightAbove {
+                mod_id: ModId::from("Ghost"),
+                threshold: 0.0,
+            },
             &item,
             &ctx
         ));

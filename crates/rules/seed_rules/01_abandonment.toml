@@ -201,3 +201,25 @@ priority = 45
 tag = "warning"
 [rule.then.action]
 kind = "guidance"
+
+# ---------------------------------------------------------------------
+# §1.x — M15.3 / R022 — Hidden desecrated mod is destroyed by Vaal
+[[rule]]
+id = "R022-hidden-desecrated-incompatible-with-vaal"
+category = "abandonment"
+explanation = "Vaal corruption clears the hidden desecrated slot before sampling outcomes; the unrevealed mod is lost regardless of which outcome rolls."
+source = "/docs/34 §1.x (M15.3 R022) + poe2db Vaal corruption interaction"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { has_hidden_desecrated = true },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "WARNING: Vaal corruption destroys the hidden desecrated slot. Reveal at the Well of Souls FIRST, or accept that the desecrated mod is gone."
+priority = 240
+tag = "warning"
+[rule.then.action]
+kind = "guidance"

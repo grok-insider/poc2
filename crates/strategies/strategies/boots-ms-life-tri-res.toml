@@ -1,0 +1,97 @@
+# Boots: 30% MS + Life + Tri-Resistance
+# M15.1 — boots flagship template; the 30% MS prefix gate is the
+# canonical step-1 abandon point per Belton's rubric.
+
+id = "boots-ms-life-tri-res"
+name = "Boots: 30% MS + Life + Tri-Res"
+patch_min = "0.4.0"
+item_classes = ["Boots"]
+attribute_pools = ["str", "str_dex", "str_int"]
+expected_cost_div = [10, 60]
+expected_success_prob = [0.05, 0.20]
+confidence = "community"
+note = "Boots chain: hunt the 30% MS prefix first; if Transmute/Aug doesn't hit, abandon and restart on a fresh base."
+
+[source]
+kind = "user"
+credit = "project-author"
+reference = "M15.1"
+
+preconditions = [
+    { ilvl = { op = "gte", value = 82 } },
+    { rarity = "normal" },
+    { corrupted = false },
+    { mirrored = false },
+]
+
+[target]
+constraints = []
+
+[[target.prefixes]]
+concept = "MovementSpeed"
+count = 1
+min_tier = 1
+
+[[target.prefixes]]
+concept = "Life"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 3
+min_tier = 2
+
+abandon_criteria = [
+    { corrupted = true },
+    { sanctified = true },
+]
+
+[[steps]]
+id = "S1-perfect-transmute"
+action = { kind = "apply_currency", currency = "PerfectOrbOfTransmutation" }
+target_check = { has_concept = { concept = "MovementSpeed", affix = "prefix" } }
+on_success = "S2-perfect-augment"
+on_failure = "S1b-restart"
+
+[[steps]]
+id = "S1b-restart"
+action = { kind = "abandon", reason = "Transmute did not hit MovementSpeed; vendor and restart on fresh base (per Belton step 1)." }
+
+[[steps]]
+id = "S2-perfect-augment"
+action = { kind = "apply_currency", currency = "PerfectOrbOfAugmentation" }
+target_check = { has_concept = { concept = "Life", affix = "prefix" } }
+on_success = "S3-perfect-regal"
+on_failure = "S3-perfect-regal"
+
+[[steps]]
+id = "S3-perfect-regal"
+action = { kind = "apply_currency", currency = "PerfectRegalOrb" }
+target_check = { rarity = "rare" }
+on_success = "S4-exalt-fill"
+on_failure = "S4-exalt-fill"
+
+[[steps]]
+id = "S4-exalt-fill"
+action = { kind = "apply_currency", currency = "PerfectExaltedOrb", omens = ["OmenOfDextralExaltation"] }
+target_check = { affix_count = { affix = "suffix", count = { op = "gte", value = 3 } } }
+on_success = "S5-divine"
+on_failure = "S4-exalt-fill"
+
+[[steps]]
+id = "S5-divine"
+action = { kind = "apply_currency", currency = "DivineOrb" }
+on_success = "S6-vaal-finish"
+on_failure = "S6-vaal-finish"
+
+[[steps]]
+id = "S6-vaal-finish"
+action = { kind = "apply_currency", currency = "VaalOrb", omens = ["OmenOfCorruption"] }
+on_success = "S7-done"
+on_failure = "S7-done"
+
+[[steps]]
+id = "S7-done"
+action = { kind = "done" }

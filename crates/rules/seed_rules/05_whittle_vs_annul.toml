@@ -185,3 +185,27 @@ priority = 35
 tag = "meta"
 [rule.then.action]
 kind = "guidance"
+
+# ---------------------------------------------------------------------
+# M15.3 / R227 — Annul on Magic with 1 mod returns to Normal
+[[rule]]
+id = "R227-annul-magic-with-one-mod-returns-to-normal"
+category = "whittle_vs_annul"
+explanation = "OrbOfAnnulment on a Magic item with a single mod removes that mod and demotes the item back to Normal rarity. Useful when the Magic mod is unwanted and you want to restart from Normal without vendoring."
+source = "/docs/34 §5.x (M15.3 R227) + engine OrbOfAnnulment::apply"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "magic" },
+    { mod_count = { op = "eq", value = 1 } },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "Annul on a 1-mod Magic = back to Normal. Cheaper than vendoring when you want to retry Transmute on the same base."
+priority = 100
+[rule.then.action]
+kind = "apply_currency"
+currency = "OrbOfAnnulment"
+omens = []

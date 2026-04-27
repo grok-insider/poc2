@@ -125,3 +125,29 @@ priority = 25
 tag = "meta"
 [rule.then.action]
 kind = "guidance"
+
+# ---------------------------------------------------------------------
+# M15.3 / R225 — Hinekora's Lock + Vaal interaction
+[[rule]]
+id = "R225-hinekora-lock-saves-pre-vaal-state"
+category = "hinekora_lock"
+explanation = "Hinekora's Lock seeds the next operation deterministically. Applied before Vaal, the lock saves the pre-Vaal RNG state — the user can preview the outcome and abandon if it's a brick. Reverting wastes the lock seed (one-shot)."
+source = "/docs/34 §3.x (M15.3 R225) + engine HinekorasLock semantics"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { has_hinekora_lock = false },
+    { mod_count = { op = "gte", value = 3 } },
+    { expected_sale_price = { op = "gte", value = 5.0 } },
+]
+
+[[rule.then]]
+note = "Pre-Lock before Vaal: the lock previews the corruption outcome so you can abandon a brick BEFORE committing the corruption. Worth the lock cost on items above 5 div sale value."
+priority = 220
+[rule.then.action]
+kind = "apply_currency"
+currency = "HinekorasLock"
+omens = []

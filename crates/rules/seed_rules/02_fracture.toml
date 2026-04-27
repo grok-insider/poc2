@@ -170,3 +170,48 @@ priority = 100
 tag = "meta"
 [rule.then.action]
 kind = "guidance"
+
+# ---------------------------------------------------------------------
+# M15.3 / R226 — Hidden desecrated cannot be the fracture target
+[[rule]]
+id = "R226-fracture-cannot-target-hidden-desecrated"
+category = "fracture"
+explanation = "FracturingOrb selects from visible mods only. Hidden desecrated slots are excluded from the pool until revealed at the Well of Souls."
+source = "/docs/34 §2.5 (M15.3 R226) + engine FracturingOrb::apply"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_hidden_desecrated = true },
+    { has_fractured = false },
+]
+
+[[rule.then]]
+note = "Reveal the desecrated mod first — fracture only sees visible mods, so unrevealed slots can't be the lock target."
+priority = 110
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# M15.3 / R236 — Fracture is illegal below 4 mods (formalises engine contract)
+[[rule]]
+id = "R236-fracture-illegal-below-4-mods"
+category = "fracture"
+explanation = "Engine FracturingOrb::can_apply_to rejects items with fewer than 4 visible mods (poe2 mechanic — the orb requires ≥4 mods to be eligible at all)."
+source = "/docs/34 §2.1 (M15.3 R236) + engine CannotApply::FractureRequiresFourMods"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { mod_count = { op = "lt", value = 4 } },
+]
+
+[[rule.then]]
+note = "Fracture is mechanically illegal below 4 visible mods. Build to 4 mods first, then fracture is in scope."
+priority = 25
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

@@ -272,3 +272,74 @@ priority = 30
 tag = "meta"
 [rule.then.action]
 kind = "guidance"
+
+# =====================================================================
+# M15.3 — Vaal corruption mechanics rules.
+# =====================================================================
+
+# R142 — Putrefaction omen + Ancient bone wastes ilvl gating
+[[rule]]
+id = "R142-omen-of-putrefaction-prefers-preserved-bone"
+category = "vaal"
+explanation = "Omen of Putrefaction biases the bone reveal toward higher-tier desecrated mods. Ancient bones already roll high-tier-only at the engine level, so the omen's bias adds nothing. Preserved bones accept the full ilvl ladder, so the omen actually shifts the distribution toward higher tiers."
+source = "/docs/34 §10.x (M15.3 R142) + poe2db Omen of Putrefaction interaction"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { has_hidden_desecrated = false },
+]
+
+[[rule.then]]
+note = "If you're using Omen of Putrefaction, pair it with a Preserved bone, not Ancient. Ancient bones already tier-gate; the omen's bias has nothing to amplify."
+priority = 80
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R143 — Twice-corrupt destroy chance
+[[rule]]
+id = "R143-twice-corrupt-50-pct-destroy-chance"
+category = "vaal"
+explanation = "Architect's Orb corrupts an already-corrupted item with a documented ~50% destroy chance per the poe2 wiki. Without a HinekorasLock preview or a fully-priced backup item, twice-corrupt is a coin flip on losing the entire craft."
+source = "/docs/34 §10.x (M15.3 R143) + poe2 wiki Architect's Orb"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { corrupted = true },
+    { has_hinekora_lock = false },
+]
+
+[[rule.then]]
+note = "WARNING: Architect's Orb has ~50% destroy chance on already-corrupted items. Pre-Lock or have a backup; never twice-corrupt a high-value item without one or the other."
+priority = 230
+tag = "warning"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R233 — Omen of Corruption removes NoChange outcome
+[[rule]]
+id = "R233-omen-of-corruption-removes-no-change"
+category = "vaal"
+explanation = "Engine Vaal::apply (M14.4) consumes Omen of Corruption via OmenSet::consume_prevent_no_change; when present, the NoChange outcome is dropped from the categorical distribution and the remaining 5 outcomes renormalize over the original 0.75 mass."
+source = "/docs/34 §10.x (M15.3 R233) + engine sample_vaal_outcome"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { rarity = "rare" },
+    { corrupted = false },
+    { stash_has = { currency = "OmenOfCorruption", count = { op = "gte", value = 1 } } },
+]
+
+[[rule.then]]
+note = "Omen of Corruption removes the NoChange outcome (25% of trials would otherwise leave the item unchanged). With the omen the chance of any *change* outcome rises from 75% to 100% — recommended for high-value Vaal-finishes."
+priority = 110
+[rule.then.action]
+kind = "apply_currency"
+currency = "VaalOrb"
+omens = ["OmenOfCorruption"]

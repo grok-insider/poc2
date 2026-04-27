@@ -99,3 +99,75 @@ priority = 100
 kind = "apply_currency"
 currency = "AdaptiveCatalyst"
 omens = []
+
+# =====================================================================
+# M15.3 — Catalyst quality mechanics rules.
+# =====================================================================
+
+# R229 — Tag-mismatch resets quality to 0
+[[rule]]
+id = "R229-catalyst-tag-mismatch-resets-quality"
+category = "other"
+explanation = "Engine Catalyst::apply checks the item's QualityKind; switching from a Tagged(A) catalyst to a Tagged(B) catalyst (or from Untagged with non-zero quality to any Tagged) resets quality to 0 before applying the new catalyst's increment. Stacking different catalyst types wastes prior quality."
+source = "/docs/34 §99 (M15.3 R229) + engine Catalyst::apply quality-kind switch"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class_any = ["Ring", "Amulet", "Belt", "Jewel"] },
+    { quality = { op = "gte", value = 5 } },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Quality is tagged to the last catalyst used. Switching catalyst tags resets quality to 0 — commit to one tag (Flesh / Reaver / Unstable / Carapace / Adaptive) per craft."
+priority = 35
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R230 — Quality boosts tag-matching mod weight by 1% per quality
+[[rule]]
+id = "R230-catalyst-quality-boosts-mod-weights"
+category = "other"
+explanation = "Tagged catalyst quality boosts the spawn weight of tag-matching mods by 1% per quality, capping at +20% with a fully-quality'd catalyst (4× normal applies, +5%/apply). This biases sample_eligible_mod toward the catalyst's tag during subsequent Trans/Aug/Regal/Exalt/Chaos."
+source = "/docs/34 §99 (M15.3 R230) + poe2 wiki Catalyst quality scaling"
+confidence = "verified"
+
+[rule.when]
+all = [
+    { item_class_any = ["Ring", "Amulet", "Belt", "Jewel"] },
+    { quality = { op = "gte", value = 15 } },
+    { rarity = "rare" },
+]
+
+[[rule.then]]
+note = "Catalyst quality at 15+ adds a meaningful weight bias on tag-matching mods. Apply your finishing Exalt / Regal NOW to capture the bias before further mods dilute it."
+priority = 95
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R234 — Belt class catalyst restrictions in 0.4
+[[rule]]
+id = "R234-belt-class-catalyst-restrictions-0-4"
+category = "other"
+explanation = "Per the 0.4 catalyst data, Belts are documented to accept Unstable (caster) and Flesh (life) catalysts cleanly; other catalyst types may not have a meaningful tag intersection on belt-base mods. Engine Catalyst::can_apply_to (M14.5) accepts any catalyst on a Belt — this rule layers a tag-preference recommendation on top."
+source = "/docs/34 §99 (M15.3 R234) + community testing"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class = "Belt" },
+    { rarity = "rare" },
+    { corrupted = false },
+]
+
+[[rule.then]]
+note = "Belt catalyst preferences in 0.4: Unstable (caster) for spell-tagged belts, Flesh (life) for life-tagged belts, Adaptive (breach) for breach-aligned builds. Other catalyst tags work mechanically but their per-mod weight bias may be smaller."
+priority = 60
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

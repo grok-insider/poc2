@@ -188,3 +188,63 @@ priority = 60
 tag = "meta"
 [rule.then.action]
 kind = "guidance"
+
+# =====================================================================
+# M15.3 — Base selection mechanics rules.
+# =====================================================================
+
+# R218 — Recombinator success drops sharply when ilvl jumps tier ladders
+[[rule]]
+id = "R218-recombinator-prefer-low-tier-ilvl-base"
+category = "base_selection"
+explanation = "Recombinator success-chance includes the per-mod tier-ratio product term (engine M14.4). When the base's ilvl jumps a tier ladder boundary, candidate mods at the highest tier dilute the ratio denominator and crash the success chance. Pick the lowest-tier ilvl base that still admits the keeper tier."
+source = "/docs/34 §9.x (M15.3 R218) + engine compute_recombine_success_chance"
+confidence = "community"
+
+[rule.when]
+ilvl = { op = "gte", value = 86 }
+
+[[rule.then]]
+note = "For Recombinator chains, pick the lowest ilvl base that still admits your keeper tier. Higher ilvls add tier-ladder peers to the denominator and crash success chance."
+priority = 35
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R220 — Body armours with Hexer's / Vile / Cultist Robe lock to int_armour
+[[rule]]
+id = "R220-int-armour-bases-block-str-dex-pools"
+category = "base_selection"
+explanation = "Hexer's Robe, Vile Robe, Cultist Robe and other pure-int body armour bases carry the int_armour tag exclusively; the str_armour and dex_armour mod pools are blocked by tag-filtering at sample_eligible_mod (engine M14.1's per-base weight resolution honours the tag intersection)."
+source = "/docs/34 §9.x (M15.3 R220) + RePoE-fork base tag table"
+confidence = "verified"
+
+[rule.when]
+attribute_pool = "int"
+
+[[rule.then]]
+note = "Pure-int body armour bases (Hexer's Robe, Vile Robe, Cultist Robe, etc.) only roll int_armour mods. Str-flavoured (Life-only) and dex-flavoured (Evasion) prefixes are excluded by base-tag intersection."
+priority = 25
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+# R221 — Hybrid Armour-Evasion bases pull from str + dex + str_dex pools
+[[rule]]
+id = "R221-armour-evasion-hybrids-roll-three-pools"
+category = "base_selection"
+explanation = "Armour+Evasion hybrid bases (str_dex attribute pool) admit pure-armour mods, pure-evasion mods, AND the str_dex hybrid pool — three separate spawn-weight tag intersections. The wider mod pool dilutes per-mod hit rates compared to a single-attribute base."
+source = "/docs/34 §9.x (M15.3 R221) + RePoE-fork base tag tables"
+confidence = "verified"
+
+[rule.when]
+attribute_pool = "str_dex"
+
+[[rule.then]]
+note = "Armour+Evasion hybrid bases roll three pools (pure-str, pure-dex, str_dex hybrid). The wider pool means lower per-mod hit rate — prefer single-attribute bases for tight chains."
+priority = 25
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
