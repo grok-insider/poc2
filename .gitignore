@@ -17,6 +17,10 @@ apps/desktop/src-tauri/Cargo.lock
 apps/desktop/dist/*
 !apps/desktop/dist/index.html
 
+# Per-base art icons fetched by `cargo run -p poc2-pipeline --bin fetch-base-icons`.
+# These are downloaded locally per-developer; the script must be re-run to regenerate.
+apps/desktop/public/base-icons/
+
 # Editors / IDE
 .idea/
 .vscode/*

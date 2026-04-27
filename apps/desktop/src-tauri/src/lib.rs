@@ -8,6 +8,7 @@
 //! `poc2-advisor`, etc.). The Tauri layer only adapts those crates to
 //! IPC commands and lifecycle events.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -151,6 +152,7 @@ struct BundleState {
     resolver: Arc<DefaultCurrencyResolver>,
     bundle_path: Option<PathBuf>,
     bundle_patch: Option<PatchVersion>,
+    asset_seeds: Arc<Vec<AssetEntry>>,
 }
 
 /// Shared application state. Built once at startup. Bundle-derived
@@ -189,6 +191,48 @@ struct PriceRefreshMeta {
     /// How many entries the snapshot contained (informational).
     total_entries: usize,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct AssetEntry {
+    id: String,
+    name: String,
+    kind: String,
+    detail_url: Option<String>,
+    source_url: Option<String>,
+    local_path: Option<String>,
+    status: String,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AssetManifest {
+    generated_at: String,
+    entries: Vec<AssetEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct AssetStatus {
+    total: usize,
+    cached: usize,
+    missing: usize,
+    failed: usize,
+    root: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CacheAssetsArgs {
+    #[serde(default)]
+    refresh: bool,
+    #[serde(default = "default_asset_limit")]
+    limit: usize,
+}
+
+const fn default_asset_limit() -> usize {
+    96
+}
+
+const ASSET_BATCH_LIMIT: usize = 96;
 
 impl AdvisorState {
     fn build() -> Self {
@@ -246,7 +290,7 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
         Some(p) => try_load_bundle(p),
         None => load_bundle_from_known_paths(),
     };
-    let (registry, bundle_path, bundle_patch, essences, catalysts) = match loaded {
+    let (registry, bundle_path, bundle_patch, essences, catalysts, asset_seeds) = match loaded {
         Some((bundle, path)) => {
             let patch = bundle.game_patch();
             tracing::info!(
@@ -261,6 +305,7 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
                 weights = bundle.weights.len(),
                 "loaded data bundle"
             );
+            let asset_seeds = build_asset_seeds(&bundle);
             let essences = bundle.essence_catalogue();
             let catalysts = bundle.catalyst_catalogue();
             (
@@ -269,6 +314,7 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
                 Some(patch),
                 essences,
                 catalysts,
+                asset_seeds,
             )
         }
         None => {
@@ -283,6 +329,7 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
                 None,
                 Vec::new(),
                 Vec::new(),
+                build_asset_seeds_without_bundle(),
             )
         }
     };
@@ -309,7 +356,277 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
         resolver: Arc::new(resolver),
         bundle_path,
         bundle_patch,
+        asset_seeds: Arc::new(asset_seeds),
     }
+}
+
+fn build_asset_seeds(bundle: &Bundle) -> Vec<AssetEntry> {
+    let mut seeds = build_asset_seeds_without_bundle();
+    let mut seen: HashSet<String> = seeds.iter().map(|a| a.id.clone()).collect();
+
+    for entry in &bundle.omens.entries {
+        let Some(id) = entry.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let name = entry
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(id);
+        let icon_url = entry
+            .get("icon_url")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        if seen.insert(id.to_string()) {
+            seeds.push(asset_seed(
+                id.to_string(),
+                name.to_string(),
+                "omen",
+                Some(poe2db_detail_url(name)),
+                icon_url,
+            ));
+        }
+    }
+
+    for entry in &bundle.essences.entries {
+        let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let id = essence_asset_id(
+            name,
+            entry
+                .get("corrupt")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        );
+        if seen.insert(id.clone()) {
+            seeds.push(asset_seed(
+                id,
+                name.to_string(),
+                "essence",
+                Some(poe2db_detail_url(name)),
+                entry
+                    .get("icon_url")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+            ));
+        }
+    }
+
+    for entry in &bundle.bones.entries {
+        let Some(id) = entry.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let name = entry
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(id);
+        if seen.insert(id.to_string()) {
+            seeds.push(asset_seed(
+                id.to_string(),
+                name.to_string(),
+                "bone",
+                Some(poe2db_detail_url(name)),
+                None,
+            ));
+        }
+    }
+
+    seeds
+}
+
+fn build_asset_seeds_without_bundle() -> Vec<AssetEntry> {
+    let mut seeds: Vec<AssetEntry> = known_item_class_assets()
+        .into_iter()
+        .map(|(id, name)| asset_seed(id.into(), name.into(), "class", None, None))
+        .collect();
+    seeds.extend(known_currency_assets().into_iter().map(|(id, name)| {
+        asset_seed(
+            id.into(),
+            name.into(),
+            "currency",
+            Some(poe2db_detail_url(name)),
+            None,
+        )
+    }));
+    seeds
+}
+
+fn known_item_class_assets() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("BodyArmour", "Body Armour"),
+        ("Helmet", "Helmet"),
+        ("Helmets", "Helmets"),
+        ("Gloves", "Gloves"),
+        ("Boots", "Boots"),
+        ("Bow", "Bow"),
+        ("Crossbow", "Crossbow"),
+        ("Staff", "Staff"),
+        ("Quarterstaff", "Quarterstaff"),
+        ("OneHandSword", "One Hand Sword"),
+        ("OneHandAxe", "One Hand Axe"),
+        ("OneHandMace", "One Hand Mace"),
+        ("Spear", "Spear"),
+        ("Flail", "Flail"),
+        ("Claw", "Claw"),
+        ("Dagger", "Dagger"),
+        ("Wand", "Wand"),
+        ("Sceptre", "Sceptre"),
+        ("TwoHandSword", "Two Hand Sword"),
+        ("TwoHandAxe", "Two Hand Axe"),
+        ("TwoHandMace", "Two Hand Mace"),
+        ("OneHandWeapon", "One Hand Weapon"),
+        ("TwoHandWeapon", "Two Hand Weapon"),
+        ("Ring", "Ring"),
+        ("Amulet", "Amulet"),
+        ("Belt", "Belt"),
+        ("Focus", "Focus"),
+        ("Shield", "Shield"),
+        ("Quiver", "Quiver"),
+    ]
+}
+
+fn known_currency_assets() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("OrbOfTransmutation", "Orb of Transmutation"),
+        ("GreaterOrbOfTransmutation", "Greater Orb of Transmutation"),
+        ("PerfectOrbOfTransmutation", "Perfect Orb of Transmutation"),
+        ("OrbOfAugmentation", "Orb of Augmentation"),
+        ("GreaterOrbOfAugmentation", "Greater Orb of Augmentation"),
+        ("PerfectOrbOfAugmentation", "Perfect Orb of Augmentation"),
+        ("RegalOrb", "Regal Orb"),
+        ("GreaterRegalOrb", "Greater Regal Orb"),
+        ("PerfectRegalOrb", "Perfect Regal Orb"),
+        ("OrbOfAlchemy", "Orb of Alchemy"),
+        ("ExaltedOrb", "Exalted Orb"),
+        ("GreaterExaltedOrb", "Greater Exalted Orb"),
+        ("PerfectExaltedOrb", "Perfect Exalted Orb"),
+        ("OrbOfAnnulment", "Orb of Annulment"),
+        ("ChaosOrb", "Chaos Orb"),
+        ("GreaterChaosOrb", "Greater Chaos Orb"),
+        ("PerfectChaosOrb", "Perfect Chaos Orb"),
+        ("DivineOrb", "Divine Orb"),
+        ("VaalOrb", "Vaal Orb"),
+        ("HinekorasLock", "Hinekora's Lock"),
+        ("FracturingOrb", "Fracturing Orb"),
+        ("FleshCatalyst", "Flesh Catalyst"),
+        ("IntrinsicCatalyst", "Intrinsic Catalyst"),
+        ("ReaverCatalyst", "Reaver Catalyst"),
+        ("CarapaceCatalyst", "Carapace Catalyst"),
+        ("UnstableCatalyst", "Unstable Catalyst"),
+        ("AdaptiveCatalyst", "Adaptive Catalyst"),
+    ]
+}
+
+fn asset_seed(
+    id: String,
+    name: String,
+    kind: impl Into<String>,
+    detail_url: Option<String>,
+    source_url: Option<String>,
+) -> AssetEntry {
+    let source_url = source_url.or_else(|| known_remote_asset_url(&id).map(str::to_string));
+    AssetEntry {
+        id,
+        name,
+        kind: kind.into(),
+        detail_url,
+        source_url,
+        local_path: None,
+        status: "missing".into(),
+        error: None,
+    }
+}
+
+fn known_remote_asset_url(id: &str) -> Option<&'static str> {
+    match id {
+        "BodyArmour" => Some(
+            "https://cdn.poe2db.tw/image/Art/2DItems/Armours/BodyArmours/Basetypes/BodyInt03.webp",
+        ),
+        "Helmet" | "Helmets" => Some(
+            "https://cdn.poe2db.tw/image/Art/2DItems/Armours/Helmets/Basetypes/HelmetInt03.webp",
+        ),
+        "Boots" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Armours/Boots/Basetypes/BootsDex01.webp")
+        }
+        "Ring" => Some("https://cdn.poe2db.tw/image/Art/2DItems/Rings/Basetypes/IronRing.webp"),
+        "Amulet" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Amulets/Basetypes/GoldAmulet.webp")
+        }
+        "OrbOfTransmutation" | "GreaterOrbOfTransmutation" | "PerfectOrbOfTransmutation" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyUpgradeToMagic.webp")
+        }
+        "OrbOfAugmentation" | "GreaterOrbOfAugmentation" | "PerfectOrbOfAugmentation" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyAddModToMagic.webp")
+        }
+        "OrbOfAlchemy" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyUpgradeToRare.webp")
+        }
+        "ExaltedOrb" | "GreaterExaltedOrb" | "PerfectExaltedOrb" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyAddModToRare.webp")
+        }
+        "DivineOrb" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyModValues.webp")
+        }
+        "ChaosOrb" | "GreaterChaosOrb" | "PerfectChaosOrb" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyRerollRare.webp")
+        }
+        "RegalOrb" | "GreaterRegalOrb" | "PerfectRegalOrb" => {
+            Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyUpgradeMagicToRare.webp")
+        }
+        "VaalOrb" => Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/CurrencyCorrupt.webp"),
+        "OrbOfAnnulment" => Some("https://cdn.poe2db.tw/image/Art/2DItems/Currency/AnnullOrb.webp"),
+        _ => None,
+    }
+}
+
+fn poe2db_detail_url(name: &str) -> String {
+    format!("https://poe2db.tw/us/{}", slug_name(name))
+}
+
+fn slug_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c
+            } else if c.is_whitespace() || c == '-' || c == '_' {
+                '_'
+            } else {
+                '\0'
+            }
+        })
+        .filter(|c| *c != '\0')
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn essence_asset_id(name: &str, corrupt: bool) -> String {
+    if corrupt {
+        return format!("CorruptedEssenceOf{}", essence_suffix(name));
+    }
+    let prefix = if name.starts_with("Lesser ") {
+        "LesserEssenceOf"
+    } else if name.starts_with("Greater ") {
+        "GreaterEssenceOf"
+    } else if name.starts_with("Perfect ") {
+        "PerfectEssenceOf"
+    } else {
+        "EssenceOf"
+    };
+    format!("{prefix}{}", essence_suffix(name))
+}
+
+fn essence_suffix(name: &str) -> String {
+    name.split_whitespace()
+        .filter(|w| {
+            !matches!(
+                *w,
+                "Essence" | "of" | "the" | "Lesser" | "Greater" | "Perfect" | "Corrupted"
+            )
+        })
+        .collect()
 }
 
 /// Search the conventional locations for a `*.bundle.json[.gz]` and load
@@ -477,6 +794,329 @@ fn ping() -> String {
         env!("CARGO_PKG_VERSION"),
         poc2_engine::ENGINE_SCHEMA_VERSION
     )
+}
+
+#[tauri::command]
+fn asset_manifest(state: tauri::State<'_, AdvisorState>) -> Result<AssetManifest, String> {
+    let entries = merged_asset_entries(&state)?;
+    Ok(AssetManifest {
+        generated_at: now_iso8601(),
+        entries,
+    })
+}
+
+#[tauri::command]
+fn asset_status(state: tauri::State<'_, AdvisorState>) -> Result<AssetStatus, String> {
+    let entries = merged_asset_entries(&state)?;
+    Ok(asset_status_from_entries(entries, assets_dir()))
+}
+
+#[tauri::command]
+async fn cache_all_assets(
+    args: CacheAssetsArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<AssetStatus, String> {
+    let Some(root) = assets_dir() else {
+        return Err("no $XDG_CONFIG_HOME or $HOME — cannot cache assets".into());
+    };
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+
+    let mut entries = merged_asset_entries(&state)?;
+    let client = reqwest::Client::builder()
+        .user_agent("poc2-asset-cache/0.1")
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let batch_limit = args.limit.min(ASSET_BATCH_LIMIT);
+    let jobs = select_asset_batch(&entries, args.refresh, batch_limit);
+    tracing::info!(count = jobs.len(), root = %root.display(), "caching asset batch");
+
+    let mut set = tokio::task::JoinSet::new();
+    for mut entry in jobs {
+        let client = client.clone();
+        let root = root.clone();
+        let refresh = args.refresh;
+        set.spawn(async move {
+            if let Err(e) = cache_one_asset(&client, &root, &mut entry, refresh).await {
+                entry.status = "failed".into();
+                entry.error = Some(e);
+            }
+            entry
+        });
+    }
+
+    while let Some(result) = set.join_next().await {
+        let updated = result.map_err(|e| e.to_string())?;
+        if let Some(entry) = entries.iter_mut().find(|entry| entry.id == updated.id) {
+            *entry = updated;
+        }
+    }
+
+    write_asset_manifest(&root, &entries)?;
+    Ok(asset_status_from_entries(entries, Some(root)))
+}
+
+fn select_asset_batch(entries: &[AssetEntry], refresh: bool, limit: usize) -> Vec<AssetEntry> {
+    let mut candidates: Vec<AssetEntry> = entries
+        .iter()
+        .filter(|entry| refresh || entry.status == "missing")
+        .cloned()
+        .collect();
+    candidates.sort_by_key(asset_priority);
+    candidates.truncate(limit);
+    candidates
+}
+
+fn asset_priority(entry: &AssetEntry) -> u8 {
+    match entry.kind.as_str() {
+        "class" => 0,
+        "currency" => 1,
+        "omen" => 2,
+        "essence" => 3,
+        "catalyst" => 4,
+        "bone" => 5,
+        "base" => 6,
+        _ => 9,
+    }
+}
+
+fn assets_dir() -> Option<PathBuf> {
+    if let Some(xdg_config) = std::env::var_os("XDG_CONFIG_HOME") {
+        Some(Path::new(&xdg_config).join("poc2/assets"))
+    } else {
+        std::env::var_os("HOME").map(|home| Path::new(&home).join(".config/poc2/assets"))
+    }
+}
+
+fn merged_asset_entries(state: &tauri::State<'_, AdvisorState>) -> Result<Vec<AssetEntry>, String> {
+    let bundle = state.bundle.read().expect("bundle rwlock poisoned");
+    let mut entries = (*bundle.asset_seeds).clone();
+    drop(bundle);
+
+    if let Some(root) = assets_dir() {
+        let cached = read_asset_manifest(&root);
+        for entry in &mut entries {
+            if let Some(existing) = cached.iter().find(|candidate| candidate.id == entry.id) {
+                entry.source_url = entry
+                    .source_url
+                    .clone()
+                    .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
+                    .or_else(|| existing.source_url.clone());
+                entry.local_path = existing.local_path.clone();
+                entry.status = existing.status.clone();
+                entry.error = existing.error.clone();
+            }
+            if let Some(local_path) = &entry.local_path {
+                if Path::new(local_path).is_file() {
+                    entry.status = "cached".into();
+                    entry.error = None;
+                }
+            }
+        }
+    }
+
+    entries.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.name.cmp(&b.name)));
+    Ok(entries)
+}
+
+fn read_asset_manifest(root: &Path) -> Vec<AssetEntry> {
+    let path = root.join("manifest.json");
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<AssetManifest>(&contents)
+        .map(|m| m.entries)
+        .unwrap_or_default()
+}
+
+fn write_asset_manifest(root: &Path, entries: &[AssetEntry]) -> Result<(), String> {
+    let manifest = AssetManifest {
+        generated_at: now_iso8601(),
+        entries: entries.to_vec(),
+    };
+    let path = root.join("manifest.json");
+    let tmp = root.join("manifest.json.tmp");
+    let serialized = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, serialized).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn cache_one_asset(
+    client: &reqwest::Client,
+    root: &Path,
+    entry: &mut AssetEntry,
+    refresh: bool,
+) -> Result<(), String> {
+    let source_url = match &entry.source_url {
+        Some(url) => url.clone(),
+        None => discover_asset_url(client, entry).await?,
+    };
+    let ext = image_extension(&source_url);
+    let rel = format!(
+        "{}/{}.{}",
+        sanitize_path_segment(&entry.kind),
+        sanitize_path_segment(&entry.id),
+        ext
+    );
+    let dest = root.join(&rel);
+    if dest.is_file() && !refresh {
+        entry.source_url = Some(source_url);
+        entry.local_path = Some(dest.display().to_string());
+        entry.status = "cached".into();
+        entry.error = None;
+        return Ok(());
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let bytes = if source_url.starts_with("generated:") {
+        generated_asset_svg(entry).into_bytes().into()
+    } else {
+        client
+            .get(&source_url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?
+    };
+    let tmp = dest.with_extension(format!("{ext}.tmp"));
+    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
+    entry.source_url = Some(source_url);
+    entry.local_path = Some(dest.display().to_string());
+    entry.status = "cached".into();
+    entry.error = None;
+    Ok(())
+}
+
+async fn discover_asset_url(
+    client: &reqwest::Client,
+    entry: &AssetEntry,
+) -> Result<String, String> {
+    let detail_url = entry
+        .detail_url
+        .as_ref()
+        .ok_or_else(|| "no detail page available".to_string())?;
+    let html = client
+        .get(detail_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+    extract_og_image(&html).ok_or_else(|| format!("no og:image found at {detail_url}"))
+}
+
+fn extract_og_image(html: &str) -> Option<String> {
+    for marker in [
+        "property=\"og:image\"",
+        "property='og:image'",
+        "name=\"og:image\"",
+        "name='og:image'",
+    ] {
+        let Some(pos) = html.find(marker) else {
+            continue;
+        };
+        let tail = &html[pos..html.len().min(pos + 600)];
+        if let Some(content_pos) = tail.find("content=") {
+            let after = &tail[content_pos + "content=".len()..];
+            let quote = after.chars().next()?;
+            if quote != '"' && quote != '\'' {
+                continue;
+            }
+            let rest = &after[quote.len_utf8()..];
+            let end = rest.find(quote)?;
+            return Some(rest[..end].to_string());
+        }
+    }
+    None
+}
+
+fn image_extension(url: &str) -> &'static str {
+    if url.starts_with("generated:") {
+        return "svg";
+    }
+    let clean = url.split('?').next().unwrap_or(url).to_ascii_lowercase();
+    if clean.ends_with(".png") {
+        "png"
+    } else if clean.ends_with(".jpg") || clean.ends_with(".jpeg") {
+        "jpg"
+    } else {
+        "webp"
+    }
+}
+
+fn generated_asset_svg(entry: &AssetEntry) -> String {
+    let initials: String = entry
+        .name
+        .split_whitespace()
+        .filter_map(|part| part.chars().next())
+        .take(2)
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    let text = if initials.is_empty() { "?" } else { &initials };
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs>
+  <radialGradient id="g" cx="50%" cy="38%" r="66%">
+    <stop offset="0" stop-color="#183848"/>
+    <stop offset="0.55" stop-color="#0b171d"/>
+    <stop offset="1" stop-color="#030506"/>
+  </radialGradient>
+  <linearGradient id="gold" x1="0" x2="1">
+    <stop offset="0" stop-color="#6f4614"/>
+    <stop offset="0.5" stop-color="#ffd37a"/>
+    <stop offset="1" stop-color="#6f4614"/>
+  </linearGradient>
+</defs>
+<rect width="256" height="256" rx="22" fill="url(#g)"/>
+<path d="M26 40h204v176H26z" fill="none" stroke="url(#gold)" stroke-width="5"/>
+<path d="M46 62h164v132H46z" fill="none" stroke="#3b2a19" stroke-width="2"/>
+<circle cx="128" cy="128" r="54" fill="#081015" stroke="#00c8ff" stroke-width="3" opacity="0.78"/>
+<text x="128" y="144" text-anchor="middle" font-family="Georgia,serif" font-size="54" font-weight="700" fill="#ffd37a">{text}</text>
+</svg>"##
+    )
+}
+
+fn sanitize_path_segment(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn asset_status_from_entries(entries: Vec<AssetEntry>, root: Option<PathBuf>) -> AssetStatus {
+    let cached = entries.iter().filter(|e| e.status == "cached").count();
+    let failed = entries.iter().filter(|e| e.status == "failed").count();
+    AssetStatus {
+        total: entries.len(),
+        cached,
+        failed,
+        missing: entries.len().saturating_sub(cached + failed),
+        root: root.map(|p| p.display().to_string()),
+    }
+}
+
+fn now_iso8601() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    secs.to_string()
 }
 
 #[derive(Debug, Serialize)]
@@ -792,6 +1432,719 @@ fn recovery_hints(
         next_action_summary,
         hints,
     })
+}
+
+// ---------------------------------------------------------------------
+// Bases (Phase 9) — list base items the user can pick from.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+struct BaseSummary {
+    id: String,
+    name: String,
+    class_pascal: String,
+    class_display: String,
+    drop_level: u32,
+    attribute_pool: String,
+    tags: Vec<String>,
+    release_state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BasesArgs {
+    /// PascalCase class id like "BodyArmour". When `None`, returns every base.
+    #[serde(default)]
+    class_pascal: Option<String>,
+    /// Include legacy/unreleased bases. Defaults to false.
+    #[serde(default)]
+    include_legacy: bool,
+}
+
+#[tauri::command]
+fn list_bases(
+    args: BasesArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<Vec<BaseSummary>, String> {
+    let bundle = state.bundle.read().expect("bundle rwlock poisoned");
+    drop(bundle);
+    // We don't actually need the bundle's mod registry here — we read the
+    // raw bundle from disk for now via the bundle path.
+    let path = state
+        .bundle
+        .read()
+        .expect("bundle rwlock poisoned")
+        .bundle_path
+        .clone();
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    let bundle: Bundle = poc2_data::io::read_bundle(&path).map_err(|e| e.to_string())?;
+
+    let mut out = Vec::with_capacity(bundle.base_items.len());
+    for base in &bundle.base_items {
+        let display = base.item_class.as_str().to_string();
+        let pascal = pascal_class(&display);
+        if let Some(filter) = &args.class_pascal {
+            if filter != &pascal {
+                continue;
+            }
+        }
+        if !args.include_legacy
+            && !matches!(
+                base.release_state,
+                poc2_engine::base::ReleaseState::Released
+            )
+        {
+            continue;
+        }
+        out.push(BaseSummary {
+            id: base.id.as_str().to_string(),
+            name: base.name.clone(),
+            class_pascal: pascal,
+            class_display: display,
+            drop_level: base.drop_level,
+            attribute_pool: format!("{:?}", base.attribute_pool).to_ascii_lowercase(),
+            tags: base.tags.iter().map(|t| t.as_str().to_string()).collect(),
+            release_state: format!("{:?}", base.release_state).to_ascii_lowercase(),
+        });
+    }
+    out.sort_by(|a, b| a.drop_level.cmp(&b.drop_level).then(a.name.cmp(&b.name)));
+    Ok(out)
+}
+
+fn pascal_class(raw: &str) -> String {
+    let mut s = String::with_capacity(raw.len());
+    let mut up = true;
+    for c in raw.chars() {
+        if c.is_whitespace() || c == '-' || c == '_' {
+            up = true;
+        } else if up {
+            for u in c.to_uppercase() {
+                s.push(u);
+            }
+            up = false;
+        } else {
+            s.push(c);
+        }
+    }
+    s
+}
+
+// ---------------------------------------------------------------------
+// Eligible mods (Phase 1)
+//
+// Enumerate, for the given (item, affix), every mod the bundle says could
+// roll on this base + ilvl, plus any mods that are blocked only by a
+// Greater/Perfect "min required level" floor (so the UI can grey them
+// out with an explanation).
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AffixSlotFilter {
+    Prefix,
+    Suffix,
+    Either,
+}
+
+impl AffixSlotFilter {
+    fn matches(self, ty: poc2_engine::item::AffixType) -> bool {
+        use poc2_engine::item::AffixType;
+        match self {
+            Self::Prefix => matches!(ty, AffixType::Prefix),
+            Self::Suffix => matches!(ty, AffixType::Suffix),
+            Self::Either => matches!(ty, AffixType::Prefix | AffixType::Suffix),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct EligibleModsArgs {
+    item: Item,
+    #[serde(default = "default_affix_slot")]
+    affix: AffixSlotFilter,
+    /// `min_required_level` floor (e.g. Perfect Transmute = 70).
+    /// Mods below this floor are returned but flagged blocked.
+    #[serde(default)]
+    min_required_level: u32,
+}
+
+const fn default_affix_slot() -> AffixSlotFilter {
+    AffixSlotFilter::Either
+}
+
+#[derive(Debug, Serialize)]
+struct EligibleModView {
+    mod_id: String,
+    name: Option<String>,
+    mod_group: String,
+    affix_type: String,
+    kind: String,
+    /// Concept ids this mod produces, e.g. ["EnergyShield"].
+    concepts: Vec<String>,
+    /// Tags (e.g. "boots", "movement").
+    tags: Vec<String>,
+    /// Tier index within the mod-group ladder (1 = highest required level).
+    tier_index: u32,
+    /// Total tiers for this mod-group on this base.
+    tier_count: u32,
+    required_level: u32,
+    /// Eligible right now (passes class+ilvl+groups+patch+positive weight).
+    eligible_now: bool,
+    /// Blocked by `min_required_level` even though otherwise eligible.
+    blocked_by_min_level: bool,
+    /// Already present on the item (mod-group exclusivity).
+    blocked_by_group: bool,
+    /// Sum of spawn weights for tags relevant on this item.
+    weight: u32,
+    /// Probability share among the eligible-now set.
+    weight_share: f64,
+    text_template: Option<String>,
+    /// Stat ranges `(stat_id, min, max)`, in mod's own order.
+    stats: Vec<EligibleStatView>,
+    is_hybrid: bool,
+    is_essence_only: bool,
+    is_desecrated_only: bool,
+    is_local: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct EligibleStatView {
+    stat_id: String,
+    min: f64,
+    max: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct EligibleModsResponse {
+    /// Item class derived from the input item.
+    item_class: String,
+    /// Whether the bundle has any mods registered for this item-class+affix.
+    /// `false` means the UI should show a "no_data_for_class" notice.
+    data_available: bool,
+    affix: String,
+    /// Patch the registry was loaded for.
+    patch: String,
+    mods: Vec<EligibleModView>,
+}
+
+#[tauri::command]
+fn eligible_mods(
+    args: EligibleModsArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<EligibleModsResponse, String> {
+    use poc2_engine::ids::ItemClassId;
+    use poc2_engine::item::AffixType;
+    use poc2_engine::mods::{ModFlags, ModKind};
+
+    let bundle = state.bundle.read().expect("bundle rwlock poisoned");
+    let registry = bundle.registry.clone();
+    let patch = bundle.bundle_patch.unwrap_or(PatchVersion::PATCH_0_4_0);
+    drop(bundle);
+
+    let item = &args.item;
+    let class = ItemClassId::from(item.base.as_str());
+
+    // Collect occupied groups already on the item (from any affix slot).
+    let mut occupied_groups: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in item.prefixes.iter().chain(item.suffixes.iter()) {
+        if let Some(g) = registry.group_of(&m.mod_id) {
+            occupied_groups.insert(g.as_str().to_string());
+        }
+    }
+
+    let affix_label = match args.affix {
+        AffixSlotFilter::Prefix => "prefix",
+        AffixSlotFilter::Suffix => "suffix",
+        AffixSlotFilter::Either => "either",
+    };
+
+    // Build a candidate index: all mods for the class on the relevant affix.
+    let mut indices: Vec<_> = Vec::new();
+    if args.affix.matches(AffixType::Prefix) {
+        indices.extend(
+            registry
+                .for_class_affix(&class, AffixType::Prefix)
+                .iter()
+                .copied(),
+        );
+    }
+    if args.affix.matches(AffixType::Suffix) {
+        indices.extend(
+            registry
+                .for_class_affix(&class, AffixType::Suffix)
+                .iter()
+                .copied(),
+        );
+    }
+
+    if indices.is_empty() {
+        return Ok(EligibleModsResponse {
+            item_class: class.as_str().to_string(),
+            data_available: false,
+            affix: affix_label.to_string(),
+            patch: format!("{patch}"),
+            mods: Vec::new(),
+        });
+    }
+
+    // Group counts for tier_index/tier_count assignment. Tier 1 = highest
+    // required_level within group.
+    let mut group_levels: std::collections::HashMap<String, Vec<u32>> =
+        std::collections::HashMap::new();
+    for &idx in &indices {
+        let Some(m) = registry.at(idx) else { continue };
+        if m.kind != ModKind::Explicit {
+            continue;
+        }
+        if !m.patch_range.contains(patch) {
+            continue;
+        }
+        let total: u32 = m.spawn_weights.iter().map(|sw| sw.weight).sum();
+        if total == 0 {
+            continue;
+        }
+        group_levels
+            .entry(m.mod_group.0.as_str().to_string())
+            .or_default()
+            .push(m.required_level);
+    }
+    for v in group_levels.values_mut() {
+        v.sort_unstable_by(|a, b| b.cmp(a)); // descending: highest required_level first = T1
+        v.dedup();
+    }
+
+    // First pass: build raw list and remember the eligible-now subset's total weight.
+    let mut raw: Vec<EligibleModView> = Vec::new();
+    let mut eligible_total_weight: u64 = 0;
+
+    for idx in indices {
+        let Some(m) = registry.at(idx) else { continue };
+        if m.kind != ModKind::Explicit {
+            continue;
+        }
+        if !m.patch_range.contains(patch) {
+            continue;
+        }
+        let group_id = m.mod_group.0.as_str().to_string();
+        let weight: u32 = m.spawn_weights.iter().map(|sw| sw.weight).sum();
+        if weight == 0 {
+            continue;
+        }
+        let blocked_by_group = occupied_groups.contains(&group_id);
+        let blocked_by_min = m.required_level < args.min_required_level;
+        let blocked_by_ilvl = m.required_level > item.ilvl;
+        let eligible_now = !blocked_by_group && !blocked_by_min && !blocked_by_ilvl;
+
+        if eligible_now {
+            eligible_total_weight = eligible_total_weight.saturating_add(u64::from(weight));
+        }
+
+        let levels = group_levels.get(&group_id);
+        let tier_count = levels.map(|v| v.len() as u32).unwrap_or(1);
+        let tier_index = levels
+            .and_then(|v| v.iter().position(|l| *l == m.required_level))
+            .map(|p| (p + 1) as u32)
+            .unwrap_or(1);
+
+        raw.push(EligibleModView {
+            mod_id: m.id.as_str().to_string(),
+            name: m.name.clone(),
+            mod_group: group_id,
+            affix_type: match m.affix_type {
+                AffixType::Prefix => "prefix".into(),
+                AffixType::Suffix => "suffix".into(),
+                AffixType::Implicit => "implicit".into(),
+                AffixType::Enchantment => "enchantment".into(),
+            },
+            kind: format!("{:?}", m.kind).to_ascii_lowercase(),
+            concepts: m
+                .concept_set
+                .iter()
+                .map(|c| c.as_str().to_string())
+                .collect(),
+            tags: m.tags.iter().map(|t| t.as_str().to_string()).collect(),
+            tier_index,
+            tier_count,
+            required_level: m.required_level,
+            eligible_now,
+            blocked_by_min_level: blocked_by_min && !blocked_by_ilvl && !blocked_by_group,
+            blocked_by_group,
+            weight,
+            weight_share: 0.0,
+            text_template: m.text_template.clone(),
+            stats: m
+                .stats
+                .iter()
+                .map(|s| EligibleStatView {
+                    stat_id: s.stat_id.as_str().to_string(),
+                    min: s.min,
+                    max: s.max,
+                })
+                .collect(),
+            is_hybrid: m.flags.contains(ModFlags::HYBRID),
+            is_essence_only: m.flags.contains(ModFlags::ESSENCE_ONLY),
+            is_desecrated_only: m.flags.contains(ModFlags::DESECRATED_ONLY),
+            is_local: m.flags.contains(ModFlags::LOCAL),
+        });
+    }
+
+    if eligible_total_weight > 0 {
+        for view in &mut raw {
+            if view.eligible_now {
+                view.weight_share = view.weight as f64 / eligible_total_weight as f64;
+            }
+        }
+    }
+
+    // Sort: eligible first, then by tier_index asc (T1 first), then weight desc.
+    raw.sort_by(|a, b| {
+        b.eligible_now
+            .cmp(&a.eligible_now)
+            .then(a.tier_index.cmp(&b.tier_index))
+            .then(b.weight.cmp(&a.weight))
+            .then(a.mod_id.cmp(&b.mod_id))
+    });
+
+    Ok(EligibleModsResponse {
+        item_class: class.as_str().to_string(),
+        data_available: true,
+        affix: affix_label.to_string(),
+        patch: format!("{patch}"),
+        mods: raw,
+    })
+}
+
+// ---------------------------------------------------------------------
+// check_can_apply (v2 plan, Phase A.2 IPC surface)
+//
+// Returns the engine's structured CannotApply reason for an
+// `(item, currency)` pair. Used by the OutcomeDialog and AdvisorPanel
+// to show authoritative "cannot apply" messages without client-side
+// rarity/slot reasoning that could drift from the engine's verdict.
+//
+// Returns `None` (variant kind = "ok") when the action is applicable.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CheckCanApplyArgs {
+    item: Item,
+    currency: String,
+}
+
+/// Mirror of [`poc2_engine::CannotApply`] for serde-stable IPC. Each
+/// variant carries the data the UI needs to render a friendly message;
+/// the leading `kind` tag matches the discriminator on the TS side.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum CannotApplyView {
+    /// Action is applicable — no obstacle.
+    Ok,
+    /// Currency rejected because it doesn't accept the item's rarity.
+    WrongRarity {
+        item_rarity: String,
+        expected: Vec<String>,
+    },
+    /// All affix slots of the relevant kind are full.
+    NoOpenSlots { affix: String },
+    /// Item is corrupted and the currency can't apply.
+    Corrupted,
+    /// Item is mirrored and cannot be modified.
+    Mirrored,
+    /// Hinekora's Lock is already active.
+    AlreadyLocked,
+    /// Fracture refused — item has fewer than 4 visible mods.
+    FractureRequiresFourMods { current: u32 },
+    /// Recombinator inputs don't share base / ilvl.
+    RecombinatorInputMismatch,
+    /// Free-form fallback for variants the v2 IPC hasn't enumerated yet.
+    Other { message: String },
+    /// Currency id wasn't in the engine's resolver.
+    UnknownCurrency,
+}
+
+fn rarity_label(r: poc2_engine::Rarity) -> &'static str {
+    match r {
+        poc2_engine::Rarity::Normal => "normal",
+        poc2_engine::Rarity::Magic => "magic",
+        poc2_engine::Rarity::Rare => "rare",
+        poc2_engine::Rarity::Unique => "unique",
+    }
+}
+
+fn cannot_apply_to_view(reason: poc2_engine::CannotApply) -> CannotApplyView {
+    use poc2_engine::CannotApply;
+    match reason {
+        CannotApply::WrongRarity {
+            item_rarity,
+            expected,
+        } => CannotApplyView::WrongRarity {
+            item_rarity: rarity_label(item_rarity).to_string(),
+            expected: expected
+                .iter()
+                .map(|r| rarity_label(r).to_string())
+                .collect(),
+        },
+        CannotApply::NoOpenSlots { affix } => CannotApplyView::NoOpenSlots {
+            affix: format!("{affix:?}").to_lowercase(),
+        },
+        CannotApply::Corrupted => CannotApplyView::Corrupted,
+        CannotApply::Mirrored => CannotApplyView::Mirrored,
+        CannotApply::AlreadyLocked => CannotApplyView::AlreadyLocked,
+        CannotApply::FractureRequiresFourMods { current } => {
+            CannotApplyView::FractureRequiresFourMods {
+                #[allow(clippy::cast_possible_truncation)]
+                current: current as u32,
+            }
+        }
+        CannotApply::RecombinatorInputMismatch => CannotApplyView::RecombinatorInputMismatch,
+        CannotApply::Other(s) => CannotApplyView::Other {
+            message: s.to_string(),
+        },
+    }
+}
+
+#[tauri::command]
+fn check_can_apply(
+    args: CheckCanApplyArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<CannotApplyView, String> {
+    use poc2_engine::CurrencyResolver as _;
+    let bundle = state.bundle.read().expect("bundle rwlock poisoned");
+    let resolver = bundle.resolver.clone();
+    drop(bundle);
+    let id = poc2_engine::ids::CurrencyId::from(args.currency.as_str());
+    let Some(currency) = resolver.resolve(&id) else {
+        return Ok(CannotApplyView::UnknownCurrency);
+    };
+    Ok(match currency.can_apply_to(&args.item) {
+        Ok(()) => CannotApplyView::Ok,
+        Err(reason) => cannot_apply_to_view(reason),
+    })
+}
+
+// ---------------------------------------------------------------------
+// Record outcome (Phase 2)
+//
+// Apply a user-chosen mod outcome to the in-memory item. This is how the
+// UI integrates "I just used Perfect Transmute and rolled X" into the
+// session's item state without going through random sampling.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct RecordOutcomeArgs {
+    item: Item,
+    outcome: OutcomeKind,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OutcomeKind {
+    /// Add a mod that the user picked from the eligible-mods list.
+    AddMod {
+        mod_id: String,
+        /// 0..=1 normalized roll along the mod's stat range. None = midpoint.
+        #[serde(default)]
+        roll: Option<f64>,
+        /// Currency that produced this mod (informational, used for rarity
+        /// transitions like Normal→Magic on Transmute).
+        #[serde(default)]
+        currency: Option<String>,
+    },
+    /// Remove a mod by (affix, index) — used for Annul/Chaos.
+    RemoveMod { affix: String, index: usize },
+    /// Replace a mod (Chaos): remove `(affix, index)` then add `mod_id`.
+    ReplaceMod {
+        remove_affix: String,
+        remove_index: usize,
+        add_mod_id: String,
+        #[serde(default)]
+        roll: Option<f64>,
+    },
+    /// Manual rarity bump (no mod change). Used when the engine doesn't
+    /// know what to roll for the currency yet.
+    SetRarity { rarity: String },
+}
+
+#[derive(Debug, Serialize)]
+struct RecordOutcomeResponse {
+    item: Item,
+    change: String,
+    explanation: String,
+}
+
+#[tauri::command]
+fn record_outcome(
+    args: RecordOutcomeArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<RecordOutcomeResponse, String> {
+    use poc2_engine::ids::ModId;
+    use poc2_engine::item::{AffixType, ModRoll};
+
+    let bundle = state.bundle.read().expect("bundle rwlock poisoned");
+    let registry = bundle.registry.clone();
+    drop(bundle);
+
+    let mut item = args.item;
+
+    match args.outcome {
+        OutcomeKind::AddMod {
+            mod_id,
+            roll,
+            currency,
+        } => {
+            let mid = ModId::from(mod_id.clone());
+            let def = registry
+                .get(&mid)
+                .ok_or_else(|| format!("unknown mod id: {mod_id}"))?;
+            // Validate ilvl + class.
+            if def.required_level > item.ilvl {
+                return Err(format!(
+                    "mod {mod_id} requires ilvl {} but item has ilvl {}",
+                    def.required_level, item.ilvl
+                ));
+            }
+            // Mod-group exclusivity.
+            for m in item.prefixes.iter().chain(item.suffixes.iter()) {
+                if let Some(g) = registry.group_of(&m.mod_id) {
+                    if g.as_str() == def.mod_group.0.as_str() {
+                        return Err(format!(
+                            "mod-group {} already occupied by {}",
+                            def.mod_group.0.as_str(),
+                            m.mod_id
+                        ));
+                    }
+                }
+            }
+            // Slot capacity (assume 3/3).
+            match def.affix_type {
+                AffixType::Prefix if item.prefixes.len() >= 3 => {
+                    return Err("no open prefix slots".into());
+                }
+                AffixType::Suffix if item.suffixes.len() >= 3 => {
+                    return Err("no open suffix slots".into());
+                }
+                _ => {}
+            }
+            let t = roll.unwrap_or(0.5).clamp(0.0, 1.0);
+            let values = def.stats.iter().map(|s| s.roll(t)).collect();
+            let roll = ModRoll {
+                mod_id: mid,
+                affix_type: def.affix_type,
+                kind: def.kind,
+                values,
+                is_fractured: false,
+            };
+            match def.affix_type {
+                AffixType::Prefix => item.prefixes.push(roll),
+                AffixType::Suffix => item.suffixes.push(roll),
+                _ => return Err("only prefix/suffix outcomes supported here".into()),
+            }
+            // Bump rarity for transmute-like flows.
+            if let Some(c) = currency.as_deref() {
+                let target = match c {
+                    "OrbOfTransmutation"
+                    | "GreaterOrbOfTransmutation"
+                    | "PerfectOrbOfTransmutation" => Some("magic"),
+                    "RegalOrb" | "GreaterRegalOrb" | "PerfectRegalOrb" => Some("rare"),
+                    "ExaltedOrb" | "GreaterExaltedOrb" | "PerfectExaltedOrb" => Some("rare"),
+                    "ChaosOrb" | "GreaterChaosOrb" | "PerfectChaosOrb" => Some("rare"),
+                    _ => None,
+                };
+                if let Some(want) = target {
+                    let want_rarity: poc2_engine::item::Rarity =
+                        serde_json::from_value(serde_json::json!(want))
+                            .map_err(|e| e.to_string())?;
+                    use poc2_engine::item::Rarity::*;
+                    let cur = item.rarity;
+                    let upgrade =
+                        matches!((cur, want_rarity), (Normal, Magic | Rare) | (Magic, Rare));
+                    if upgrade {
+                        item.rarity = want_rarity;
+                    }
+                }
+            }
+            Ok(RecordOutcomeResponse {
+                item,
+                change: "added".into(),
+                explanation: format!("added {mod_id}"),
+            })
+        }
+        OutcomeKind::RemoveMod { affix, index } => {
+            let removed_id = remove_outcome_slot(&mut item, &affix, index)?;
+            Ok(RecordOutcomeResponse {
+                item,
+                change: "removed".into(),
+                explanation: format!("removed {removed_id}"),
+            })
+        }
+        OutcomeKind::ReplaceMod {
+            remove_affix,
+            remove_index,
+            add_mod_id,
+            roll,
+        } => {
+            let removed_id = remove_outcome_slot(&mut item, &remove_affix, remove_index)?;
+            let mid = ModId::from(add_mod_id.clone());
+            let def = registry
+                .get(&mid)
+                .ok_or_else(|| format!("unknown mod id: {add_mod_id}"))?;
+            let t = roll.unwrap_or(0.5).clamp(0.0, 1.0);
+            let values = def.stats.iter().map(|s| s.roll(t)).collect();
+            let new_roll = ModRoll {
+                mod_id: mid,
+                affix_type: def.affix_type,
+                kind: def.kind,
+                values,
+                is_fractured: false,
+            };
+            match def.affix_type {
+                AffixType::Prefix => item.prefixes.push(new_roll),
+                AffixType::Suffix => item.suffixes.push(new_roll),
+                _ => return Err("only prefix/suffix replacement supported".into()),
+            }
+            Ok(RecordOutcomeResponse {
+                item,
+                change: "replaced".into(),
+                explanation: format!("replaced {removed_id} with {add_mod_id}"),
+            })
+        }
+        OutcomeKind::SetRarity { rarity } => {
+            let r: poc2_engine::item::Rarity = serde_json::from_value(serde_json::json!(rarity))
+                .map_err(|e| format!("invalid rarity {rarity}: {e}"))?;
+            item.rarity = r;
+            Ok(RecordOutcomeResponse {
+                item,
+                change: "rarity".into(),
+                explanation: format!("set rarity to {rarity}"),
+            })
+        }
+    }
+}
+
+fn remove_outcome_slot(item: &mut Item, affix: &str, index: usize) -> Result<String, String> {
+    use poc2_engine::item::AffixType;
+    let af: AffixType = match affix {
+        "prefix" => AffixType::Prefix,
+        "suffix" => AffixType::Suffix,
+        other => return Err(format!("invalid affix: {other}")),
+    };
+    let removed = match af {
+        AffixType::Prefix => {
+            if index >= item.prefixes.len() {
+                return Err("prefix index out of range".into());
+            }
+            item.prefixes.remove(index)
+        }
+        AffixType::Suffix => {
+            if index >= item.suffixes.len() {
+                return Err("suffix index out of range".into());
+            }
+            item.suffixes.remove(index)
+        }
+        _ => return Err("only prefix/suffix removal supported".into()),
+    };
+    Ok(removed.mod_id.as_str().to_string())
 }
 
 // ---------------------------------------------------------------------
@@ -1428,6 +2781,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ping,
+            asset_manifest,
+            asset_status,
+            cache_all_assets,
             recommend,
             recommend_streaming,
             run_n_trials,
@@ -1438,6 +2794,10 @@ pub fn run() {
             load_state,
             save_state,
             recovery_hints,
+            eligible_mods,
+            check_can_apply,
+            record_outcome,
+            list_bases,
             list_leagues,
             list_recipes,
             save_recipe,

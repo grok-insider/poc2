@@ -33,6 +33,13 @@ impl DivEquiv {
         max: 0.0,
     };
 
+    /// Zero-cost band — usable as a serde-default for fields that have
+    /// `DivEquiv` payloads but should default to "free" when missing
+    /// from the deserialised JSON.
+    pub const fn zero() -> Self {
+        Self::ZERO
+    }
+
     pub const fn point(d: f64) -> Self {
         Self {
             min: d,

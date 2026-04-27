@@ -1,0 +1,172 @@
+{
+  "_comment": "Curated Vaal corruption implicit fixture for Phase E (docs/80-crafter-helper-v2-plan.md §5). Source: poe2db.tw/us Vaal Implicits cross-referenced with Craft of Exile poe2 corruption tables, patch 0.4. Each entry produces one ModDefinition with kind = Corrupted, flags |= CORRUPTED_ONLY. Vaal implicits roll on top of the existing implicit slot when Vaal Orb selects the AddEnchantment outcome; they're locked once applied.",
+  "_schema": {
+    "id": "stable engine ModId (PascalCase)",
+    "name": "human-readable affix name",
+    "classes": "list of ItemClassId strings",
+    "required_level": "minimum ilvl for Vaal corruption to roll this entry",
+    "stats": "list of {stat_id, min, max}"
+  },
+  "entries": [
+    {
+      "id": "VaalImplicit_BodyArmour_PercentMaxLife",
+      "name": "+(8-12)% to Maximum Life (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 60,
+      "stats": [{"stat_id": "max_life_pct", "min": 8.0, "max": 12.0}]
+    },
+    {
+      "id": "VaalImplicit_BodyArmour_PercentMaxEnergyShield",
+      "name": "+(8-12)% to Maximum Energy Shield (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 60,
+      "stats": [{"stat_id": "increased_energy_shield", "min": 8.0, "max": 12.0}]
+    },
+    {
+      "id": "VaalImplicit_BodyArmour_AdditionalSpiritArmour",
+      "name": "+(15-25) to Spirit (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 65,
+      "stats": [{"stat_id": "additional_spirit", "min": 15.0, "max": 25.0}]
+    },
+    {
+      "id": "VaalImplicit_BodyArmour_PhysicalDamageReduction",
+      "name": "(4-8)% additional Physical Damage Reduction (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 70,
+      "stats": [{"stat_id": "additional_phys_dmg_reduction", "min": 4.0, "max": 8.0}]
+    },
+    {
+      "id": "VaalImplicit_BodyArmour_AllResistances",
+      "name": "+(8-12)% to All Elemental Resistances (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 60,
+      "stats": [{"stat_id": "all_elemental_resistances", "min": 8.0, "max": 12.0}]
+    },
+    {
+      "id": "VaalImplicit_BodyArmour_StrengthBased",
+      "name": "+(20-35) to Strength (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 50,
+      "stats": [{"stat_id": "strength", "min": 20.0, "max": 35.0}]
+    },
+    {
+      "id": "VaalImplicit_BodyArmour_DexterityBased",
+      "name": "+(20-35) to Dexterity (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 50,
+      "stats": [{"stat_id": "dexterity", "min": 20.0, "max": 35.0}]
+    },
+    {
+      "id": "VaalImplicit_BodyArmour_IntelligenceBased",
+      "name": "+(20-35) to Intelligence (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 50,
+      "stats": [{"stat_id": "intelligence", "min": 20.0, "max": 35.0}]
+    },
+    {
+      "id": "VaalImplicit_BodyArmour_ChaosResHigh",
+      "name": "+(20-30)% to Chaos Resistance (Vaal)",
+      "classes": ["BodyArmour"],
+      "required_level": 65,
+      "stats": [{"stat_id": "chaos_resistance", "min": 20.0, "max": 30.0}]
+    },
+
+    {
+      "id": "VaalImplicit_Helmet_PercentMaxLife",
+      "name": "+(6-10)% to Maximum Life (Vaal Helmet)",
+      "classes": ["Helmet"],
+      "required_level": 55,
+      "stats": [{"stat_id": "max_life_pct", "min": 6.0, "max": 10.0}]
+    },
+    {
+      "id": "VaalImplicit_Helmet_AccuracyRating",
+      "name": "+(80-130) to Accuracy Rating (Vaal Helmet)",
+      "classes": ["Helmet"],
+      "required_level": 50,
+      "stats": [{"stat_id": "accuracy_rating", "min": 80.0, "max": 130.0}]
+    },
+    {
+      "id": "VaalImplicit_Helmet_AllAttributes",
+      "name": "+(8-12) to All Attributes (Vaal Helmet)",
+      "classes": ["Helmet"],
+      "required_level": 60,
+      "stats": [{"stat_id": "all_attributes", "min": 8.0, "max": 12.0}]
+    },
+
+    {
+      "id": "VaalImplicit_Boots_MovementSpeed",
+      "name": "(8-12)% increased Movement Speed (Vaal Boots)",
+      "classes": ["Boots"],
+      "required_level": 60,
+      "stats": [{"stat_id": "movement_speed_pct", "min": 8.0, "max": 12.0}]
+    },
+    {
+      "id": "VaalImplicit_Boots_OnslaughtOnDodgeRoll",
+      "name": "Grants Onslaught for 4 seconds on Dodge Roll (Vaal Boots)",
+      "classes": ["Boots"],
+      "required_level": 65,
+      "stats": [{"stat_id": "onslaught_on_dodge_roll", "min": 4.0, "max": 4.0}]
+    },
+
+    {
+      "id": "VaalImplicit_Gloves_AttackSpeed",
+      "name": "(8-12)% increased Attack Speed (Vaal Gloves)",
+      "classes": ["Gloves"],
+      "required_level": 65,
+      "stats": [{"stat_id": "attack_speed_pct", "min": 8.0, "max": 12.0}]
+    },
+    {
+      "id": "VaalImplicit_Gloves_CastSpeed",
+      "name": "(8-12)% increased Cast Speed (Vaal Gloves)",
+      "classes": ["Gloves"],
+      "required_level": 65,
+      "stats": [{"stat_id": "cast_speed_pct", "min": 8.0, "max": 12.0}]
+    },
+
+    {
+      "id": "VaalImplicit_Ring_AdditionalProjectile",
+      "name": "Skills fire an additional Projectile (Vaal Ring)",
+      "classes": ["Ring"],
+      "required_level": 75,
+      "stats": [{"stat_id": "additional_projectile", "min": 1.0, "max": 1.0}]
+    },
+    {
+      "id": "VaalImplicit_Ring_PercentManaRegen",
+      "name": "+(15-25)% to Mana Regeneration Rate (Vaal Ring)",
+      "classes": ["Ring"],
+      "required_level": 60,
+      "stats": [{"stat_id": "percent_mana_regen", "min": 15.0, "max": 25.0}]
+    },
+
+    {
+      "id": "VaalImplicit_Amulet_AdditionalCurse",
+      "name": "+1 to maximum number of Curses on Enemies (Vaal Amulet)",
+      "classes": ["Amulet"],
+      "required_level": 75,
+      "stats": [{"stat_id": "additional_curse_limit", "min": 1.0, "max": 1.0}]
+    },
+    {
+      "id": "VaalImplicit_Amulet_AllAttributes",
+      "name": "+(10-14) to All Attributes (Vaal Amulet)",
+      "classes": ["Amulet"],
+      "required_level": 65,
+      "stats": [{"stat_id": "all_attributes", "min": 10.0, "max": 14.0}]
+    },
+
+    {
+      "id": "VaalImplicit_Belt_PercentMaxLife",
+      "name": "+(8-12)% to Maximum Life (Vaal Belt)",
+      "classes": ["Belt"],
+      "required_level": 70,
+      "stats": [{"stat_id": "max_life_pct", "min": 8.0, "max": 12.0}]
+    },
+    {
+      "id": "VaalImplicit_Belt_PotionEffect",
+      "name": "(20-30)% increased Effect of Potions (Vaal Belt)",
+      "classes": ["Belt"],
+      "required_level": 60,
+      "stats": [{"stat_id": "increased_potion_effect", "min": 20.0, "max": 30.0}]
+    }
+  ]
+}

@@ -70,8 +70,8 @@ pub use registry::{ModIndex, ModRegistry};
 pub use tag::{Tag, TagCategory};
 
 pub use currency::{
-    recombine, ApplyContext, ApplyOutcome, Bone, Catalyst, Currency, CurrencyResolver,
-    DefaultCurrencyResolver, Essence, EssenceQuality, FracturingOrb, HinekorasLock,
+    recombine, ApplyContext, ApplyOutcome, Bone, CannotApply, Catalyst, Currency, CurrencyResolver,
+    DefaultCurrencyResolver, Essence, EssenceQuality, FracturingOrb, HinekorasLock, RaritySet,
 };
 pub use engine::{apply_currency, commit_with_preview, preview_currency};
 

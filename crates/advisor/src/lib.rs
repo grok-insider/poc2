@@ -49,12 +49,12 @@ pub mod simulator;
 pub mod stash;
 
 pub use action::{from_rule_action, from_strategy_action, AdvisorAction};
-pub use candidate::{generate_candidates, Candidate};
+pub use candidate::{generate_candidates, generate_candidates_with_goal, Candidate};
 pub use goal::{is_satisfied, should_abandon, Goal};
 pub use planner::{plan, BeamConfig, PlanInput};
 pub use recommendation::{Recommendation, RecommendationSource};
 pub use recovery::collect_strategy_hints;
-pub use scorer::{action_cost, score, ScoringWeights};
+pub use scorer::{action_cost, count_keepers, occupancy_adjustment, score, ScoringWeights};
 pub use simulator::{simulate, simulate_n, McOutcome, SimulationOutcome};
 pub use stash::Stash;
 

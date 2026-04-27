@@ -6,8 +6,10 @@ use tracing::{info, warn};
 
 use crate::error::PipelineResult;
 use crate::http::make_client;
-use crate::normalize::{normalize_coe, normalize_poe2db, normalize_repoe};
-use crate::sources::{coe, poe2db, repoe};
+use crate::normalize::{
+    flag_essence_target_mods, normalize_coe, normalize_fixtures, normalize_poe2db, normalize_repoe,
+};
+use crate::sources::{coe, fixtures, poe2db, repoe};
 
 /// Pipeline build options.
 #[derive(Debug, Clone)]
@@ -88,6 +90,30 @@ pub async fn build_bundle(opts: BuildOptions) -> PipelineResult<Bundle> {
             }
         }
     }
+
+    // ---- Curated fixtures (always on — embedded in the binary) ----------
+    // Phase E: registers desecrated mods + Vaal corruption implicits.
+    // These are not scraped because poe2db page layouts shift per patch
+    // and tests cannot tolerate flaky network. The fixture is hand-
+    // maintained from poe2db's published Desecrated_Modifiers table.
+    info!("loading curated fixture data (desecrated + Vaal implicits)…");
+    match fixtures::load() {
+        Ok(snap) => {
+            info!("{}", snap.count_summary());
+            if let Err(e) = normalize_fixtures(&snap, &mut bundle) {
+                warn!(error = %e, "fixture normalization failed");
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "fixture parse failed; bundle missing desecrated/Vaal mods");
+        }
+    }
+
+    // Promote any essence-target mod that didn't already carry the
+    // ESSENCE_ONLY flag (Phase E.2 — guarantees the registry's
+    // essence pool is complete even when RePoE-fork's is_essence_only
+    // boolean missed a join).
+    flag_essence_target_mods(&mut bundle);
 
     if !opts.skip_validation {
         info!("validating bundle…");

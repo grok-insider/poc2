@@ -323,6 +323,9 @@ impl Currency for OrbOfTransmutation {
     fn name(&self) -> &'static str {
         "Orb of Transmutation"
     }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::NORMAL
+    }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if !item.is_modifiable() {
@@ -382,6 +385,9 @@ impl Currency for OrbOfAugmentation {
     fn name(&self) -> &'static str {
         "Orb of Augmentation"
     }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::MAGIC
+    }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if !item.is_modifiable() {
@@ -439,6 +445,9 @@ impl Currency for RegalOrb {
     }
     fn name(&self) -> &'static str {
         "Regal Orb"
+    }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::MAGIC
     }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
@@ -505,6 +514,9 @@ impl Currency for OrbOfAlchemy {
     fn name(&self) -> &'static str {
         "Orb of Alchemy"
     }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::NORMAL
+    }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if !item.is_modifiable() {
@@ -562,6 +574,9 @@ impl Currency for ExaltedOrb {
     }
     fn name(&self) -> &'static str {
         "Exalted Orb"
+    }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::RARE
     }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
@@ -634,6 +649,9 @@ impl Currency for OrbOfAnnulment {
     fn name(&self) -> &'static str {
         "Orb of Annulment"
     }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::MAGIC.union(crate::currency::RaritySet::RARE)
+    }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if !item.is_modifiable() {
@@ -697,6 +715,9 @@ impl Currency for ChaosOrb {
     }
     fn name(&self) -> &'static str {
         "Chaos Orb"
+    }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::RARE
     }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
@@ -797,6 +818,11 @@ impl Currency for DivineOrb {
     fn name(&self) -> &'static str {
         "Divine Orb"
     }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::MAGIC
+            .union(crate::currency::RaritySet::RARE)
+            .union(crate::currency::RaritySet::UNIQUE)
+    }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if !item.is_modifiable() {
@@ -891,6 +917,9 @@ impl Currency for VaalOrb {
     }
     fn name(&self) -> &'static str {
         "Vaal Orb"
+    }
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::all()
     }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
@@ -1027,7 +1056,8 @@ macro_rules! greater_perfect_add_currency {
         $require:expr,
         $promote:expr,
         $max_slots:expr,
-        $min_level:expr
+        $min_level:expr,
+        $valid_rarities:expr
     ) => {
         #[derive(Debug)]
         pub struct $struct {
@@ -1051,6 +1081,9 @@ macro_rules! greater_perfect_add_currency {
             }
             fn name(&self) -> &'static str {
                 $disp
+            }
+            fn valid_rarities(&self) -> crate::currency::RaritySet {
+                $valid_rarities
             }
             fn apply(
                 &self,
@@ -1089,6 +1122,9 @@ macro_rules! greater_perfect_chaos {
             fn name(&self) -> &'static str {
                 $disp
             }
+            fn valid_rarities(&self) -> crate::currency::RaritySet {
+                crate::currency::RaritySet::RARE
+            }
             fn apply(
                 &self,
                 item: &mut Item,
@@ -1108,7 +1144,8 @@ greater_perfect_add_currency!(
     Rarity::Normal,
     Some(Rarity::Magic),
     1,
-    MIN_LEVEL_GREATER_TRANSMUTE
+    MIN_LEVEL_GREATER_TRANSMUTE,
+    crate::currency::RaritySet::NORMAL
 );
 greater_perfect_add_currency!(
     PerfectOrbOfTransmutation,
@@ -1117,7 +1154,8 @@ greater_perfect_add_currency!(
     Rarity::Normal,
     Some(Rarity::Magic),
     1,
-    MIN_LEVEL_PERFECT_ALL
+    MIN_LEVEL_PERFECT_ALL,
+    crate::currency::RaritySet::NORMAL
 );
 
 // Augmentation ------------------------------------------------------------
@@ -1128,7 +1166,8 @@ greater_perfect_add_currency!(
     Rarity::Magic,
     None,
     1,
-    MIN_LEVEL_GREATER_AUGMENT
+    MIN_LEVEL_GREATER_AUGMENT,
+    crate::currency::RaritySet::MAGIC
 );
 greater_perfect_add_currency!(
     PerfectOrbOfAugmentation,
@@ -1137,7 +1176,8 @@ greater_perfect_add_currency!(
     Rarity::Magic,
     None,
     1,
-    MIN_LEVEL_PERFECT_ALL
+    MIN_LEVEL_PERFECT_ALL,
+    crate::currency::RaritySet::MAGIC
 );
 
 // Regal -------------------------------------------------------------------
@@ -1148,7 +1188,8 @@ greater_perfect_add_currency!(
     Rarity::Magic,
     Some(Rarity::Rare),
     3,
-    MIN_LEVEL_GREATER_REGAL
+    MIN_LEVEL_GREATER_REGAL,
+    crate::currency::RaritySet::MAGIC
 );
 greater_perfect_add_currency!(
     PerfectRegalOrb,
@@ -1157,7 +1198,8 @@ greater_perfect_add_currency!(
     Rarity::Magic,
     Some(Rarity::Rare),
     3,
-    MIN_LEVEL_PERFECT_ALL
+    MIN_LEVEL_PERFECT_ALL,
+    crate::currency::RaritySet::MAGIC
 );
 
 // Exalted -----------------------------------------------------------------
@@ -1168,7 +1210,8 @@ greater_perfect_add_currency!(
     Rarity::Rare,
     None,
     3,
-    MIN_LEVEL_GREATER_EXALT
+    MIN_LEVEL_GREATER_EXALT,
+    crate::currency::RaritySet::RARE
 );
 greater_perfect_add_currency!(
     PerfectExaltedOrb,
@@ -1177,7 +1220,8 @@ greater_perfect_add_currency!(
     Rarity::Rare,
     None,
     3,
-    MIN_LEVEL_PERFECT_ALL
+    MIN_LEVEL_PERFECT_ALL,
+    crate::currency::RaritySet::RARE
 );
 
 // Chaos -------------------------------------------------------------------

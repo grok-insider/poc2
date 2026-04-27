@@ -91,6 +91,58 @@ pub fn simulate(
         AdvisorAction::Stop | AdvisorAction::Abandon { .. } | AdvisorAction::Guidance { .. } => {
             noop_success(item)
         }
+        AdvisorAction::Recurring { inner, .. } => {
+            // Simulate ONE pass through the inner loop body. The planner's
+            // Monte Carlo aggregator (`simulate_n`) calls this multiple
+            // times; the per-iteration success rate it derives is what
+            // the loop estimator (Phase B.4) uses to compute mean
+            // iterations. A pass succeeds when every leaf step in
+            // `inner` succeeds; the first failure short-circuits.
+            simulate_recurring_pass(item, inner, omens_in, registry, resolver, patch, &mut rng)
+        }
+    }
+}
+
+/// One pass of a [`AdvisorAction::Recurring`] body. Each leaf step is
+/// simulated in sequence with the previous outcome's item; the pass
+/// fails on the first step that fails. The change count is summed
+/// across leaf steps.
+fn simulate_recurring_pass(
+    mut item: Item,
+    inner: &[AdvisorAction],
+    omens_in: &OmenSet,
+    registry: &ModRegistry,
+    resolver: &dyn CurrencyResolver,
+    patch: PatchVersion,
+    rng: &mut Xoshiro256PlusPlus,
+) -> SimulationOutcome {
+    let mut total_changes: u32 = 0;
+    for (idx, leaf) in inner.iter().enumerate() {
+        // Derive a per-step seed from the rng so every leaf gets a
+        // distinct deterministic stream. We can't pass a `&mut rng`
+        // through `simulate` (it constructs its own from `u64`), so
+        // we mint a fresh seed per leaf.
+        let seed = {
+            use rand::RngCore;
+            rng.next_u64().wrapping_add(idx as u64)
+        };
+        let leaf_outcome = simulate(&item, leaf, omens_in, registry, resolver, patch, seed);
+        if !leaf_outcome.success {
+            return SimulationOutcome {
+                item: leaf_outcome.item,
+                success: false,
+                error: leaf_outcome.error,
+                change_count: total_changes,
+            };
+        }
+        total_changes = total_changes.saturating_add(leaf_outcome.change_count);
+        item = leaf_outcome.item;
+    }
+    SimulationOutcome {
+        item,
+        success: true,
+        error: None,
+        change_count: total_changes,
     }
 }
 

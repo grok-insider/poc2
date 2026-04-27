@@ -50,4 +50,14 @@ pub use weights::{Confidence, WeightObservation};
 ///
 /// Bumped on any breaking change to the bundle format. Mismatch with a bundle's
 /// declared version is a hard error; the loader refuses to proceed.
+///
+/// ## History
+///
+/// - **v1** — initial release (M1, v1.0). Phase E (Desecrated + Vaal
+///   implicit fixture ingestion, `docs/80-crafter-helper-v2-plan.md` §5)
+///   was *additive* to the existing schema: it adds entries to
+///   `bundle.mods` whose `kind` and `flags` fields already round-trip in
+///   v1, so the loader keeps reading older bundles without rebuilds.
+///   Settings UI surfaces a "rebuild bundle" hint when the user opts in
+///   to the v2 advisor heuristics so they can refresh on demand.
 pub const BUNDLE_SCHEMA_VERSION: u32 = 1;

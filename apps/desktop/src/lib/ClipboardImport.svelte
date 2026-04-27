@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
+  import { invoke } from './tauri';
   import type { Item, ParseClipboardResponse } from './types';
 
   type Props = {

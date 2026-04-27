@@ -101,6 +101,14 @@ impl Currency for Essence {
         self.display_name
     }
 
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        match self.quality {
+            EssenceQuality::Lesser | EssenceQuality::Normal => crate::currency::RaritySet::NORMAL,
+            EssenceQuality::Greater => crate::currency::RaritySet::MAGIC,
+            EssenceQuality::Perfect | EssenceQuality::Corrupted => crate::currency::RaritySet::RARE,
+        }
+    }
+
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         // Sanctified items reject all essences.
         if item.sanctified {

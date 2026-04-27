@@ -91,6 +91,10 @@ impl Currency for Bone {
         "Desecration Bone"
     }
 
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::RARE
+    }
+
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if !item.is_modifiable() {
             return Err(EngineError::InvalidApplication(

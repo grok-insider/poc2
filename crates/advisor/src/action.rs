@@ -17,7 +17,17 @@
 use poc2_engine::ids::{ConceptId, CurrencyId, OmenId};
 use serde::{Deserialize, Serialize};
 
+use crate::recommendation::StopPredicate;
+
 /// One concrete next-step action the advisor can recommend.
+///
+/// Most variants represent a single in-game move. The [`Recurring`] variant
+/// (Phase B.4) captures a *loop* — an inner sequence repeated until a
+/// [`StopPredicate`] fires. This lets the advisor compress idiomatic chains
+/// like "Annul-to-1 + Chaos-spam" into one card with an iteration estimate
+/// instead of stamping out a tree of clones.
+///
+/// [`Recurring`]: AdvisorAction::Recurring
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AdvisorAction {
@@ -40,6 +50,15 @@ pub enum AdvisorAction {
     /// where no offered option carries this concept fails the step.
     /// `abandon_if_no_match` (A.2) escalates that failure into a hard
     /// abandon recommendation.
+    ///
+    /// Phase B.6 additions:
+    /// - `bone` — which bone (currency) is being applied. `None` for
+    ///   legacy reveal recommendations from the strategy DSL where the
+    ///   bone is selected at apply time. `Some(_)` when the candidate
+    ///   generator emits one recommendation per `(bone, omen)` pair.
+    /// - `omen` — which omen, if any, is pre-bound for this reveal.
+    ///   The cost of the recommendation includes the priced sum of
+    ///   `bone + omen`.
     Reveal {
         #[serde(default)]
         prefer: Vec<ConceptId>,
@@ -49,6 +68,16 @@ pub enum AdvisorAction {
         min_acceptable: Option<ConceptId>,
         #[serde(default)]
         abandon_if_no_match: bool,
+        /// Which bone the user is about to apply. `None` for the
+        /// pre-Phase-B.6 reveal shape that didn't carry a bone id.
+        #[serde(default)]
+        bone: Option<CurrencyId>,
+        /// Single omen pre-bound to this reveal action. The advisor
+        /// emits one recommendation per legal `(bone, omen)` pair so
+        /// the user sees explicit options instead of a single generic
+        /// "reveal" card.
+        #[serde(default)]
+        omen: Option<OmenId>,
     },
     /// Recombine the current item with a second one matching `other_item_id`.
     /// `other_item_id` is the stash item id selected by the candidate
@@ -70,6 +99,29 @@ pub enum AdvisorAction {
     /// 10 div on this base"). Surfaced to the user but does not advance
     /// the planner.
     Guidance { note: String },
+    /// A recurring step — repeat `inner` until `stop` is satisfied.
+    /// The advisor's loop-collapse pass produces these from sequences
+    /// the planner discovered (Annul + Chaos until target, Augment +
+    /// Regal-essence until two prefixes, etc.).
+    ///
+    /// The UI renders one card with a "Stop when: …" summary, the
+    /// expected iteration count (carried separately by the surrounding
+    /// `Recommendation::loop_estimate`), and the total cost band.
+    /// Clicking "Show inner sequence" expands `inner` so the user can
+    /// see the per-iteration moves.
+    ///
+    /// `inner` is a vector of leaf actions (no nested `Recurring` —
+    /// the planner flattens before emitting). The iteration estimate
+    /// (with its f64 fields) lives on the [`Recommendation`] alongside
+    /// `expected_cost` so this enum can stay `Eq`/`Hash`.
+    ///
+    /// [`Recommendation`]: crate::recommendation::Recommendation
+    Recurring {
+        /// One pass through the loop body.
+        inner: Vec<AdvisorAction>,
+        /// Loop exit condition.
+        stop: StopPredicate,
+    },
 }
 
 impl AdvisorAction {
@@ -82,6 +134,7 @@ impl AdvisorAction {
                 | AdvisorAction::ApplyHinekorasLock
                 | AdvisorAction::Reveal { .. }
                 | AdvisorAction::Recombine { .. }
+                | AdvisorAction::Recurring { .. }
         )
     }
 
@@ -145,6 +198,12 @@ pub fn from_strategy_action(action: &poc2_strategies::Action) -> Option<AdvisorA
             use_abyssal_echoes: *use_abyssal_echoes,
             min_acceptable: min_acceptable.clone(),
             abandon_if_no_match: *abandon_if_no_match,
+            // Strategy-emitted reveals are bone-/omen-agnostic — the
+            // executor binds them at apply time. Phase B.6's
+            // candidate-generator additions are the path that emits
+            // explicit `(bone, omen)` recommendations.
+            bone: None,
+            omen: None,
         }),
         Action::Recombine {
             other_item: _,
@@ -179,6 +238,8 @@ pub fn from_rule_action(action: &poc2_rules::SuggestionAction) -> AdvisorAction 
             use_abyssal_echoes: false,
             min_acceptable: None,
             abandon_if_no_match: false,
+            bone: None,
+            omen: None,
         },
         SuggestionAction::StopAndSell => AdvisorAction::Stop,
         SuggestionAction::Abandon { reason } => AdvisorAction::Abandon {
@@ -295,6 +356,8 @@ mod tests {
             use_abyssal_echoes,
             min_acceptable,
             abandon_if_no_match,
+            bone,
+            omen,
         } = &a
         else {
             panic!("expected Reveal, got {a:?}");
@@ -306,5 +369,7 @@ mod tests {
             Some("EnergyShield")
         );
         assert!(*abandon_if_no_match);
+        assert!(bone.is_none());
+        assert!(omen.is_none());
     }
 }

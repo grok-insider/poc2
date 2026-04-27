@@ -23,6 +23,7 @@ export interface ModRoll {
 export type QualityKind = 'Untagged' | { Tagged: string };
 
 export interface Item {
+  /** Engine-facing class id (PascalCase, e.g. "BodyArmour"). */
   base: string;
   ilvl: number;
   rarity: Rarity;
@@ -38,6 +39,12 @@ export interface Item {
   hidden_desecrated: null | unknown;
   sockets: unknown[];
   hinekora_lock: number | null;
+  /** Full bundle BaseTypeId (e.g. "Metadata/Items/Armours/BodyArmours/FourBodyInt3").
+   * UI-only field used to render base art and the human-readable base name.
+   * The engine ignores this when planning. */
+  base_type_id?: string | null;
+  /** Display name for the base (e.g. "Hexer's Robe"). UI-only. */
+  base_display_name?: string | null;
 }
 
 export interface ValuePredicate {
@@ -90,6 +97,25 @@ export interface Stash {
   unlimited?: boolean;
 }
 
+/// Phase B.5 — stop condition for a recurring step.
+export interface ConceptCriterion {
+  concept: string;
+  min_tier: number;
+  affix?: AffixType | null;
+}
+
+export interface StopPredicate {
+  concepts?: ConceptCriterion[];
+  max_mods?: number | null;
+}
+
+/// Phase B.4 — iteration estimate for a recurring step.
+export interface LoopEstimate {
+  mean_iterations: number;
+  iter_stderr: number;
+  total_cost: DivEquiv;
+}
+
 export type AdvisorAction =
   | { kind: 'apply_currency'; currency: string; omens: string[] }
   | { kind: 'activate_omen'; omen: string }
@@ -100,11 +126,20 @@ export type AdvisorAction =
       use_abyssal_echoes: boolean;
       min_acceptable: string | null;
       abandon_if_no_match: boolean;
+      /// Phase B.6 — bone the user is applying. `null` for legacy
+      /// strategy-DSL reveals that don't bind a bone yet.
+      bone?: string | null;
+      /// Phase B.6 — omen pre-bound to this reveal action.
+      omen?: string | null;
     }
   | { kind: 'recombine'; other_item_id: string; omens: string[] }
   | { kind: 'stop' }
   | { kind: 'abandon'; reason: string }
-  | { kind: 'guidance'; note: string };
+  | { kind: 'guidance'; note: string }
+  /// Phase B.4 — recurring step (loop body + stop predicate). The
+  /// associated `Recommendation.loop_estimate` carries iteration
+  /// count and total-cost estimates the UI renders alongside.
+  | { kind: 'recurring'; inner: AdvisorAction[]; stop: StopPredicate };
 
 export type RecommendationSource =
   | { kind: 'rule'; id: string; confidence: 'verified' | 'community' | 'experimental' }
@@ -122,6 +157,10 @@ export interface Recommendation {
   score: number;
   rationale: string;
   depth: number;
+  /** Phase B.4 — `loop_estimate` is set when `action.kind === 'recurring'`.
+   * Carries the mean iteration count + stderr and the total cost band
+   * the UI shows alongside the recurring-step card. */
+  loop_estimate?: LoopEstimate | null;
 }
 
 export interface RecommendArgs {
@@ -338,4 +377,136 @@ export interface RecipeSummary {
   name: string;
   description: string;
   created_at: string;
+}
+
+export interface AssetEntry {
+  id: string;
+  name: string;
+  kind: string;
+  detail_url: string | null;
+  source_url: string | null;
+  local_path: string | null;
+  status: 'missing' | 'cached' | 'failed' | string;
+  error: string | null;
+}
+
+export interface AssetManifest {
+  generated_at: string;
+  entries: AssetEntry[];
+}
+
+export interface AssetStatus {
+  total: number;
+  cached: number;
+  missing: number;
+  failed: number;
+  root: string | null;
+}
+
+export interface EligibleStatView {
+  stat_id: string;
+  min: number;
+  max: number;
+}
+
+export interface EligibleModView {
+  mod_id: string;
+  name: string | null;
+  mod_group: string;
+  affix_type: 'prefix' | 'suffix' | 'implicit' | 'enchantment';
+  kind: string;
+  concepts: string[];
+  tags: string[];
+  tier_index: number;
+  tier_count: number;
+  required_level: number;
+  eligible_now: boolean;
+  blocked_by_min_level: boolean;
+  blocked_by_group: boolean;
+  weight: number;
+  weight_share: number;
+  text_template: string | null;
+  stats: EligibleStatView[];
+  is_hybrid: boolean;
+  is_essence_only: boolean;
+  is_desecrated_only: boolean;
+  is_local: boolean;
+}
+
+export interface EligibleModsResponse {
+  item_class: string;
+  data_available: boolean;
+  affix: 'prefix' | 'suffix' | 'either';
+  patch: string;
+  mods: EligibleModView[];
+}
+
+export type RecordOutcome =
+  | { kind: 'add_mod'; mod_id: string; roll?: number; currency?: string }
+  | { kind: 'remove_mod'; affix: 'prefix' | 'suffix'; index: number }
+  | {
+      kind: 'replace_mod';
+      remove_affix: 'prefix' | 'suffix';
+      remove_index: number;
+      add_mod_id: string;
+      roll?: number;
+    }
+  | { kind: 'set_rarity'; rarity: Rarity };
+
+export interface RecordOutcomeResponse {
+  item: Item;
+  change: 'added' | 'removed' | 'replaced' | 'rarity';
+  explanation: string;
+}
+
+/// Phase A.2 — structured `CannotApply` reason from the engine, returned
+/// by `check_can_apply` Tauri command. The OutcomeDialog and AdvisorPanel
+/// use this in place of client-side rarity heuristics so the badge
+/// matches the engine's verdict exactly.
+export type CannotApplyView =
+  | { kind: 'ok' }
+  | { kind: 'wrong_rarity'; item_rarity: Rarity; expected: Rarity[] }
+  | { kind: 'no_open_slots'; affix: string }
+  | { kind: 'corrupted' }
+  | { kind: 'mirrored' }
+  | { kind: 'already_locked' }
+  | { kind: 'fracture_requires_four_mods'; current: number }
+  | { kind: 'recombinator_input_mismatch' }
+  | { kind: 'other'; message: string }
+  | { kind: 'unknown_currency' };
+
+export interface HistoryEntry {
+  id: string;
+  timestamp: string;
+  change: 'added' | 'removed' | 'replaced' | 'rarity' | string;
+  explanation: string;
+  /** Snapshot of the item before the change, used for Undo. */
+  before: Item;
+}
+
+export interface BaseSummary {
+  id: string;
+  name: string;
+  class_pascal: string;
+  class_display: string;
+  drop_level: number;
+  attribute_pool: string;
+  tags: string[];
+  release_state: string;
+}
+
+export interface BaseIconManifestEntry {
+  name: string;
+  class_pascal: string;
+  rel: string;
+  source_url: string;
+  drop_level: number;
+  attribute_pool: string;
+}
+
+export interface BaseIconManifest {
+  version: number;
+  fetched_at: string;
+  entries: Record<string, BaseIconManifestEntry>;
+  missing: { name: string; class_pascal: string; reason: string; detail_url: string }[];
 }

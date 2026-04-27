@@ -1,6 +1,9 @@
 //! Top-level bundle container.
 
-use poc2_engine::{BaseType, ItemClass, ModDefinition, PatchVersion, Tag, ENGINE_SCHEMA_VERSION};
+use poc2_engine::{
+    BaseType, ItemClass, ItemClassId, ModDefinition, ModKind, PatchVersion, Tag,
+    ENGINE_SCHEMA_VERSION,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::concepts::{ConceptDefinition, ConceptMap};
@@ -155,6 +158,27 @@ impl Bundle {
     /// Patch this bundle declares.
     pub fn game_patch(&self) -> PatchVersion {
         self.header.game_patch
+    }
+
+    /// Iterate every mod with the requested `kind` whose
+    /// `allowed_item_classes` contains `class`.
+    ///
+    /// Used by Phase E coverage tests and by the OutcomeDialog when it
+    /// renders the per-class breakdown of the desecrated / Vaal-implicit
+    /// pools (`docs/80-crafter-helper-v2-plan.md` §5).
+    pub fn mods_by_kind_for_class<'a>(
+        &'a self,
+        class: &'a ItemClassId,
+        kind: ModKind,
+    ) -> impl Iterator<Item = &'a ModDefinition> + 'a {
+        self.mods
+            .iter()
+            .filter(move |m| m.kind == kind && m.allowed_on(class))
+    }
+
+    /// Convenience: count mods of `kind` for `class`.
+    pub fn count_mods_by_kind_for_class(&self, class: &ItemClassId, kind: ModKind) -> usize {
+        self.mods_by_kind_for_class(class, kind).count()
     }
 
     /// Extract the bundle's essence catalogue as a typed list of

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
+  import { invoke } from './tauri';
   import type { Goal, Item, Recipe, RecipeSummary } from './types';
 
   type Props = {
@@ -15,6 +15,7 @@
 
   let recipes = $state<RecipeSummary[]>([]);
   let loading = $state(false);
+  let loaded = $state(false);
   let error = $state<string | null>(null);
   let newName = $state('');
   let newDescription = $state('');
@@ -25,6 +26,7 @@
     error = null;
     try {
       recipes = await invoke<RecipeSummary[]>('list_recipes');
+      loaded = true;
     } catch (e) {
       error = String(e);
     } finally {
@@ -33,7 +35,7 @@
   }
 
   $effect.pre(() => {
-    void refreshList();
+    if (!loaded && !loading) void refreshList();
   });
 
   function recipeFromCurrent(): Recipe {

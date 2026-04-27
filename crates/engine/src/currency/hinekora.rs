@@ -57,6 +57,29 @@ impl Currency for HinekorasLock {
         "Hinekora's Lock"
     }
 
+    fn valid_rarities(&self) -> crate::currency::RaritySet {
+        crate::currency::RaritySet::NORMAL
+            .union(crate::currency::RaritySet::MAGIC)
+            .union(crate::currency::RaritySet::RARE)
+    }
+
+    fn can_apply_to(&self, item: &Item) -> Result<(), crate::currency::CannotApply> {
+        let valid = self.valid_rarities();
+        if !valid.contains(item.rarity) {
+            return Err(crate::currency::CannotApply::WrongRarity {
+                item_rarity: item.rarity,
+                expected: valid,
+            });
+        }
+        if item.mirrored {
+            return Err(crate::currency::CannotApply::Mirrored);
+        }
+        if item.hinekora_lock.is_some() {
+            return Err(crate::currency::CannotApply::AlreadyLocked);
+        }
+        Ok(())
+    }
+
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
         if !item.is_modifiable() {
             return Err(EngineError::InvalidApplication(

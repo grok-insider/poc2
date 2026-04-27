@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
-  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { invoke, listen } from './tauri';
+  import type { UnlistenFn } from '@tauri-apps/api/event';
   import {
     CLIENT_LOG_EVENT,
     type ClientLogEvent,
@@ -40,6 +40,7 @@
 
   let leagues = $state<LeagueInfo[]>([]);
   let leaguesLoading = $state(false);
+  let leaguesLoaded = $state(false);
   let leaguesError = $state<string | null>(null);
 
   let pricesRefreshing = $state(false);
@@ -49,6 +50,7 @@
   // ---- Phase F — plugin manager ----
   let plugins = $state<PluginInfo[]>([]);
   let pluginsLoading = $state(false);
+  let pluginsLoaded = $state(false);
   let pluginsError = $state<string | null>(null);
 
   async function refreshPlugins() {
@@ -56,6 +58,7 @@
     pluginsError = null;
     try {
       plugins = await invoke<PluginInfo[]>('list_plugins');
+      pluginsLoaded = true;
     } catch (e) {
       pluginsError = String(e);
     } finally {
@@ -82,7 +85,7 @@
 
   // Auto-refresh once on mount.
   $effect.pre(() => {
-    if (plugins.length === 0 && !pluginsLoading) {
+    if (!pluginsLoaded && !pluginsLoading) {
       void refreshPlugins();
     }
   });
@@ -177,11 +180,12 @@
 
   // Load the leagues dropdown on mount.
   $effect.pre(() => {
-    if (leagues.length > 0 || leaguesLoading) return;
+    if (leaguesLoaded || leaguesLoading) return;
     leaguesLoading = true;
     invoke<LeagueInfo[]>('list_leagues')
       .then((ls) => {
         leagues = ls;
+        leaguesLoaded = true;
       })
       .catch((e) => {
         leaguesError = String(e);

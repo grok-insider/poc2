@@ -27,10 +27,10 @@ use poc2_rules::RuleSet;
 use poc2_strategies::{PluginPredicateDispatch, PredicateContext, StrategyRegistry};
 
 use crate::action::AdvisorAction;
-use crate::candidate::{generate_candidates, Candidate};
+use crate::candidate::{generate_candidates_with_goal, Candidate};
 use crate::goal::{is_satisfied_with_ctx, should_abandon_with_ctx, Goal};
-use crate::recommendation::{Recommendation, RecommendationSource};
-use crate::scorer::{action_cost, score, ScoringWeights};
+use crate::recommendation::{LoopEstimate, Recommendation, RecommendationSource};
+use crate::scorer::{action_cost, occupancy_adjustment, score, ScoringWeights};
 use crate::simulator::simulate_n;
 use crate::stash::Stash;
 
@@ -92,6 +92,11 @@ struct PlanNode {
     first_rationale: String,
     /// Prior of `path[0]` candidate.
     first_prior: f64,
+    /// Cumulative concept-occupancy score adjustment (Phase B.1).
+    /// Positive when each step protected keepers; negative when steps
+    /// risked them. Added to `score_node`'s base utility so chains
+    /// that respect what's already locked outrank chains that don't.
+    occupancy_score_delta: f64,
     /// Already-terminated path? (Stop / Abandon / goal-satisfied / abandon-criteria-fired)
     terminated: bool,
 }
@@ -107,6 +112,7 @@ impl PlanNode {
             first_source: None,
             first_rationale: String::new(),
             first_prior: 1.0,
+            occupancy_score_delta: 0.0,
             terminated: false,
         }
     }
@@ -167,6 +173,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
             score: f64::INFINITY,
             rationale: "Item already satisfies the target; stop and equip or sell.".into(),
             depth: 0,
+            loop_estimate: None,
         }];
     }
 
@@ -198,13 +205,16 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
                 continue;
             }
 
-            let cands = generate_candidates(
+            let cands = generate_candidates_with_goal(
                 &node.item,
                 &node_ctx,
                 input.rules,
                 input.strategies,
+                input.resolver,
                 input.stash,
                 input.patch,
+                Some(&input.goal),
+                input.registry,
             );
             for cand in cands {
                 let child = expand_with_candidate(node, &cand, depth, input);
@@ -266,6 +276,12 @@ fn expand_with_candidate(
         .seed
         .wrapping_add(u64::from(depth))
         .wrapping_add(node.path.len() as u64);
+    // Phase B.1 — compute the occupancy adjustment using the *pre-action*
+    // item, since the heuristic asks "does this currency risk what's
+    // already locked here". The simulator overwrites `next.item` below.
+    let occ = occupancy_adjustment(&cand.action, &node.item, &input.goal, input.registry);
+    next.occupancy_score_delta += occ;
+
     let mc = simulate_n(
         &node.item,
         &cand.action,
@@ -312,13 +328,19 @@ fn score_node(node: &PlanNode, input: &PlanInput<'_>, cfg: &BeamConfig) -> f64 {
         partial_progress(&node.item, &input.goal, input.registry)
     };
     let success_prob = node.accumulated_prob * progress;
-    score(
+    let base = score(
         success_prob,
         node.accumulated_cost,
         node.first_prior,
         cfg.risk,
         cfg.weights,
-    )
+    );
+    // Phase B.1 — fold the cumulative occupancy adjustment in. We also
+    // amplify by the risk-aware variance penalty so a cautious user
+    // (low risk) feels the protection bonus more strongly than a
+    // greedy user; this keeps the variance/protection signals aligned.
+    let risk_factor = 1.0 - cfg.risk.clamp(0.0, 1.0).powi(2);
+    base + node.occupancy_score_delta * risk_factor
 }
 
 /// Roughly: fraction of the goal's target specs that are satisfied.
@@ -378,6 +400,11 @@ fn node_to_recommendation(
         .unwrap_or(RecommendationSource::Heuristic {
             name: "fallback".into(),
         });
+    let loop_estimate = if let AdvisorAction::Recurring { inner, .. } = &action {
+        Some(estimate_loop_iterations(inner, node, valuator))
+    } else {
+        None
+    };
     Recommendation {
         action,
         source,
@@ -387,7 +414,43 @@ fn node_to_recommendation(
         score: score_value,
         rationale: node.first_rationale.clone(),
         depth: node.path.len() as u32,
+        loop_estimate,
     }
+}
+
+/// Estimate the iteration count and total cost for a Recurring step.
+///
+/// We fold `(per-iter success prob, per-iter cost)` into a geometric
+/// expectation. With `p` = single-iteration progress probability and
+/// per-iter cost `c`:
+///
+/// - Mean iterations until success ≈ `1 / max(p, 0.05)`.
+/// - Stderr ≈ `sqrt((1 - p) / p^2)` (standard geometric stderr).
+/// - Total cost band = inner cost × mean iterations.
+///
+/// The `node` carries the planner's MC-derived per-step success
+/// probability via `accumulated_prob`; we use that as the proxy for
+/// per-iteration progress. If the planner discovered the loop without
+/// a probability sample (e.g., heuristic-emitted), we fall back to
+/// `0.5` which produces a 2-iteration central estimate.
+fn estimate_loop_iterations(
+    inner: &[AdvisorAction],
+    node: &PlanNode,
+    valuator: &Valuator,
+) -> LoopEstimate {
+    let p = if node.accumulated_prob > 0.0 && node.accumulated_prob < 1.0 {
+        node.accumulated_prob
+    } else {
+        0.5
+    };
+    let p_floored = p.max(0.05);
+    let mean = 1.0 / p_floored;
+    let stderr = ((1.0 - p_floored) / (p_floored * p_floored)).sqrt();
+    let mut per_iter_cost = DivEquiv::ZERO;
+    for leaf in inner {
+        per_iter_cost = per_iter_cost.plus(action_cost(leaf, valuator));
+    }
+    LoopEstimate::new(mean, stderr, per_iter_cost)
 }
 
 #[cfg(test)]

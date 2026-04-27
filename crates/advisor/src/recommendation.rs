@@ -8,10 +8,134 @@
 //! The advisor returns `Vec<Recommendation>` sorted by `score` descending
 //! (highest utility first). The UI typically renders the top 3-5.
 
+use poc2_engine::ids::ConceptId;
+use poc2_engine::item::AffixType;
 use poc2_market::DivEquiv;
 use serde::{Deserialize, Serialize};
 
 use crate::action::AdvisorAction;
+
+// =========================================================================
+// Stop predicates (Phase B.5)
+// =========================================================================
+
+/// One concept the user wants present at a minimum tier.
+///
+/// Used by [`StopPredicate`] to describe when a recurring step
+/// (Annul + Chaos loop, Greater Essence chain, etc.) should stop.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ConceptCriterion {
+    /// Concept this criterion targets (e.g., `EnergyShield`,
+    /// `FireResistance`).
+    pub concept: ConceptId,
+    /// Tier ladder index — `1` means "any tier", larger numbers force
+    /// progressively higher-rolled mods. Values follow `min_tier` semantics
+    /// from `Goal.target.prefixes[].min_tier` so the same predicate engine
+    /// can decide goal-met and stop-loop.
+    pub min_tier: u8,
+    /// Restrict this criterion to a specific affix slot. `None` matches
+    /// either prefix or suffix.
+    #[serde(default)]
+    pub affix: Option<AffixType>,
+}
+
+/// Stop condition for a recurring step. The loop exits as soon as
+/// **all** criteria are simultaneously satisfied, or `max_mods` (when
+/// set) is reached, whichever comes first.
+///
+/// Surfaced in the UI as a friendly list ("Stop when: T1 ES on prefix
+/// AND T1 Cold Resistance on suffix").
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub struct StopPredicate {
+    /// Conjunction of concept-tier-affix criteria that must hold.
+    #[serde(default)]
+    pub concepts: Vec<ConceptCriterion>,
+    /// Optional cap on visible-mod count. Used for "stop when item has 4
+    /// mods" guards. `None` means uncapped.
+    #[serde(default)]
+    pub max_mods: Option<u8>,
+}
+
+impl StopPredicate {
+    /// Empty predicate — never satisfied; useful for tests where the
+    /// loop is expected to run for the configured iteration cap.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Convenience: render a one-line "Stop when: ..." summary the UI
+    /// can print directly above the recurring-step card. Returns
+    /// `"Stop when: never"` for the empty predicate.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        if self.concepts.is_empty() && self.max_mods.is_none() {
+            return "Stop when: never".into();
+        }
+        let mut parts: Vec<String> = self
+            .concepts
+            .iter()
+            .map(|c| {
+                let affix = match c.affix {
+                    Some(AffixType::Prefix) => " on prefix",
+                    Some(AffixType::Suffix) => " on suffix",
+                    Some(AffixType::Implicit) => " on implicit",
+                    Some(AffixType::Enchantment) => " on enchantment",
+                    None => "",
+                };
+                format!("T{}+ {}{}", c.min_tier, c.concept.as_str(), affix)
+            })
+            .collect();
+        if let Some(cap) = self.max_mods {
+            parts.push(format!("≤ {cap} visible mods"));
+        }
+        format!("Stop when: {}", parts.join(" AND "))
+    }
+}
+
+// =========================================================================
+// Recurring-step iteration estimate (Phase B.4)
+// =========================================================================
+
+/// Estimated iterations and total cost for a [`AdvisorAction::Recurring`]
+/// step. Computed via Monte Carlo against the inner sequence's
+/// per-step success probability; the stderr lets the UI show
+/// "this loop runs 8 ± 3 times".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoopEstimate {
+    /// Mean iteration count to reach the stop predicate.
+    #[serde(default)]
+    pub mean_iterations: f64,
+    /// Standard deviation of iteration count (Monte Carlo stderr × √n).
+    #[serde(default)]
+    pub iter_stderr: f64,
+    /// Mean total divine-equivalent cost across all iterations.
+    #[serde(default = "DivEquiv::zero")]
+    pub total_cost: DivEquiv,
+}
+
+impl Default for LoopEstimate {
+    fn default() -> Self {
+        Self {
+            mean_iterations: 0.0,
+            iter_stderr: 0.0,
+            total_cost: DivEquiv::ZERO,
+        }
+    }
+}
+
+impl LoopEstimate {
+    /// Construct an estimate from a per-iteration cost band and the
+    /// expected mean / stderr iteration count.
+    #[must_use]
+    pub fn new(mean_iterations: f64, iter_stderr: f64, per_iter_cost: DivEquiv) -> Self {
+        Self {
+            mean_iterations,
+            iter_stderr,
+            total_cost: per_iter_cost.scale(mean_iterations.max(0.0)),
+        }
+    }
+}
 
 /// Where this recommendation originated.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +186,12 @@ pub struct Recommendation {
     /// Beam-search depth at which this recommendation was found.
     /// Depth 1 = immediate; deeper = found via lookahead.
     pub depth: u32,
+    /// Loop estimate — `Some` only when `action` is
+    /// [`AdvisorAction::Recurring`]. Carries the iteration mean / stderr
+    /// and total cost so the UI can render
+    /// "this loop runs 8 ± 3 times costing 4-12 div".
+    #[serde(default)]
+    pub loop_estimate: Option<LoopEstimate>,
 }
 
 impl Recommendation {
@@ -96,9 +226,76 @@ mod tests {
             score: 4.0,
             rationale: "Chaos spam toward target.".into(),
             depth: 1,
+            loop_estimate: None,
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: Recommendation = serde_json::from_str(&s).unwrap();
         assert_eq!(back, r);
+    }
+
+    #[test]
+    fn recurring_recommendation_round_trips_through_serde() {
+        use poc2_engine::ids::ConceptId;
+        let r = Recommendation {
+            action: AdvisorAction::Recurring {
+                inner: vec![
+                    AdvisorAction::ApplyCurrency {
+                        currency: CurrencyId::from("OrbOfAnnulment"),
+                        omens: vec![],
+                    },
+                    AdvisorAction::ApplyCurrency {
+                        currency: CurrencyId::from("ChaosOrb"),
+                        omens: vec![],
+                    },
+                ],
+                stop: StopPredicate {
+                    concepts: vec![ConceptCriterion {
+                        concept: ConceptId::from("EnergyShield"),
+                        min_tier: 1,
+                        affix: Some(AffixType::Prefix),
+                    }],
+                    max_mods: Some(6),
+                },
+            },
+            source: RecommendationSource::Heuristic {
+                name: "loop-collapse-annul-chaos".into(),
+            },
+            expected_cost: DivEquiv::point(0.5),
+            expected_prob: 0.6,
+            prob_stderr: 0.1,
+            score: 3.5,
+            rationale: "Annul + Chaos until T1 ES on prefix.".into(),
+            depth: 1,
+            loop_estimate: Some(LoopEstimate {
+                mean_iterations: 8.0,
+                iter_stderr: 3.0,
+                total_cost: DivEquiv::point(4.0),
+            }),
+        };
+        let s = serde_json::to_string(&r).unwrap();
+        let back: Recommendation = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn stop_predicate_summary_renders_concepts() {
+        use poc2_engine::ids::ConceptId;
+        let p = StopPredicate {
+            concepts: vec![ConceptCriterion {
+                concept: ConceptId::from("EnergyShield"),
+                min_tier: 1,
+                affix: Some(AffixType::Prefix),
+            }],
+            max_mods: Some(6),
+        };
+        let s = p.summary();
+        assert!(s.contains("EnergyShield"));
+        assert!(s.contains("prefix"));
+        assert!(s.contains("≤ 6"));
+    }
+
+    #[test]
+    fn stop_predicate_empty_summary_is_never() {
+        assert_eq!(StopPredicate::empty().summary(), "Stop when: never");
     }
 }

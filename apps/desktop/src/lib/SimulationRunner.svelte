@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
+  import { invoke } from './tauri';
   import type { AdvisorAction, Item, TrialDistribution } from './types';
 
   type Props = {
@@ -52,6 +52,8 @@
         return 'Abandon';
       case 'guidance':
         return 'Guidance';
+      case 'recurring':
+        return `Loop · ${a.inner.length} step${a.inner.length === 1 ? '' : 's'}`;
     }
   }
 

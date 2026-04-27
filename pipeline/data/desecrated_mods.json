@@ -1,0 +1,494 @@
+{
+  "_comment": "Curated desecrated-mod fixture for Phase E (docs/80-crafter-helper-v2-plan.md §5). Source: poe2db.tw/us/Desecrated_Modifiers cross-referenced with Craft of Exile poe2 trees, patch 0.4. Each entry produces one ModDefinition with kind = Desecrated and flags |= DESECRATED_ONLY. Tier ladders are folded; we ship the mid-tier representative entry for each lord+class+slot combination because the engine's beam search treats these uniformly. Adding finer-grained tiers is a Phase B follow-up. The lord assignment (Amanamu/Kurgal/Ulaman) and the Mark-of-the-Abyssal-Lord essence-only sister entries follow the in-game catalogue.",
+  "_lords": ["Amanamu", "Kurgal", "Ulaman"],
+  "_schema": {
+    "id": "stable engine ModId (PascalCase, prefixed by class)",
+    "name": "human-readable affix name",
+    "lord": "Amanamu | Kurgal | Ulaman",
+    "affix": "Prefix | Suffix",
+    "classes": "list of ItemClassId strings",
+    "tier": "1-based ladder index (we ship one representative tier here)",
+    "required_level": "minimum ilvl to roll",
+    "stats": "list of {stat_id, min, max}"
+  },
+  "entries": [
+    {
+      "id": "BodyArmourDesecrated_Amanamu_LifeOnHit",
+      "name": "of the Abyssal Lord (Life on Hit)",
+      "lord": "Amanamu",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "life_gained_on_hit", "min": 18.0, "max": 30.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Kurgal_AdditionalSpiritFromBodyArmour",
+      "name": "of the Abyssal Lord (Spirit)",
+      "lord": "Kurgal",
+      "affix": "Prefix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "additional_spirit_from_body_armour", "min": 30.0, "max": 50.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Kurgal_AttributeAll",
+      "name": "of the Abyssal Lord (All Attributes)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 55,
+      "stats": [{"stat_id": "all_attributes", "min": 9.0, "max": 13.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Ulaman_PercentMaxLifeReg",
+      "name": "of the Abyssal Lord (% Max Life Regen)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "percent_max_life_regen", "min": 0.6, "max": 1.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Amanamu_ChaosResAndChaosThorns",
+      "name": "of the Abyssal Lord (Chaos Thorns)",
+      "lord": "Amanamu",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "chaos_thorns", "min": 12.0, "max": 18.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Kurgal_GrantsSkillElementalAegis",
+      "name": "of the Abyssal Lord (Elemental Aegis)",
+      "lord": "Kurgal",
+      "affix": "Prefix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 75,
+      "stats": [{"stat_id": "grants_skill_elemental_aegis", "min": 1.0, "max": 1.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Ulaman_ReducedExtraDamageFromCrits",
+      "name": "of the Abyssal Lord (Crit Mitigation)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "reduced_extra_damage_from_crits", "min": 14.0, "max": 22.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Amanamu_LifeRegenWhileMoving",
+      "name": "of the Abyssal Lord (Regen on Move)",
+      "lord": "Amanamu",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "life_regen_while_moving", "min": 25.0, "max": 40.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Kurgal_BlockChanceWhileHoldingShield",
+      "name": "of the Abyssal Lord (Block Chance)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "additional_block_chance", "min": 4.0, "max": 6.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Ulaman_StunThresholdGlobal",
+      "name": "of the Abyssal Lord (Stun Threshold)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "stun_threshold", "min": 18.0, "max": 28.0}]
+    },
+    {
+      "id": "BodyArmourDesecrated_Amanamu_PhysDmgTaken",
+      "name": "of the Abyssal Lord (Phys Mitigation)",
+      "lord": "Amanamu",
+      "affix": "Suffix",
+      "classes": ["BodyArmour"],
+      "tier": 1,
+      "required_level": 75,
+      "stats": [{"stat_id": "less_phys_dmg_taken", "min": 5.0, "max": 8.0}]
+    },
+
+    {
+      "id": "HelmetDesecrated_Amanamu_LifeOnKill",
+      "name": "of the Abyssal Lord (Life on Kill)",
+      "lord": "Amanamu",
+      "affix": "Suffix",
+      "classes": ["Helmet"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "life_gained_on_kill", "min": 30.0, "max": 50.0}]
+    },
+    {
+      "id": "HelmetDesecrated_Kurgal_ItemRarityFromKill",
+      "name": "of the Abyssal Lord (Rarity)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["Helmet"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "increased_rarity_from_kill", "min": 18.0, "max": 26.0}]
+    },
+    {
+      "id": "HelmetDesecrated_Ulaman_AccuracyRating",
+      "name": "of the Abyssal Lord (Accuracy)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Helmet"],
+      "tier": 1,
+      "required_level": 55,
+      "stats": [{"stat_id": "accuracy_rating", "min": 80.0, "max": 130.0}]
+    },
+    {
+      "id": "HelmetDesecrated_Amanamu_LifeLeechFromHits",
+      "name": "of the Abyssal Lord (Leech)",
+      "lord": "Amanamu",
+      "affix": "Prefix",
+      "classes": ["Helmet"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "life_leech_pct", "min": 0.6, "max": 1.0}]
+    },
+    {
+      "id": "HelmetDesecrated_Kurgal_LightRadius",
+      "name": "of the Abyssal Lord (Light Radius)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["Helmet"],
+      "tier": 1,
+      "required_level": 50,
+      "stats": [{"stat_id": "light_radius_pct", "min": 30.0, "max": 50.0}]
+    },
+    {
+      "id": "HelmetDesecrated_Ulaman_AttributeAll",
+      "name": "of the Abyssal Lord (All Attributes)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Helmet"],
+      "tier": 1,
+      "required_level": 55,
+      "stats": [{"stat_id": "all_attributes", "min": 9.0, "max": 13.0}]
+    },
+
+    {
+      "id": "BootsDesecrated_Amanamu_OnslaughtOnKill",
+      "name": "of the Abyssal Lord (Onslaught)",
+      "lord": "Amanamu",
+      "affix": "Suffix",
+      "classes": ["Boots"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "onslaught_duration", "min": 4.0, "max": 6.0}]
+    },
+    {
+      "id": "BootsDesecrated_Kurgal_AddedMovementSpeed",
+      "name": "of the Abyssal Lord (Movement Speed)",
+      "lord": "Kurgal",
+      "affix": "Prefix",
+      "classes": ["Boots"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "movement_speed_pct", "min": 30.0, "max": 35.0}]
+    },
+    {
+      "id": "BootsDesecrated_Ulaman_DodgeRoll",
+      "name": "of the Abyssal Lord (Dodge Roll Distance)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Boots"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "dodge_roll_distance", "min": 20.0, "max": 30.0}]
+    },
+    {
+      "id": "BootsDesecrated_Amanamu_SkeletonOnKill",
+      "name": "of the Abyssal Lord (Summon Skeleton)",
+      "lord": "Amanamu",
+      "affix": "Prefix",
+      "classes": ["Boots"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "summon_skeleton_chance", "min": 8.0, "max": 12.0}]
+    },
+    {
+      "id": "BootsDesecrated_Kurgal_StunImmunityOnLowLife",
+      "name": "of the Abyssal Lord (Stun Immunity)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["Boots"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "stun_immunity_on_low_life", "min": 1.0, "max": 1.0}]
+    },
+    {
+      "id": "BootsDesecrated_Ulaman_AttackSpeedOnFullLife",
+      "name": "of the Abyssal Lord (Atk Speed on Full Life)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Boots"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "attack_speed_full_life", "min": 8.0, "max": 12.0}]
+    },
+
+    {
+      "id": "GlovesDesecrated_Amanamu_AccuracyAndLifeOnKill",
+      "name": "of the Abyssal Lord (Accuracy + Life)",
+      "lord": "Amanamu",
+      "affix": "Suffix",
+      "classes": ["Gloves"],
+      "tier": 1,
+      "required_level": 55,
+      "stats": [{"stat_id": "life_gained_on_kill", "min": 22.0, "max": 35.0}]
+    },
+    {
+      "id": "GlovesDesecrated_Kurgal_CastSpeed",
+      "name": "of the Abyssal Lord (Cast Speed)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["Gloves"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "cast_speed_pct", "min": 9.0, "max": 13.0}]
+    },
+    {
+      "id": "GlovesDesecrated_Ulaman_AttackSpeedHybrid",
+      "name": "of the Abyssal Lord (Attack Speed)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Gloves"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "attack_speed_pct", "min": 9.0, "max": 13.0}]
+    },
+    {
+      "id": "GlovesDesecrated_Amanamu_ChaosDamageToAttacks",
+      "name": "of the Abyssal Lord (Chaos Damage to Attacks)",
+      "lord": "Amanamu",
+      "affix": "Prefix",
+      "classes": ["Gloves"],
+      "tier": 1,
+      "required_level": 75,
+      "stats": [{"stat_id": "added_chaos_damage_attacks_min", "min": 12.0, "max": 18.0},
+                 {"stat_id": "added_chaos_damage_attacks_max", "min": 24.0, "max": 36.0}]
+    },
+    {
+      "id": "GlovesDesecrated_Kurgal_PercentSpiritFromGloves",
+      "name": "of the Abyssal Lord (Spirit on Gloves)",
+      "lord": "Kurgal",
+      "affix": "Prefix",
+      "classes": ["Gloves"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "additional_spirit", "min": 15.0, "max": 25.0}]
+    },
+    {
+      "id": "GlovesDesecrated_Ulaman_DamagePerEnduranceCharge",
+      "name": "of the Abyssal Lord (Per Endurance Charge)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Gloves"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "increased_damage_per_endurance_charge", "min": 6.0, "max": 10.0}]
+    },
+
+    {
+      "id": "RingDesecrated_Amanamu_ManaLeechFromHits",
+      "name": "of the Abyssal Lord (Mana Leech)",
+      "lord": "Amanamu",
+      "affix": "Suffix",
+      "classes": ["Ring"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "mana_leech_pct", "min": 0.4, "max": 0.6}]
+    },
+    {
+      "id": "RingDesecrated_Kurgal_RarityOfItems",
+      "name": "of the Abyssal Lord (Rarity)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["Ring"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "increased_rarity", "min": 16.0, "max": 22.0}]
+    },
+    {
+      "id": "RingDesecrated_Ulaman_AdditionalProjectile",
+      "name": "of the Abyssal Lord (Additional Projectile)",
+      "lord": "Ulaman",
+      "affix": "Prefix",
+      "classes": ["Ring"],
+      "tier": 1,
+      "required_level": 75,
+      "stats": [{"stat_id": "additional_projectile", "min": 1.0, "max": 1.0}]
+    },
+    {
+      "id": "RingDesecrated_Amanamu_AddedChaosDamage",
+      "name": "of the Abyssal Lord (Added Chaos)",
+      "lord": "Amanamu",
+      "affix": "Prefix",
+      "classes": ["Ring"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "added_chaos_damage_attacks_min", "min": 6.0, "max": 9.0},
+                 {"stat_id": "added_chaos_damage_attacks_max", "min": 12.0, "max": 18.0}]
+    },
+    {
+      "id": "RingDesecrated_Kurgal_PercentManaRegen",
+      "name": "of the Abyssal Lord (Mana Regen)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["Ring"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "percent_mana_regen", "min": 12.0, "max": 18.0}]
+    },
+    {
+      "id": "RingDesecrated_Ulaman_GreaterChargeOnCrit",
+      "name": "of the Abyssal Lord (Charge on Crit)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Ring"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "extra_charge_on_crit_chance", "min": 8.0, "max": 12.0}]
+    },
+
+    {
+      "id": "AmuletDesecrated_Amanamu_AdditionalCurse",
+      "name": "of the Abyssal Lord (Additional Curse)",
+      "lord": "Amanamu",
+      "affix": "Prefix",
+      "classes": ["Amulet"],
+      "tier": 1,
+      "required_level": 75,
+      "stats": [{"stat_id": "additional_curse_limit", "min": 1.0, "max": 1.0}]
+    },
+    {
+      "id": "AmuletDesecrated_Kurgal_PercentEnergyShield",
+      "name": "of the Abyssal Lord (Increased ES)",
+      "lord": "Kurgal",
+      "affix": "Prefix",
+      "classes": ["Amulet"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "increased_energy_shield", "min": 14.0, "max": 22.0}]
+    },
+    {
+      "id": "AmuletDesecrated_Ulaman_GrantsSkillElementalInvocation",
+      "name": "of the Abyssal Lord (Elemental Invocation)",
+      "lord": "Ulaman",
+      "affix": "Prefix",
+      "classes": ["Amulet"],
+      "tier": 1,
+      "required_level": 75,
+      "stats": [{"stat_id": "grants_skill_elemental_invocation", "min": 1.0, "max": 1.0}]
+    },
+    {
+      "id": "AmuletDesecrated_Amanamu_PercentMinionLife",
+      "name": "of the Abyssal Lord (Minion Life)",
+      "lord": "Amanamu",
+      "affix": "Prefix",
+      "classes": ["Amulet"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "minion_life_pct", "min": 14.0, "max": 22.0}]
+    },
+    {
+      "id": "AmuletDesecrated_Kurgal_PercentSpiritOnAmulet",
+      "name": "of the Abyssal Lord (Amulet Spirit)",
+      "lord": "Kurgal",
+      "affix": "Prefix",
+      "classes": ["Amulet"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "additional_spirit", "min": 25.0, "max": 35.0}]
+    },
+    {
+      "id": "AmuletDesecrated_Ulaman_AllElementalResistances",
+      "name": "of the Abyssal Lord (All Elemental Res)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Amulet"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "all_elemental_resistances", "min": 8.0, "max": 12.0}]
+    },
+
+    {
+      "id": "BeltDesecrated_Amanamu_PercentMaxLife",
+      "name": "of the Abyssal Lord (Max Life)",
+      "lord": "Amanamu",
+      "affix": "Prefix",
+      "classes": ["Belt"],
+      "tier": 1,
+      "required_level": 70,
+      "stats": [{"stat_id": "max_life_pct", "min": 5.0, "max": 8.0}]
+    },
+    {
+      "id": "BeltDesecrated_Kurgal_FlaskChargesGained",
+      "name": "of the Abyssal Lord (Flask Charges)",
+      "lord": "Kurgal",
+      "affix": "Suffix",
+      "classes": ["Belt"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "increased_flask_charges_gained", "min": 18.0, "max": 28.0}]
+    },
+    {
+      "id": "BeltDesecrated_Ulaman_StunThresholdLocal",
+      "name": "of the Abyssal Lord (Local Stun Threshold)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Belt"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "stun_threshold", "min": 14.0, "max": 22.0}]
+    },
+    {
+      "id": "BeltDesecrated_Amanamu_PercentChaosDamage",
+      "name": "of the Abyssal Lord (Chaos Damage)",
+      "lord": "Amanamu",
+      "affix": "Prefix",
+      "classes": ["Belt"],
+      "tier": 1,
+      "required_level": 75,
+      "stats": [{"stat_id": "increased_chaos_damage", "min": 22.0, "max": 32.0}]
+    },
+    {
+      "id": "BeltDesecrated_Kurgal_PercentMaxMana",
+      "name": "of the Abyssal Lord (Max Mana)",
+      "lord": "Kurgal",
+      "affix": "Prefix",
+      "classes": ["Belt"],
+      "tier": 1,
+      "required_level": 65,
+      "stats": [{"stat_id": "max_mana_pct", "min": 8.0, "max": 12.0}]
+    },
+    {
+      "id": "BeltDesecrated_Ulaman_PotionEffect",
+      "name": "of the Abyssal Lord (Potion Effect)",
+      "lord": "Ulaman",
+      "affix": "Suffix",
+      "classes": ["Belt"],
+      "tier": 1,
+      "required_level": 60,
+      "stats": [{"stat_id": "increased_potion_effect", "min": 18.0, "max": 28.0}]
+    }
+  ]
+}

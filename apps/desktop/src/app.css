@@ -1,18 +1,23 @@
 :root {
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Inter',
+  font-family: 'Trebuchet MS', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     'Segoe UI', sans-serif;
   font-size: 14px;
   line-height: 1.5;
   color-scheme: dark;
 
-  --bg: #0d0e12;
-  --bg-elevated: #15171d;
-  --fg: #e6e8ee;
-  --fg-muted: #8b909c;
-  --accent: #f5b942;
-  --border: #23252d;
+  --bg: #07090b;
+  --bg-elevated: #101419;
+  --fg: #e7e0d2;
+  --fg-soft: #cfc4b1;
+  --fg-muted: #8f8779;
+  --accent: #c58f3d;
+  --gold: #c58f3d;
+  --gold-bright: #ffd37a;
+  --border: #29231b;
+  --border-strong: #4a351f;
+  --border-gold: rgba(197, 143, 61, 0.65);
 
-  background: var(--bg);
+  background: #07090b;
   color: var(--fg);
 }
 
@@ -46,7 +51,7 @@ header h1 {
   margin: 0 0 2rem;
 }
 
-section {
+section:not(.workspace):not(.panel) {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 6px;

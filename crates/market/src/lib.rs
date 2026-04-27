@@ -21,10 +21,15 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::doc_markdown)]
 
+pub mod cache;
 pub mod meta;
 pub mod prices;
 pub mod valuator;
 
+pub use cache::{
+    cache_file_for_league, default_cache_dir, store as cache_store, try_load as cache_try_load,
+    CacheError, CachedSnapshot, DEFAULT_TTL,
+};
 pub use meta::{
     fetch_meta_snapshot, off_meta, MetaBuild, MetaError, MetaSnapshot, NicheTarget,
     POE_NINJA_BUILDS_BASE_URL, POE_NINJA_DEFAULT_LEAGUE,

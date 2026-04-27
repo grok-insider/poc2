@@ -229,13 +229,17 @@ pub fn apply_feed_to_valuator<S: std::hash::BuildHasher>(
 
 /// The v1 baseline poe2scout slug → `CurrencyId` map.
 ///
-/// Covers basic orbs + greater/perfect tiers + Hinekora's Lock + Fracturing
-/// Orb + Mirror. Essence / omen / bone slugs are pluggable via the
-/// pipeline normalizer.
+/// Covers basic orbs, greater/perfect tiers, Hinekora's Lock, Fracturing
+/// Orb, Mirror, plus the v2 additions (Phase F): omens (priced via the
+/// `ritual` category) and essences across all four tiers + corrupted
+/// variants (priced via `essences`). Slugs come from poe2scout's `api_id`
+/// field.
 #[must_use]
+#[allow(clippy::too_many_lines)] // explicit slug → CurrencyId table is the contract
 pub fn default_id_mapping() -> HashMap<String, CurrencyId> {
     let mut m = HashMap::new();
     let pairs = [
+        // ---- Basic orbs + tier variants -------------------------------
         ("transmutation", "OrbOfTransmutation"),
         ("greater-orb-of-transmutation", "GreaterOrbOfTransmutation"),
         ("perfect-orb-of-transmutation", "PerfectOrbOfTransmutation"),
@@ -265,6 +269,101 @@ pub fn default_id_mapping() -> HashMap<String, CurrencyId> {
         ("bauble", "GlassblowersBauble"),
         ("whetstone", "BlacksmithsWhetstone"),
         ("gcp", "GemcuttersPrism"),
+        // ---- Omens (Phase F) ------------------------------------------
+        // Mapped to the same CurrencyId namespace because the advisor's
+        // scorer looks them up via `CurrencyId::from(omen.as_str())`.
+        ("omen-of-whittling", "OmenOfWhittling"),
+        ("omen-of-corruption", "OmenOfCorruption"),
+        ("omen-of-light", "OmenOfLight"),
+        ("omen-of-the-blessed", "OmenOfTheBlessed"),
+        ("omen-of-sinistral-exaltation", "OmenOfSinistralExaltation"),
+        ("omen-of-dextral-exaltation", "OmenOfDextralExaltation"),
+        ("omen-of-greater-exaltation", "OmenOfGreaterExaltation"),
+        ("omen-of-sinistral-erasure", "OmenOfSinistralErasure"),
+        ("omen-of-dextral-erasure", "OmenOfDextralErasure"),
+        (
+            "omen-of-sinistral-crystallisation",
+            "OmenOfSinistralCrystallisation",
+        ),
+        (
+            "omen-of-dextral-crystallisation",
+            "OmenOfDextralCrystallisation",
+        ),
+        ("omen-of-sinistral-necromancy", "OmenOfSinistralNecromancy"),
+        ("omen-of-dextral-necromancy", "OmenOfDextralNecromancy"),
+        ("omen-of-the-liege", "OmenOfTheLiege"),
+        ("omen-of-the-sovereign", "OmenOfTheSovereign"),
+        ("omen-of-the-blackblooded", "OmenOfBlackblooded"),
+        ("omen-of-echoes-of-the-abyss", "OmenOfEchoesOfTheAbyss"),
+        ("omen-of-sanctification", "OmenOfSanctification"),
+        // ---- Essences (Phase F) ---------------------------------------
+        // poe2scout publishes essences under `Category=essences` with
+        // slugs of the form `{quality-prefix}-essence-of-{name}` plus the
+        // bare `essence-of-{name}` for the Normal tier. We register the
+        // common keepers; the long tail matches via the pipeline-emitted
+        // essence catalogue's slug field where available.
+        ("essence-of-the-body", "EssenceOfTheBody"),
+        ("essence-of-the-mind", "EssenceOfTheMind"),
+        ("essence-of-flames", "EssenceOfFlames"),
+        ("essence-of-ice", "EssenceOfIce"),
+        ("essence-of-electricity", "EssenceOfElectricity"),
+        ("essence-of-ruin", "EssenceOfRuin"),
+        ("essence-of-battle", "EssenceOfBattle"),
+        ("essence-of-sorcery", "EssenceOfSorcery"),
+        ("essence-of-haste", "EssenceOfHaste"),
+        ("essence-of-the-infinite", "EssenceOfTheInfinite"),
+        ("essence-of-seeking", "EssenceOfSeeking"),
+        ("essence-of-insulation", "EssenceOfInsulation"),
+        ("essence-of-thawing", "EssenceOfThawing"),
+        ("essence-of-grounding", "EssenceOfGrounding"),
+        ("essence-of-alacrity", "EssenceOfAlacrity"),
+        ("essence-of-opulence", "EssenceOfOpulence"),
+        ("essence-of-command", "EssenceOfCommand"),
+        ("greater-essence-of-the-body", "GreaterEssenceOfTheBody"),
+        ("greater-essence-of-the-mind", "GreaterEssenceOfTheMind"),
+        ("greater-essence-of-flames", "GreaterEssenceOfFlames"),
+        ("greater-essence-of-ice", "GreaterEssenceOfIce"),
+        (
+            "greater-essence-of-electricity",
+            "GreaterEssenceOfElectricity",
+        ),
+        ("greater-essence-of-battle", "GreaterEssenceOfBattle"),
+        ("greater-essence-of-sorcery", "GreaterEssenceOfSorcery"),
+        ("greater-essence-of-haste", "GreaterEssenceOfHaste"),
+        (
+            "greater-essence-of-the-infinite",
+            "GreaterEssenceOfTheInfinite",
+        ),
+        ("greater-essence-of-seeking", "GreaterEssenceOfSeeking"),
+        ("perfect-essence-of-the-body", "PerfectEssenceOfTheBody"),
+        ("perfect-essence-of-the-mind", "PerfectEssenceOfTheMind"),
+        ("perfect-essence-of-flames", "PerfectEssenceOfFlames"),
+        ("perfect-essence-of-ice", "PerfectEssenceOfIce"),
+        (
+            "perfect-essence-of-electricity",
+            "PerfectEssenceOfElectricity",
+        ),
+        ("perfect-essence-of-battle", "PerfectEssenceOfBattle"),
+        ("perfect-essence-of-sorcery", "PerfectEssenceOfSorcery"),
+        ("perfect-essence-of-haste", "PerfectEssenceOfHaste"),
+        (
+            "perfect-essence-of-the-infinite",
+            "PerfectEssenceOfTheInfinite",
+        ),
+        ("perfect-essence-of-seeking", "PerfectEssenceOfSeeking"),
+        // ---- Bones (Phase F) ------------------------------------------
+        // poe2scout exposes bones under the `abyss` category. Slugs
+        // observed: `gnawed-rib`, `preserved-rib`, etc.
+        ("gnawed-rib", "GnawedRib"),
+        ("gnawed-jawbone", "GnawedJawbone"),
+        ("gnawed-collarbone", "GnawedCollarbone"),
+        ("preserved-rib", "PreservedRib"),
+        ("preserved-jawbone", "PreservedJawbone"),
+        ("preserved-collarbone", "PreservedCollarbone"),
+        ("preserved-cranium", "PreservedCranium"),
+        ("ancient-rib", "AncientRib"),
+        ("ancient-jawbone", "AncientJawbone"),
+        ("ancient-collarbone", "AncientCollarbone"),
     ];
     for (slug, id) in pairs {
         m.insert(slug.to_string(), CurrencyId::from(id));

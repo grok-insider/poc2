@@ -12,6 +12,14 @@ repository.workspace = true
 name = "poc2-pipeline"
 path = "src/main.rs"
 
+[[bin]]
+name = "fetch-base-icons"
+path = "src/bin/fetch_base_icons.rs"
+
+[[bin]]
+name = "regen-poe2db-fixtures"
+path = "src/bin/regen_poe2db_fixtures.rs"
+
 [dependencies]
 poc2-engine.workspace = true
 poc2-data.workspace = true
