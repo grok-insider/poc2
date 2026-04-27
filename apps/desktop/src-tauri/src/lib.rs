@@ -26,10 +26,12 @@ use poc2_parser::{lower_to_item, parse_clipboard_text, ParsedItem};
 use poc2_rules::RuleSet;
 use poc2_strategies::StrategyRegistry;
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tracing_subscriber::EnvFilter;
+
+mod client_log;
+use client_log::{start_client_log_watcher, ClientLogEvent, ClientLogWatcher, CLIENT_LOG_EVENT};
 
 /// Inlined seed strategies. Bundled into the binary so the app is
 /// self-contained out of the box; user-provided strategies are loaded
@@ -166,6 +168,10 @@ struct AdvisorState {
     /// aborts the prior task to avoid stale emits clobbering newer
     /// requests (per Phase C.2).
     streaming_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Active Client.txt watcher, if any (Phase D.1). Replaced by
+    /// each `start_client_log` invocation (the previous watcher's
+    /// inotify subscription is dropped automatically).
+    client_log_watcher: Arc<Mutex<Option<ClientLogWatcher>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -188,6 +194,7 @@ impl AdvisorState {
             valuator: Arc::new(Mutex::new(Valuator::default())),
             price_refresh: Arc::new(Mutex::new(None)),
             streaming_task: Arc::new(Mutex::new(None)),
+            client_log_watcher: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -854,6 +861,71 @@ async fn list_leagues() -> Result<Vec<LeagueInfo>, String> {
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
+// Client.txt watcher (Phase D.1)
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct StartClientLogArgs {
+    /// Absolute path to PoE2's Client.txt log. The Settings panel
+    /// will prompt the user to provide it.
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ClientLogStatus {
+    watching: bool,
+    path: Option<String>,
+}
+
+#[tauri::command]
+fn start_client_log(
+    args: StartClientLogArgs,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<ClientLogStatus, String> {
+    let path = PathBuf::from(args.path);
+    let app_clone = app.clone();
+    let watcher = start_client_log_watcher(&path, move |event: ClientLogEvent| {
+        let _ = app_clone.emit(CLIENT_LOG_EVENT, event);
+    })
+    .map_err(|e| e.to_string())?;
+    let mut guard = state
+        .client_log_watcher
+        .lock()
+        .map_err(|_| "client_log mutex poisoned".to_string())?;
+    *guard = Some(watcher);
+    Ok(ClientLogStatus {
+        watching: true,
+        path: Some(path.display().to_string()),
+    })
+}
+
+#[tauri::command]
+fn stop_client_log(state: tauri::State<'_, AdvisorState>) -> Result<ClientLogStatus, String> {
+    let mut guard = state
+        .client_log_watcher
+        .lock()
+        .map_err(|_| "client_log mutex poisoned".to_string())?;
+    *guard = None; // dropping the watcher releases the inotify subscription
+    Ok(ClientLogStatus {
+        watching: false,
+        path: None,
+    })
+}
+
+#[tauri::command]
+fn client_log_status(state: tauri::State<'_, AdvisorState>) -> Result<ClientLogStatus, String> {
+    let guard = state
+        .client_log_watcher
+        .lock()
+        .map_err(|_| "client_log mutex poisoned".to_string())?;
+    Ok(ClientLogStatus {
+        watching: guard.is_some(),
+        path: None, // we don't store the path on AdvisorState; UI tracks it
+    })
+}
+
+// ---------------------------------------------------------------------
 // Simulation runner (Phase C.3) — bulk Monte-Carlo of one action.
 // ---------------------------------------------------------------------
 
@@ -1189,6 +1261,9 @@ pub fn run() {
             load_recipe,
             delete_recipe,
             export_recipe_toml,
+            start_client_log,
+            stop_client_log,
+            client_log_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

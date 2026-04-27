@@ -1,9 +1,13 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import type {
-    LeagueInfo,
-    ReloadBundleResponse,
-    RefreshPricesResponse,
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import {
+    CLIENT_LOG_EVENT,
+    type ClientLogEvent,
+    type ClientLogStatus,
+    type LeagueInfo,
+    type ReloadBundleResponse,
+    type RefreshPricesResponse,
   } from './types';
 
   type Props = {
@@ -39,6 +43,75 @@
   let pricesRefreshing = $state(false);
   let pricesError = $state<string | null>(null);
   let lastRefreshAt = $state<string | null>(null);
+
+  // ---- Phase D.1 Client.txt watcher ----
+  let clientLogPath = $state('');
+  let clientLogStatus = $state<ClientLogStatus | null>(null);
+  let clientLogError = $state<string | null>(null);
+  let clientLogEvents = $state<ClientLogEvent[]>([]);
+  let unlistenClientLog: UnlistenFn | null = null;
+
+  $effect(() => {
+    let cancelled = false;
+    listen<ClientLogEvent>(CLIENT_LOG_EVENT, (ev) => {
+      if (cancelled) return;
+      // Keep last 5 entries.
+      clientLogEvents = [ev.payload, ...clientLogEvents].slice(0, 5);
+    }).then((u) => {
+      if (cancelled) {
+        u();
+        return;
+      }
+      unlistenClientLog = u;
+    });
+    return () => {
+      cancelled = true;
+      if (unlistenClientLog) {
+        unlistenClientLog();
+        unlistenClientLog = null;
+      }
+    };
+  });
+
+  async function startClientLog() {
+    if (!clientLogPath.trim()) {
+      clientLogError = 'Set the Client.txt path first.';
+      return;
+    }
+    clientLogError = null;
+    try {
+      clientLogStatus = await invoke<ClientLogStatus>('start_client_log', {
+        args: { path: clientLogPath.trim() },
+      });
+    } catch (e) {
+      clientLogError = String(e);
+    }
+  }
+
+  async function stopClientLog() {
+    try {
+      clientLogStatus = await invoke<ClientLogStatus>('stop_client_log');
+    } catch (e) {
+      clientLogError = String(e);
+    }
+  }
+
+  function describeClientLogEvent(ev: ClientLogEvent): string {
+    switch (ev.kind) {
+      case 'area_entered':
+        return `entered: ${ev.area}`;
+      case 'player_joined':
+        return `joined: ${ev.player}`;
+      case 'death':
+        return ev.killer
+          ? `${ev.victim} died to ${ev.killer}`
+          : `${ev.victim} died`;
+      case 'whisper':
+        return `@${ev.from}: ${ev.message}`;
+      case 'other':
+        return ev.line.slice(0, 60);
+    }
+  }
 
   // Load the leagues dropdown on mount.
   $effect.pre(() => {
@@ -193,6 +266,36 @@
     {/if}
   </div>
 
+  <!-- ============== Client.txt watcher (Phase D.1) ============== -->
+  <div class="block">
+    <h3>Client.txt watcher</h3>
+    <div class="bundle-row">
+      <input
+        type="text"
+        placeholder="Absolute path to PoE2 Client.txt"
+        bind:value={clientLogPath}
+      />
+      {#if clientLogStatus?.watching}
+        <button onclick={stopClientLog} class="secondary">Stop</button>
+      {:else}
+        <button onclick={startClientLog}>Watch</button>
+      {/if}
+    </div>
+    {#if clientLogError}
+      <pre class="error">{clientLogError}</pre>
+    {/if}
+    {#if clientLogStatus?.watching}
+      <p class="muted">watching: {clientLogStatus.path}</p>
+    {/if}
+    {#if clientLogEvents.length > 0}
+      <ul class="log-feed">
+        {#each clientLogEvents as ev, i (i)}
+          <li>{describeClientLogEvent(ev)}</li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
+
   <!-- ============== Plugin manager scaffold (Phase F.6) ============== -->
   <div class="block muted-block">
     <h3>Plugins (Phase F.6)</h3>
@@ -286,6 +389,32 @@
 
   code {
     color: var(--accent);
+    font-family: ui-monospace, 'Fira Code', monospace;
+  }
+
+  button.secondary {
+    background: var(--bg);
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+    font-weight: 400;
+  }
+
+  .log-feed {
+    list-style: none;
+    padding: 0;
+    margin: 0.4rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .log-feed li {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.75rem;
+    color: var(--fg);
     font-family: ui-monospace, 'Fira Code', monospace;
   }
 </style>

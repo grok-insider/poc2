@@ -153,6 +153,21 @@ export interface StreamingProgressEvent {
 /// Topic the streaming planner emits to.
 export const ADVISOR_PROGRESS_EVENT = 'advisor://progress';
 
+/// Phase D.1 — Client.txt log watcher.
+export type ClientLogEvent =
+  | { kind: 'area_entered'; area: string; line: string }
+  | { kind: 'player_joined'; player: string; line: string }
+  | { kind: 'death'; victim: string; killer: string | null; line: string }
+  | { kind: 'whisper'; from: string; message: string; line: string }
+  | { kind: 'other'; line: string };
+
+export interface ClientLogStatus {
+  watching: boolean;
+  path: string | null;
+}
+
+export const CLIENT_LOG_EVENT = 'client-log://event';
+
 /// Phase C.3 — bulk simulation distribution.
 export interface TrialDistribution {
   n_trials: number;
