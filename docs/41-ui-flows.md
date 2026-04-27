@@ -124,15 +124,51 @@ In addition to the 3 seed strategies bundled into the binary
 `$XDG_CONFIG_HOME/poc2/strategies/*.toml` and loads every strategy
 that parses + validates. Per-file failures are warned-and-skipped.
 
-## Future M6 Polish
+## Phase B Polish (shipped)
 
-- **Target panel** for editing the `Goal` (currently bound to the
-  hard-coded worked-example goal in `lib/fixtures.ts`).
-- **Recovery panel** that surfaces strategy step `recovery` hints when
-  the last action's outcome was a failure.
-- **Simulation runner** — a button that runs N Monte Carlo trials of a
-  candidate plan and renders cost / probability histograms.
-- **Recipe library** — save / load / share strategies + goals to
-  `$XDG_CONFIG_HOME/poc2/recipes/`.
-- **Settings** page for risk slider persistence, valuator overrides,
-  trade league selection, and bundle update controls.
+- **Target panel** (`TargetPanel.svelte`) edits the `Goal`
+  interactively; persists via `save_state` to
+  `$XDG_CONFIG_HOME/poc2/state.toml`.
+- **Recovery panel** (`RecoveryPanel.svelte`) surfaces strategy step
+  `recovery` hints when the user toggles "Last action failed".
+- **Settings panel** (`SettingsPanel.svelte`): bundle hot-swap,
+  league dropdown, prices auto-refresh interval, Client.txt watcher
+  toggle.
+- **Recipe library** (`RecipeLibrary.svelte`) — save / load / share
+  recipes via `$XDG_CONFIG_HOME/poc2/recipes/<name>.toml`.
+- **Simulation runner** (`SimulationRunner.svelte`) — runs N Monte
+  Carlo trials of a candidate action; renders an inline-SVG
+  change-count histogram.
+
+## Hyprland integration (Phase D.2)
+
+Per ADR-0009, the v1 always-on-top behaviour is implemented as a
+documented Hyprland configuration recipe rather than a custom Wayland
+layer-shell surface.
+
+Add to `~/.config/hypr/hyprland.conf` (or your NixOS Hyprland module):
+
+```hyprlang
+windowrulev2 = float, class:^(ai\.anomaly\.poc2)$
+windowrulev2 = pin, class:^(ai\.anomaly\.poc2)$
+windowrulev2 = noborder, class:^(ai\.anomaly\.poc2)$
+windowrulev2 = size 480 720, class:^(ai\.anomaly\.poc2)$
+windowrulev2 = move 100% 0, class:^(ai\.anomaly\.poc2)$
+windowrulev2 = opacity 0.95, class:^(ai\.anomaly\.poc2)$
+```
+
+`pin` keeps the window on top across workspaces; `float` keeps it
+out of the tiling stack; `move 100% 0` docks it to the right edge.
+Run PoE2 in borderless windowed mode (not exclusive fullscreen) for
+the overlay to actually float on top.
+
+Clipboard reads use `wl-clipboard` via
+`tauri-plugin-clipboard-manager` and work unchanged on Wayland.
+
+## Live integration (Phase D)
+
+| Subsystem | Tauri command | Event topic |
+|---|---|---|
+| Client.txt watcher (D.1) | `start_client_log` / `stop_client_log` / `client_log_status` | `client-log://event` |
+| Always-on-top (D.2) | (Hyprland windowrulev2; no Tauri command) | — |
+| Trade-search URL (D.3) | `trade_search` | — (opens browser) |
