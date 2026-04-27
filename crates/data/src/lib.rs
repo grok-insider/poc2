@@ -58,6 +58,14 @@ pub use weights::{Confidence, WeightObservation};
 ///   was *additive* to the existing schema: it adds entries to
 ///   `bundle.mods` whose `kind` and `flags` fields already round-trip in
 ///   v1, so the loader keeps reading older bundles without rebuilds.
-///   Settings UI surfaces a "rebuild bundle" hint when the user opts in
-///   to the v2 advisor heuristics so they can refresh on demand.
-pub const BUNDLE_SCHEMA_VERSION: u32 = 1;
+/// - **v2** — v3 (M14.7) introduces runtime consumers of `bundle.weights`
+///   (M14.1's `ModRegistry::weight_for`) and `bundle.base_items` (M14.2's
+///   `BaseRegistry`). v1 bundles missing or stale on either field would
+///   silently degrade the trained-policy advisor's accuracy, so the
+///   loader now hard-rejects v1 bundles. Bundles must be rebuilt via
+///   `cargo run -p poc2-pipeline -- build` after upgrading. The Tauri
+///   loader detects v1 on disk and surfaces a structured "rebuild
+///   bundle" event to the desktop UI; user state under
+///   `~/.config/poc2/state.toml` and `~/.config/poc2/recipes/` is
+///   wiped on the first successful v2 launch (cache/ is preserved).
+pub const BUNDLE_SCHEMA_VERSION: u32 = 2;

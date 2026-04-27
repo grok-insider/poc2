@@ -162,6 +162,30 @@ struct BundleState {
     bundle_path: Option<PathBuf>,
     bundle_patch: Option<PatchVersion>,
     asset_seeds: Arc<Vec<AssetEntry>>,
+    /// Structured M14.7 migration warning surfaced when the loader
+    /// found a schema-mismatched bundle on disk (typically a v1
+    /// bundle from a pre-v3 install). `None` means "no migration
+    /// needed". The frontend reads this via `bundle_migration_status`
+    /// to render the rebuild dialog.
+    migration_warning: Option<BundleMigrationWarning>,
+}
+
+/// Structured payload for the v1 → v2 (or future schema bumps)
+/// migration UI. Populated by the loader when it finds a bundle that
+/// cannot be loaded due to schema mismatch.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+struct BundleMigrationWarning {
+    bundle_path: String,
+    bundle_version: u32,
+    loader_version: u32,
+    /// Pre-formatted, human-readable message including the rebuild
+    /// command. Surfaced verbatim by the desktop UI's migration dialog.
+    message: String,
+    /// Whether the loader also detected legacy state (`state.toml` with
+    /// the previous schema marker) that will be wiped on next launch.
+    /// `false` when state is already on the current schema or absent.
+    state_will_be_reset: bool,
 }
 
 /// Shared application state. Built once at startup. Bundle-derived
@@ -295,13 +319,26 @@ fn build_plugin_host() -> PluginHost {
 /// directly. When `None` runs the standard XDG-aware search per
 /// [`load_bundle_from_known_paths`].
 fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
-    let loaded = match path_override {
-        Some(p) => try_load_bundle(p),
+    let outcome = match path_override {
+        Some(p) => match try_load_bundle(p) {
+            BundleLoadOutcome::Loaded(b, path) => BundleSearchOutcome::Loaded(b, path),
+            BundleLoadOutcome::SchemaMismatch {
+                path,
+                bundle_version,
+                loader_version,
+            } => BundleSearchOutcome::SchemaMismatch {
+                path,
+                bundle_version,
+                loader_version,
+            },
+            BundleLoadOutcome::Other => BundleSearchOutcome::NotFound,
+        },
         None => load_bundle_from_known_paths(),
     };
+    let mut migration_warning: Option<BundleMigrationWarning> = None;
     let (registry, base_registry, bundle_path, bundle_patch, essences, catalysts, asset_seeds) =
-        match loaded {
-            Some((bundle, path)) => {
+        match outcome {
+            BundleSearchOutcome::Loaded(bundle, path) => {
                 let patch = bundle.game_patch();
                 tracing::info!(
                     path = %path.display(),
@@ -315,6 +352,22 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
                     weights = bundle.weights.len(),
                     "loaded data bundle"
                 );
+                // M14.7c: when the active bundle is the v3 schema, check
+                // legacy state.toml and wipe it. Returns true when state
+                // was reset, which feeds into the migration_warning.
+                let state_was_reset = legacy_state_hard_reset_if_needed();
+                if state_was_reset {
+                    migration_warning = Some(BundleMigrationWarning {
+                        bundle_path: path.display().to_string(),
+                        bundle_version: poc2_data::BUNDLE_SCHEMA_VERSION,
+                        loader_version: poc2_data::BUNDLE_SCHEMA_VERSION,
+                        message: "Bundle is on the current v3 schema. Legacy user state \
+                                  (state.toml + recipes/) was reset to a clean slate per \
+                                  the v3 hard-reset migration policy. Cache is preserved."
+                            .into(),
+                        state_will_be_reset: true,
+                    });
+                }
                 let asset_seeds = build_asset_seeds(&bundle);
                 let essences = bundle.essence_catalogue();
                 let catalysts = bundle.catalyst_catalogue();
@@ -338,7 +391,41 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
                     asset_seeds,
                 )
             }
-            None => {
+            BundleSearchOutcome::SchemaMismatch {
+                path,
+                bundle_version,
+                loader_version,
+            } => {
+                tracing::warn!(
+                    path = %path.display(),
+                    bundle_version,
+                    loader_version,
+                    "bundle on disk is the wrong schema version (M14.7 v1→v2)"
+                );
+                let message = format!(
+                    "Found a v{bundle_version} bundle at {} but this build expects v{loader_version}. \
+                     Rebuild the bundle via `cargo run -p poc2-pipeline -- build` to upgrade. \
+                     The advisor is running with an empty registry until the bundle is rebuilt.",
+                    path.display()
+                );
+                migration_warning = Some(BundleMigrationWarning {
+                    bundle_path: path.display().to_string(),
+                    bundle_version,
+                    loader_version,
+                    message,
+                    state_will_be_reset: true,
+                });
+                (
+                    ModRegistry::from_mods(Vec::new(), Vec::new()),
+                    poc2_engine::BaseRegistry::default(),
+                    None,
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                    build_asset_seeds_without_bundle(),
+                )
+            }
+            BundleSearchOutcome::NotFound => {
                 tracing::warn!(
                     "no data bundle found; running with empty mod registry. \
                      Build a bundle via the pipeline (`cargo run -p poc2-pipeline -- build`) \
@@ -380,7 +467,78 @@ fn build_bundle_state(path_override: Option<&Path>) -> BundleState {
         bundle_path,
         bundle_patch,
         asset_seeds: Arc::new(asset_seeds),
+        migration_warning,
     }
+}
+
+/// M14.7c — wipe legacy `state.toml` + `recipes/` if present.
+///
+/// Cache (`~/.config/poc2/cache/`) is preserved per the v3 plan §10:
+/// price + meta caches are bundle-version-agnostic.
+///
+/// The presence-detection heuristic is intentionally simple: any
+/// `state.toml` file at the conventional path is considered legacy
+/// when this code runs for the first time after a v2 upgrade. We
+/// drop a `state.toml.v3-migrated` marker file beside the wiped
+/// `state.toml` so subsequent launches don't repeatedly wipe the
+/// freshly-written v3 state. Returns `true` iff a wipe happened.
+fn legacy_state_hard_reset_if_needed() -> bool {
+    let Some(state_dir) = poc2_state_dir() else {
+        return false;
+    };
+    let marker = state_dir.join(".v3-migrated");
+    if marker.exists() {
+        return false;
+    }
+    let mut wiped_anything = false;
+    let state_toml = state_dir.join("state.toml");
+    if state_toml.exists() {
+        match std::fs::remove_file(&state_toml) {
+            Ok(()) => {
+                tracing::info!(path = %state_toml.display(), "M14.7c: wiped legacy state.toml");
+                wiped_anything = true;
+            }
+            Err(e) => {
+                tracing::warn!(path = %state_toml.display(), error = %e, "failed to wipe legacy state.toml");
+            }
+        }
+    }
+    let recipes_dir = state_dir.join("recipes");
+    if recipes_dir.exists() {
+        match std::fs::remove_dir_all(&recipes_dir) {
+            Ok(()) => {
+                tracing::info!(
+                    path = %recipes_dir.display(),
+                    "M14.7c: wiped legacy recipes/"
+                );
+                wiped_anything = true;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    path = %recipes_dir.display(),
+                    error = %e,
+                    "failed to wipe legacy recipes/"
+                );
+            }
+        }
+    }
+    // Drop the marker so we never wipe again.
+    if let Err(e) = std::fs::create_dir_all(&state_dir) {
+        tracing::warn!(error = %e, "failed to create state dir for v3 marker");
+    }
+    if let Err(e) = std::fs::write(&marker, b"v3 migration marker; do not delete\n") {
+        tracing::warn!(path = %marker.display(), error = %e, "failed to write v3 migration marker");
+    }
+    wiped_anything
+}
+
+/// Resolve `~/.config/poc2/` (or `$XDG_CONFIG_HOME/poc2/`) — the canonical
+/// state directory used by the desktop app.
+fn poc2_state_dir() -> Option<PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(Path::new(&xdg).join("poc2"));
+    }
+    std::env::var_os("HOME").map(|home| Path::new(&home).join(".config/poc2"))
 }
 
 fn build_asset_seeds(bundle: &Bundle) -> Vec<AssetEntry> {
@@ -662,12 +820,39 @@ fn essence_suffix(name: &str) -> String {
 /// 3. `$XDG_DATA_HOME/poc2/bundles/...` or `~/.local/share/poc2/bundles/...`
 ///
 /// Within each directory, the most recently modified file wins.
-fn load_bundle_from_known_paths() -> Option<(Bundle, PathBuf)> {
+/// Search outcome variant of [`try_load_bundle`] for the bundle-search
+/// helpers. Distinguishes a successful load from "I found a bundle but
+/// it's the wrong schema (rebuild needed)" vs "no bundle at all".
+enum BundleSearchOutcome {
+    Loaded(Bundle, PathBuf),
+    SchemaMismatch {
+        path: PathBuf,
+        bundle_version: u32,
+        loader_version: u32,
+    },
+    NotFound,
+}
+
+fn load_bundle_from_known_paths() -> BundleSearchOutcome {
     if let Ok(env_path) = std::env::var("POC2_BUNDLE") {
         let p = PathBuf::from(env_path);
         if p.is_file() {
-            if let Some((b, _)) = try_load_bundle(&p) {
-                return Some((b, p));
+            match try_load_bundle(&p) {
+                BundleLoadOutcome::Loaded(b, path) => {
+                    return BundleSearchOutcome::Loaded(b, path);
+                }
+                BundleLoadOutcome::SchemaMismatch {
+                    path,
+                    bundle_version,
+                    loader_version,
+                } => {
+                    return BundleSearchOutcome::SchemaMismatch {
+                        path,
+                        bundle_version,
+                        loader_version,
+                    };
+                }
+                BundleLoadOutcome::Other => {}
             }
         }
     }
@@ -682,19 +867,38 @@ fn load_bundle_from_known_paths() -> Option<(Bundle, PathBuf)> {
     } else if let Some(home) = std::env::var_os("HOME") {
         search_dirs.push(Path::new(&home).join(".local/share/poc2/bundles"));
     }
+    let mut latest_mismatch: Option<(PathBuf, u32, u32)> = None;
     for dir in search_dirs {
-        if let Some((bundle, path)) = newest_bundle_in_dir(&dir) {
-            return Some((bundle, path));
+        match search_bundle_in_dir(&dir) {
+            BundleSearchOutcome::Loaded(b, p) => return BundleSearchOutcome::Loaded(b, p),
+            BundleSearchOutcome::SchemaMismatch {
+                path,
+                bundle_version,
+                loader_version,
+            } if latest_mismatch.is_none() => {
+                latest_mismatch = Some((path, bundle_version, loader_version));
+            }
+            _ => {}
         }
     }
-    None
+    if let Some((path, bundle_version, loader_version)) = latest_mismatch {
+        BundleSearchOutcome::SchemaMismatch {
+            path,
+            bundle_version,
+            loader_version,
+        }
+    } else {
+        BundleSearchOutcome::NotFound
+    }
 }
 
 /// Find the most recently modified `*.bundle.json{,.gz}` in `dir` and load
-/// it. Returns `None` if the directory doesn't exist or no candidate
-/// parses cleanly.
-fn newest_bundle_in_dir(dir: &Path) -> Option<(Bundle, PathBuf)> {
-    let entries = std::fs::read_dir(dir).ok()?;
+/// it. Surfaces a [`BundleSearchOutcome`] so the caller can distinguish a
+/// schema-mismatch (rebuild needed) from a generic miss.
+fn search_bundle_in_dir(dir: &Path) -> BundleSearchOutcome {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return BundleSearchOutcome::NotFound;
+    };
     let mut candidates: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
     for entry in entries.flatten() {
         let p = entry.path();
@@ -712,12 +916,29 @@ fn newest_bundle_in_dir(dir: &Path) -> Option<(Bundle, PathBuf)> {
         candidates.push((p, mtime));
     }
     candidates.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
+    let mut latest_mismatch: Option<(PathBuf, u32, u32)> = None;
     for (path, _) in candidates {
-        if let Some((b, p)) = try_load_bundle(&path) {
-            return Some((b, p));
+        match try_load_bundle(&path) {
+            BundleLoadOutcome::Loaded(b, p) => return BundleSearchOutcome::Loaded(b, p),
+            BundleLoadOutcome::SchemaMismatch {
+                path,
+                bundle_version,
+                loader_version,
+            } if latest_mismatch.is_none() => {
+                latest_mismatch = Some((path, bundle_version, loader_version));
+            }
+            _ => {}
         }
     }
-    None
+    if let Some((path, bundle_version, loader_version)) = latest_mismatch {
+        BundleSearchOutcome::SchemaMismatch {
+            path,
+            bundle_version,
+            loader_version,
+        }
+    } else {
+        BundleSearchOutcome::NotFound
+    }
 }
 
 /// Load every `*.toml` strategy in `$XDG_CONFIG_HOME/poc2/strategies/`
@@ -754,18 +975,51 @@ fn load_user_strategies(out: &mut Vec<poc2_strategies::Strategy>) {
     }
 }
 
-fn try_load_bundle(path: &Path) -> Option<(Bundle, PathBuf)> {
+/// Outcome of a single bundle-load attempt.
+///
+/// Distinguishes "loaded fine", "loadable but bundle was rejected because
+/// it was built against an older schema (rebuild needed)", and "other
+/// failure (read/parse/validation)". The desktop UI surfaces the first
+/// two via dedicated dialogs; "other" stays as a tracing warning.
+enum BundleLoadOutcome {
+    Loaded(Bundle, PathBuf),
+    /// Bundle parsed but its `schema_version` doesn't match
+    /// [`poc2_data::BUNDLE_SCHEMA_VERSION`]. The most common case in
+    /// v3 is a leftover v1 bundle from a pre-v3 install.
+    SchemaMismatch {
+        path: PathBuf,
+        bundle_version: u32,
+        loader_version: u32,
+    },
+    /// Read/parse failure or non-schema validation error.
+    Other,
+}
+
+fn try_load_bundle(path: &Path) -> BundleLoadOutcome {
     match poc2_data::io::read_bundle(path) {
         Ok(b) => match b.validate() {
-            Ok(()) => Some((b, path.to_path_buf())),
+            Ok(()) => BundleLoadOutcome::Loaded(b, path.to_path_buf()),
+            Err(poc2_data::DataError::SchemaVersionMismatch { bundle, expected }) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    bundle_version = bundle,
+                    loader_version = expected,
+                    "bundle schema mismatch — rebuild needed (M14.7 v1→v2)"
+                );
+                BundleLoadOutcome::SchemaMismatch {
+                    path: path.to_path_buf(),
+                    bundle_version: bundle,
+                    loader_version: expected,
+                }
+            }
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "bundle failed validation");
-                None
+                BundleLoadOutcome::Other
             }
         },
         Err(e) => {
             tracing::warn!(path = %path.display(), error = %e, "bundle read failed");
-            None
+            BundleLoadOutcome::Other
         }
     }
 }
@@ -817,6 +1071,24 @@ fn ping() -> String {
         env!("CARGO_PKG_VERSION"),
         poc2_engine::ENGINE_SCHEMA_VERSION
     )
+}
+
+/// M14.7b — surface the bundle migration state to the desktop UI.
+///
+/// Returns `None` when the bundle loaded cleanly under the current
+/// schema. Returns a structured warning when the loader detected:
+/// - A bundle on disk built against an older schema (rebuild needed).
+/// - Legacy state (`state.toml` / `recipes/`) that was wiped on first
+///   v3 launch per the hard-reset migration policy.
+///
+/// The UI consumes this once on app start to render the migration
+/// dialog.
+#[tauri::command]
+fn bundle_migration_status(
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<Option<BundleMigrationWarning>, String> {
+    let bundle = state.bundle.read().map_err(|e| e.to_string())?;
+    Ok(bundle.migration_warning.clone())
 }
 
 #[tauri::command]
@@ -2804,6 +3076,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ping,
+            bundle_migration_status,
             asset_manifest,
             asset_status,
             cache_all_assets,

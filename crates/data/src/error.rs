@@ -6,7 +6,10 @@ pub type DataResult<T> = Result<T, DataError>;
 
 #[derive(Debug, Error)]
 pub enum DataError {
-    #[error("bundle schema version mismatch: bundle declares {bundle}, loader expects {expected}")]
+    #[error(
+        "bundle schema version mismatch: bundle declares v{bundle}, loader expects v{expected}. \
+         Rebuild the bundle via `cargo run -p poc2-pipeline -- build` to upgrade."
+    )]
     SchemaVersionMismatch { bundle: u32, expected: u32 },
 
     #[error(

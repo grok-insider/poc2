@@ -37,7 +37,11 @@ toml.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 tokio = { workspace = true, features = ["full"] }
-reqwest.workspace = true
+# `blocking` is needed by the optional live `ReqwestTradeFetcher`
+# (M14.7d). Cargo features are additive and the type itself is gated
+# behind the `trade-scrape` feature, so the blocking subsystem only
+# ships on builds that actually opt into the live trade scraper.
+reqwest = { workspace = true, features = ["blocking"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 indexmap.workspace = true
@@ -48,6 +52,14 @@ sha2 = "0.10"
 hex = "0.4"
 regex = "1.11"
 scraper = "0.20"
+
+[features]
+# `trade-scrape` enables the live `ReqwestTradeFetcher` in
+# `crate::sources::trade`. The default build path keeps the parser,
+# cache, and observation-emission machinery available without pulling
+# the live HTTP fetcher into compilation paths that don't need it.
+default = []
+trade-scrape = []
 
 [dev-dependencies]
 tempfile = "3.13"

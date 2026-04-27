@@ -11,3 +11,4 @@ pub mod coe;
 pub mod fixtures;
 pub mod poe2db;
 pub mod repoe;
+pub mod trade;

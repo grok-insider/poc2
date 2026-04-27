@@ -409,6 +409,36 @@ mod tests {
     }
 
     #[test]
+    fn legacy_v1_bundle_is_rejected_with_rebuild_guidance() {
+        // M14.7a — bundles built against schema v1 must error with a
+        // message pointing at the rebuild command. The desktop loader
+        // matches on this error to surface a structured "rebuild bundle"
+        // hint to the user.
+        let mut b = Bundle::empty(PatchVersion::PATCH_0_4_0, "test@legacy_v1");
+        b.header.schema_version = 1;
+        let err = b.validate().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            matches!(
+                err,
+                DataError::SchemaVersionMismatch {
+                    bundle: 1,
+                    expected: 2
+                }
+            ),
+            "expected SchemaVersionMismatch{{1, 2}}; got {err:?}"
+        );
+        assert!(
+            msg.contains("v1") && msg.contains("v2"),
+            "error message should mention both versions; got {msg}"
+        );
+        assert!(
+            msg.contains("poc2-pipeline") && msg.contains("build"),
+            "error message should reference the rebuild command; got {msg}"
+        );
+    }
+
+    #[test]
     fn engine_schema_mismatch_is_caught() {
         let mut b = Bundle::empty(PatchVersion::PATCH_0_4_0, "test@0000000");
         b.header.engine_schema = 999;
