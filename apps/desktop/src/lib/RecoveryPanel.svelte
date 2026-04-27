@@ -22,7 +22,7 @@
     if (!recommendation || recommendation.source.kind !== 'strategy') return;
     const { id: strategy_id, step: step_id } = recommendation.source;
     loading = true;
-    invoke<RecoveryStepView>('recovery_hints', { strategyId: strategy_id, stepId: step_id })
+    invoke<RecoveryStepView>('recovery_hints', { strategy_id, step_id })
       .then((v) => {
         view = v;
       })

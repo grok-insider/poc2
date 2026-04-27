@@ -7,6 +7,8 @@ import type {
   BaseSummary,
   CannotApplyView,
   ClientLogStatus,
+  DatabaseEntryDetail,
+  DatabaseEntrySummary,
   EligibleModsResponse,
   Item,
   LeagueInfo,
@@ -21,6 +23,7 @@ import type {
   Recommendation,
   RefreshPricesResponse,
   ReloadBundleResponse,
+  RerollableModsResponse,
   TrialDistribution,
 } from './types';
 
@@ -79,12 +82,18 @@ async function browserInvoke<T>(cmd: string, args?: Record<string, unknown>): Pr
       } as T;
     case 'eligible_mods':
       return mockEligibleMods(args) as T;
+    case 'rerollable_mods':
+      return mockRerollableMods(args) as T;
     case 'check_can_apply':
       return mockCheckCanApply(args) as T;
     case 'record_outcome':
       return mockRecordOutcome(args) as T;
     case 'list_bases':
       return mockListBases(args) as T;
+    case 'list_database_entries':
+      return mockListDatabaseEntries(args) as T;
+    case 'database_entry_detail':
+      return mockDatabaseEntryDetail(args) as T;
     case 'recovery_hints':
       return {
         step_id: 'browser-preview',
@@ -320,6 +329,51 @@ function mockRecordOutcome(args: Record<string, unknown> | undefined): RecordOut
   };
 }
 
+function mockRerollableMods(
+  args: Record<string, unknown> | undefined,
+): RerollableModsResponse {
+  const inner = (args?.args ?? {}) as { item?: Item; omen?: string | null };
+  const item = inner.item;
+  const omen = inner.omen ?? null;
+  const sanctify = omen === 'OmenOfSanctification';
+  const implicits_only = omen === 'OmenOfTheBlessed';
+  type Slot = 'implicit' | 'prefix' | 'suffix';
+  type Roll = Item['prefixes'][number];
+  const slots: { slot: Slot; rolls: Roll[] }[] = [];
+  if (item) {
+    slots.push({ slot: 'implicit', rolls: item.implicits });
+    if (!implicits_only) {
+      slots.push({ slot: 'prefix', rolls: item.prefixes });
+      slots.push({ slot: 'suffix', rolls: item.suffixes });
+    }
+  }
+  const mods = slots.flatMap(({ slot, rolls }) =>
+    rolls.map((r, index) => ({
+      slot,
+      index,
+      mod_id: r.mod_id,
+      name: r.mod_id,
+      text_template: null,
+      tier_index: 1,
+      tier_count: 1,
+      is_fractured: r.is_fractured,
+      stats: r.values.map((current, i) => {
+        const strict_min = current * 0.9;
+        const strict_max = current * 1.1;
+        return {
+          stat_id: `mock_stat_${i}`,
+          min: sanctify ? strict_min * 0.8 : strict_min,
+          max: sanctify ? strict_max * 1.2 : strict_max,
+          strict_min,
+          strict_max,
+          current,
+        };
+      }),
+    })),
+  );
+  return { patch: '0.4.0', sanctify, implicits_only, mods };
+}
+
 function mockListBases(_args: Record<string, unknown> | undefined): BaseSummary[] {
   return [
     {
@@ -363,4 +417,93 @@ function mockListBases(_args: Record<string, unknown> | undefined): BaseSummary[
       release_state: 'released',
     },
   ];
+}
+
+function mockListDatabaseEntries(args: Record<string, unknown> | undefined): DatabaseEntrySummary[] {
+  const section = (args?.args as { section?: string } | undefined)?.section ?? 'bases';
+  const bases = mockListBases(undefined).map((base) => ({
+    id: base.id,
+    name: base.name,
+    section: 'bases' as const,
+    category: base.class_display,
+    kind: base.class_pascal,
+    icon_url: null,
+    detail_url: null,
+    tags: base.tags,
+    description: `${base.class_display} base item, drop level ${base.drop_level}.`,
+    base,
+  }));
+  const materials: DatabaseEntrySummary[] = [
+    {
+      id: 'VaalOrb',
+      name: 'Vaal Orb',
+      section: 'materials',
+      category: 'Currency',
+      kind: 'currency',
+      icon_url: null,
+      detail_url: null,
+      tags: ['currency', 'corruption'],
+      description: 'Corrupts an item, causing an unpredictable crafting outcome.',
+      base: null,
+    },
+    {
+      id: 'HinekorasLock',
+      name: "Hinekora's Lock",
+      section: 'materials',
+      category: 'Currency',
+      kind: 'currency',
+      icon_url: null,
+      detail_url: null,
+      tags: ['currency', 'preview'],
+      description: 'Previews the next crafting outcome before committing it.',
+      base: null,
+    },
+  ];
+  const list = section === 'materials' ? materials : bases;
+  const search = ((args?.args as { search?: string } | undefined)?.search ?? '').trim().toLowerCase();
+  if (!search) return list;
+  return list.filter((entry) =>
+    [entry.name, entry.category, entry.kind, entry.description ?? '', entry.tags.join(' ')]
+      .join(' ')
+      .toLowerCase()
+      .includes(search),
+  );
+}
+
+function mockDatabaseEntryDetail(args: Record<string, unknown> | undefined): DatabaseEntryDetail {
+  const payload = (args?.args as { section?: 'bases' | 'materials'; id?: string } | undefined) ?? {};
+  const section = payload.section ?? 'bases';
+  const entry = mockListDatabaseEntries({ args: { section } }).find((candidate) => candidate.id === payload.id)
+    ?? mockListDatabaseEntries({ args: { section } })[0];
+  if (section === 'materials') {
+    return {
+      summary: entry,
+      base: null,
+      material: {
+        source_section: entry.kind,
+        description: entry.description ?? '',
+        applies_to: ['Craftable items'],
+        tags: entry.tags,
+        raw_fields: [],
+      },
+    };
+  }
+  const base = entry.base ?? mockListBases(undefined)[0];
+  return {
+    summary: entry,
+    base: {
+      metadata_type: base.id,
+      drop_level: base.drop_level,
+      class_display: base.class_display,
+      attribute_pool: base.attribute_pool,
+      inventory_width: 2,
+      inventory_height: 3,
+      tags: base.tags,
+      derived_stats: [{ label: 'Energy Shield', value: 'base defensive stat', help: 'Energy Shield protects Life by taking damage first.' }],
+      requirements: [`Level ${base.drop_level}`, 'Intelligence requirement varies by base'],
+      granted_effects: [],
+      class_notes: [],
+    },
+    material: null,
+  };
 }

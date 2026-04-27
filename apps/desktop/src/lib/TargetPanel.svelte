@@ -115,6 +115,11 @@
       .split(',')
       .map((t) => t.trim())
       .filter(Boolean);
+    if (tokens.length === 0) {
+      if (slot === 'prefix') removePrefix(idx);
+      else removeSuffix(idx);
+      return;
+    }
     const patch =
       tokens.length === 1
         ? { concept: tokens[0], concept_any: [] }
@@ -407,5 +412,4 @@
     gap: 0.5rem;
   }
 </style>
-
 

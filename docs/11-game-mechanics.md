@@ -10,10 +10,12 @@
 |---|---|---|
 | Normal | 0 | 0 |
 | Magic | 1 | 1 |
-| Rare | 3 (per item-class) | 3 (per item-class) |
+| Rare | 3 | 3 |
 | Unique | varies by unique | varies |
 
-There is **no Orb of Scouring in PoE2** — once promoted past Normal, an item cannot be reverted.
+Magic items can have at most **2 explicit modifiers total**, but that means **1 prefix + 1 suffix**, not any two prefixes or any two suffixes. Rare items can have at most **6 explicit modifiers total**, as **3 prefixes + 3 suffixes**. A Rare item can have fewer than 6 explicit modifiers and remains Rare after Annul/Chaos/Essence removes modifiers; rarity is not downgraded by falling below a mod-count threshold.
+
+There is **no Orb of Scouring in PoE2** — once promoted past Normal, an item cannot be reverted to Normal by normal crafting currency.
 
 ## Affix types
 
@@ -23,6 +25,18 @@ There is **no Orb of Scouring in PoE2** — once promoted past Normal, an item c
 
 Desecrated mods occupy a Prefix or Suffix slot but carry `ModKind::Desecrated` and originate from a desecration bone.
 
+## Modifier families, tiers, and duplicates
+
+PoE2 separates an explicit mod's **slot** from its **family**:
+
+- The slot is whether the mod is a prefix or suffix.
+- The family is the underlying modifier type/stat-line, represented in this project as `ModGroup`.
+- Tiers are alternative strengths of the same family. `EnergyShield1`, `EnergyShield2`, and `EnergyShield3` are different tiers of one Energy Shield family, not distinct slots the item can hold together.
+
+An item cannot roll two modifiers from the same family at the same time, even when those modifiers are different tiers. This is the gameplay reason the engine enforces `ModGroup` exclusivity across all explicit prefixes and suffixes. When adding, replacing, or sampling a mod, any candidate whose `ModGroup` is already present must be rejected unless the existing member is the one being removed by that same operation.
+
+Hybrid modifiers are still one modifier and one affix slot. They can share concepts with singleton mods, but their data may be a separate `ModGroup`; this is why a hybrid `Armour + Energy Shield` prefix can coexist with a pure `Energy Shield` prefix if the game data assigns them different groups. Do not infer duplicate legality from concepts alone; use `ModGroup` / modifier family.
+
 ## Currencies the engine models
 
 ### Basic orbs (rarity changers / mod modifiers)
@@ -31,7 +45,7 @@ Desecrated mods occupy a Prefix or Suffix slot but carry `ModKind::Desecrated` a
 |---|---|---|
 | Orb of Transmutation | Normal | → Magic + 1 random mod |
 | Orb of Augmentation | Magic with 1 mod | Add 1 mod (fills empty slot) |
-| Orb of Alchemy | Normal | → Rare + up to 4 random mods |
+| Orb of Alchemy | Normal | → Rare + 4 random affixes |
 | Regal Orb | Magic | → Rare + 1 random mod (existing preserved) |
 | Exalted Orb | Rare with empty slot | Add 1 random mod |
 | Chaos Orb (PoE2) | Rare | Remove 1 random non-fractured + add 1 random |
@@ -59,7 +73,7 @@ Desecrated mods occupy a Prefix or Suffix slot but carry `ModKind::Desecrated` a
 | **Fracturing Orb** | Locks one visible non-fractured mod immutably. Requires ≥ 4 explicit mods (hidden desecrated counts). Cannot target hidden mods. |
 | **Hinekora's Lock** | Binds the next operation's RNG to a stored seed. Preview matches commit byte-for-byte. Refuses on corrupted/sanctified/mirrored items. |
 | **Bone** (Gnawed/Preserved/Ancient × Jawbone/Rib/Cranium/Collarbone) | Adds a hidden desecrated mod slot to a Rare item. Reveal at the Well of Souls. |
-| **Essence** (Lesser/Normal/Greater/Perfect/Corrupted × 19 types) | Adds a guaranteed specific mod. Lesser/Normal/Greater promote Magic→Rare; Perfect/Corrupted remove+add on Rare. |
+| **Essence** (Lesser/Normal/Greater/Perfect/Corrupted × 19 types) | Adds a guaranteed specific mod. Lesser/Normal/Greater promote Magic→Rare and add exactly 1 specific affix; Perfect/Corrupted remove+add on Rare. |
 | Catalysts (M2.5b — pending) | Tag-targeting quality on rings/amulets |
 | Recombinator (M2.5c — pending) | 2-item combine |
 
@@ -92,6 +106,12 @@ These are encoded as unit tests in `crates/engine/src/{item,currency}/*.rs`:
 4. **Hybrid mods produce multiple `ConceptId` outputs from one affix slot.** Concept-based target matching means `target = { concept: "EnergyShield", min_tier: 1 }` accepts both pure-ES mods and ES-Life hybrids.
 5. **Corrupted/Sanctified/Mirrored items reject most operations.** Vaal corruption is a one-way door; double-corruption only via Architect's Orb (M2.5d — pending).
 6. **Hinekora's Lock + preview = commit.** With a lock active, `preview_currency` and `apply_currency` produce byte-identical results from the same seed. Lock is consumed on successful commit; preserved on failure.
+
+## Source notes
+
+- PoE2DB Crafting: currency restrictions and effects for Transmutation, Alchemy, Regal, Essence, Augmentation, Exalted, Annulment, Chaos, and desecration: `https://poe2db.tw/us/Crafting`.
+- PoE2DB Essence: Lesser/Normal/Greater Essences upgrade Magic to Rare by adding a guaranteed modifier; Perfect/Corrupted Essences operate on Rare by remove+add: `https://poe2db.tw/us/Essence`.
+- Mobalytics item modifiers guide by Lolcohol, updated Mar 23 2026: Magic max is 1 prefix + 1 suffix; Rare max is 3 prefixes + 3 suffixes; an item cannot have two modifiers of the same type; hybrid modifiers occupy one slot: `https://mobalytics.gg/poe-2/guides/crafting-basics-part-1`.
 
 ## Worked-example reference flow
 

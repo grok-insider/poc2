@@ -104,17 +104,17 @@ The single biggest 0.4 crafting shift, per the official patch notes (Maxroll PoE
 ### 4. Greater Essence Regal Lock-In
 
 - **Source:** PaintMasterPoE (Mobalytics essence guide, updated for 0.4), reinforced by Reddit r/Poe2BudgetCraftGuide sticky.
-- **Item type:** Any rare; most efficient on jewelry, body armour, weapons.
+- **Item type:** Any craftable non-unique base; most efficient on jewelry, body armour, weapons.
 - **Preconditions:** Magic base with 2 good mods you've already secured (e.g., via Annul-Augment Spam #3); Greater Essence of the desired guaranteed mod.
-- **Currencies:** Greater Essence (cost varies: 1–10 div per type), then 3× Exalts.
+- **Currencies:** Greater Essence (cost varies: 1–10 div per type), then enough Exalts to fill remaining legal slots.
 - **Procedure:**
   1. Hold a 2-mod magic item with 2 good mods.
   2. Apply Greater Essence — converts to rare, adds the guaranteed essence mod (T3 typical for Greater) on its prefix/suffix side.
-  3. Item is now a rare with 3 known mods. Slam Greater/Perfect Exalts × 3 to fill.
+  3. Item is now a rare with 3 known mods if the Magic item had 2 mods, or 2 known mods if it had 1 mod. Slam Greater/Perfect Exalts until the legal 3-prefix/3-suffix cap is full.
 - **Decision points:**
-  - Pick essence side carefully: e.g., Essence of Body is a prefix (life on armour) — if your magic item has 2 prefixes already, the essence will replace one. Use the magic-side awareness from PaintMaster.
+  - Pick essence side carefully: e.g., Essence of Body is a prefix (life on armour). A Magic item cannot have 2 prefixes, but the essence still needs an open prefix side and cannot duplicate an existing modifier family.
   - Pair with Sinistral/Dextral Exaltation omens during slams to bias remaining mods.
-- **Recovery:** If the essence overwrote a desired mod (because rare was full on that side) — sell as scraps.
+- **Recovery:** If the essence cannot apply because its affix side is occupied on the Magic item or its modifier family is already present, use a different essence type or restart from a compatible Magic state.
 - **Expected cost:** 3–15 div total.
 - **Probability:** ~50–70% to a usable rare given 2 good mods entering.
 - **When to abandon:** If essence's resulting rare has ≤ 1 desirable mod, sell it.

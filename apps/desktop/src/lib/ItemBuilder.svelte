@@ -17,7 +17,7 @@
   }
 
   function setBase(v: string) {
-    onUpdate({ ...item, base: v });
+    onUpdate({ ...item, base: v, base_type_id: null, base_display_name: null });
   }
 
   function toggleCorrupted() {

@@ -454,7 +454,7 @@ Each predicate ships with serde schema docs + ≥ 2 unit tests in `predicate.rs`
 | R220 | 09_base_selection | Body armours with Hexer's/Vile/Cultist Robe — int_armour tag exclusively, str/dex pools blocked. **Verified.** |
 | R221 | 09_base_selection | Armour-Evasion hybrid bases roll both pure-armour and pure-evasion mods + the str_dex hybrid pool. **Verified.** |
 | R222 | 06_stop_vs_continue | Specific essence + perfect tier requires Magic input → Rare output without scour-equivalent: cannot apply to Rare. **Verified.** |
-| R223 | 04_exalt_vs_desecrate | Greater Essence on Magic locks one mod and rolls Rare with 4 mods total: existing Magic mods preserved as-is. **Verified.** |
+| R223 | 04_exalt_vs_desecrate | Greater Essence on Magic promotes to Rare, preserves existing Magic mods, and adds exactly 1 guaranteed essence modifier if slot and modifier-family constraints allow it. **Verified.** |
 | R224 | 04_exalt_vs_desecrate | PerfectExalted only legal on Rare with ≤ 5 mods (slot for new mod required). **Verified.** |
 | R225 | 03_hinekora_lock | Hinekora's Lock + Vaal: lock saves the pre-Vaal state; reverting wastes the lock seed. **Verified.** |
 | R226 | 02_fracture | FracturingOrb cannot fracture a hidden desecrated; it can only land on visible mods. **Verified.** |
@@ -812,7 +812,7 @@ These are the cases where the trained policy materially outperforms beam-search 
 
 ### 7.3 Long Greater-Essence chains
 
-**Scenario:** Magic with no mods, target = T1 ES prefix + T1 fire-res suffix on Rare. Chain is Trans → Aug → Greater Essence on suffix → maybe re-Aug → Regal. Greater Essence has a 4-mod outcome distribution; per-step probabilities are moderate (~0.05 for hitting T1 ES).
+**Scenario:** Normal base, target = T1 ES prefix + T1 fire-res suffix on Rare. Chain is Trans → Aug until the Magic state has useful non-duplicate families, then Greater Essence adds one guaranteed suffix and promotes to Rare. Greater Essence is a one-mod add, so the output has the prior Magic explicit count plus the essence mod, not a 4-mod filler distribution.
 
 **Why training succeeds:** afterstate aliasing collapses Essence's state-action pairs into a small number; the trained model represents Essence outcomes accurately; the Q-table picks the right Essence variant per step.
 

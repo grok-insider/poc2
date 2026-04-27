@@ -120,7 +120,9 @@
             <p class="tpl">{g.best.text_template}</p>
           {/if}
           <footer>
-            <span class="count">{g.count} eligible tier{g.count === 1 ? '' : 's'}</span>
+            <span class="count">
+              {g.count} {rollSource === 'all' ? 'eligible' : 'pool'} tier{g.count === 1 ? '' : 's'}
+            </span>
             <span class="weight">share {(g.best.weight_share * 100).toFixed(1)}%</span>
           </footer>
         </li>

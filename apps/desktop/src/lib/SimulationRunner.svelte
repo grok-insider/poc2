@@ -15,20 +15,37 @@
   let result = $state<TrialDistribution | null>(null);
   let running = $state(false);
   let error = $state<string | null>(null);
+  let resultKey = $state('');
+  let runRequestId = $state(0);
+
+  $effect(() => {
+    const key = `${JSON.stringify(action)}::${JSON.stringify(item)}`;
+    if (key === resultKey) return;
+    resultKey = key;
+    result = null;
+    error = null;
+  });
 
   async function run() {
     if (!action) return;
+    const requestId = runRequestId + 1;
+    runRequestId = requestId;
     running = true;
     error = null;
+    const itemSnapshot = item;
+    const actionSnapshot = action;
     try {
-      result = await invoke<TrialDistribution>('run_n_trials', {
-        args: { item, action, n_trials: nTrials },
+      const next = await invoke<TrialDistribution>('run_n_trials', {
+        args: { item: itemSnapshot, action: actionSnapshot, n_trials: nTrials },
       });
+      if (requestId !== runRequestId) return;
+      result = next;
     } catch (e) {
+      if (requestId !== runRequestId) return;
       error = String(e);
       result = null;
     } finally {
-      running = false;
+      if (requestId === runRequestId) running = false;
     }
   }
 

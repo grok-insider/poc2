@@ -149,8 +149,9 @@ action = { kind = "apply_currency", currency = "PerfectExaltedOrb", omens = ["Om
 note = """
 Path A: Perfect Exalt + Dextral Exaltation forces the slam to land
 on the opposite side from your locked-good 3-mod side. Switch to
-Sinistral if your locked side is suffixes. Path B (skipped here):
-swap currency to a Greater Essence for a guaranteed 4th mod.
+Sinistral if your locked side is suffixes. Greater Essence is not a
+valid substitute in this rare-state step; it is a Magic -> Rare one-mod
+add path and belongs earlier in a separate lock-in strategy.
 """
 on_success = "S9-done"
 on_failure = "S8b-recover"

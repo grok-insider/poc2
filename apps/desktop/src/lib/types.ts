@@ -170,6 +170,8 @@ export interface RecommendArgs {
   risk?: number;
   top_n?: number;
   depth?: number;
+  /** UI request token used to discard stale streaming progress events. */
+  request_id?: number | null;
 }
 
 export interface RecommendResponse {
@@ -183,6 +185,7 @@ export interface RecommendResponse {
 
 /// Phase C.2 streaming progress event.
 export interface StreamingProgressEvent {
+  request_id?: number | null;
   depth: number;
   recommendations: Recommendation[];
   is_final: boolean;
@@ -367,6 +370,14 @@ export interface PersistedState {
   depth?: number | null;
   /// Last top_n recommendations to fetch (1..10).
   top_n?: number | null;
+  /// JSON-encoded Item — opaque to the backend; frontend validates shape.
+  item_json?: string | null;
+  /// Last selected market league.
+  league?: string | null;
+  /// Price auto-refresh interval in minutes.
+  auto_refresh_minutes?: 0 | 5 | 30 | 60 | null;
+  /// Free-form per-project notes (M17 Notes panel).
+  notes?: string | null;
 }
 
 /// Returned by the `list_leagues` Tauri command (Phase B.3).
@@ -467,12 +478,62 @@ export type RecordOutcome =
       add_mod_id: string;
       roll?: number;
     }
+  | {
+      /** Divine Orb (and omen variants) — reroll values on existing
+       * mods within their current tier ranges. Rolls are absolute
+       * numbers, one per stat in the parent mod definition's stats
+       * array, in the same order. `sanctify=true` widens the bounds
+       * to `[min × 0.8, max × 1.2]` and sets `Item.sanctified`. */
+      kind: 'reroll_values';
+      rolls: { slot: 'implicit' | 'prefix' | 'suffix'; index: number; values: number[] }[];
+      sanctify?: boolean;
+    }
   | { kind: 'set_rarity'; rarity: Rarity };
 
 export interface RecordOutcomeResponse {
   item: Item;
-  change: 'added' | 'removed' | 'replaced' | 'rarity';
+  change: 'added' | 'removed' | 'replaced' | 'rarity' | 'rerolled' | 'sanctified';
   explanation: string;
+}
+
+/** Phase D.6 — backs the Divine Orb outcome dialog. Returned by the
+ *  `rerollable_mods` Tauri command. One entry per slot eligible for
+ *  Divine reroll on the current item, with the `[min, max]` bounds the
+ *  player can record per stat. Sanctification widens the bounds; Omen
+ *  of the Blessed restricts the result to implicits only. */
+export interface RerollableStatView {
+  stat_id: string;
+  /** Lower bound the player can record. Sanctified band when active. */
+  min: number;
+  /** Upper bound the player can record. Sanctified band when active. */
+  max: number;
+  /** Strict (non-sanctified) lower bound. */
+  strict_min: number;
+  /** Strict (non-sanctified) upper bound. */
+  strict_max: number;
+  /** Currently rolled value for this stat. */
+  current: number;
+}
+
+export interface RerollableMod {
+  slot: 'implicit' | 'prefix' | 'suffix';
+  index: number;
+  mod_id: string;
+  name: string | null;
+  text_template: string | null;
+  tier_index: number;
+  tier_count: number;
+  is_fractured: boolean;
+  stats: RerollableStatView[];
+}
+
+export interface RerollableModsResponse {
+  patch: string;
+  /** True when Omen of Sanctification is active (widened bounds). */
+  sanctify: boolean;
+  /** True when Omen of the Blessed is active (implicits-only). */
+  implicits_only: boolean;
+  mods: RerollableMod[];
 }
 
 /// Phase A.2 — structured `CannotApply` reason from the engine, returned
@@ -496,8 +557,17 @@ export interface HistoryEntry {
   timestamp: string;
   change: 'added' | 'removed' | 'replaced' | 'rarity' | string;
   explanation: string;
+  action?: AdvisorAction | null;
+  action_label?: string | null;
+  cost_div?: number | null;
+  materials?: MaterialUse[];
   /** Snapshot of the item before the change, used for Undo. */
   before: Item;
+}
+
+export interface MaterialUse {
+  id: string;
+  quantity: number;
 }
 
 export interface BaseSummary {
@@ -509,6 +579,55 @@ export interface BaseSummary {
   attribute_pool: string;
   tags: string[];
   release_state: string;
+}
+
+export type DatabaseSection = 'bases' | 'materials';
+
+export interface DatabaseStatLine {
+  label: string;
+  value: string;
+  help?: string | null;
+}
+
+export interface DatabaseBaseDetail {
+  metadata_type: string;
+  drop_level: number;
+  class_display: string;
+  attribute_pool: string;
+  inventory_width: number;
+  inventory_height: number;
+  tags: string[];
+  derived_stats: DatabaseStatLine[];
+  requirements: string[];
+  granted_effects: DatabaseStatLine[];
+  class_notes: string[];
+}
+
+export interface DatabaseMaterialDetail {
+  source_section: string;
+  description: string;
+  applies_to: string[];
+  tags: string[];
+  raw_fields: DatabaseStatLine[];
+}
+
+export interface DatabaseEntrySummary {
+  id: string;
+  name: string;
+  section: DatabaseSection;
+  category: string;
+  kind: string;
+  icon_url?: string | null;
+  detail_url?: string | null;
+  tags: string[];
+  description?: string | null;
+  base?: BaseSummary | null;
+}
+
+export interface DatabaseEntryDetail {
+  summary: DatabaseEntrySummary;
+  base?: DatabaseBaseDetail | null;
+  material?: DatabaseMaterialDetail | null;
 }
 
 export interface BaseIconManifestEntry {

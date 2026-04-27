@@ -138,6 +138,16 @@
     };
   });
 
+  $effect.pre(() => {
+    invoke<ClientLogStatus>('client_log_status')
+      .then((status) => {
+        clientLogStatus = status;
+      })
+      .catch(() => {
+        /* watcher status is best-effort */
+      });
+  });
+
   async function startClientLog() {
     if (!clientLogPath.trim()) {
       clientLogError = 'Set the Client.txt path first.';

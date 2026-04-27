@@ -13,7 +13,7 @@
 #![allow(clippy::needless_pass_by_value)]
 #![allow(clippy::too_many_lines)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -115,10 +115,19 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         .base_items
         .iter()
         .filter(|b| matches!(b.release_state, poc2_engine::base::ReleaseState::Released))
-        .filter(|b| is_gear_class(b.item_class.as_str()))
+        .filter(|b| is_inspectable_base(b.item_class.as_str(), &b.name, b.id.as_str()))
         .collect();
 
     info!(total = bases.len(), "released gear bases");
+
+    let current_base_ids: BTreeSet<&str> = bases.iter().map(|base| base.id.as_str()).collect();
+    let current_base_names: BTreeSet<&str> = bases.iter().map(|base| base.name.as_str()).collect();
+    manifest
+        .entries
+        .retain(|id, _| current_base_ids.contains(id.as_str()));
+    manifest
+        .missing
+        .retain(|missing| current_base_names.contains(missing.name.as_str()));
 
     let mut ok = 0usize;
     let mut skipped = 0usize;
@@ -264,20 +273,24 @@ fn pascal_class(raw: &str) -> String {
     s
 }
 
-fn is_gear_class(raw: &str) -> bool {
+fn is_inspectable_base(class: &str, name: &str, id: &str) -> bool {
+    is_database_base_class(class) && !is_known_noncraft_base(name, id)
+}
+
+fn is_database_base_class(raw: &str) -> bool {
     matches!(
         raw,
-        "Body Armour"
+        "BodyArmour"
+            | "Body Armour"
             | "Helmet"
             | "Gloves"
             | "Boots"
             | "Shield"
-            | "Buckler"
-            | "Quiver"
             | "Focus"
             | "Belt"
             | "Amulet"
             | "Ring"
+            | "Jewel"
             | "Bow"
             | "Crossbow"
             | "Wand"
@@ -289,12 +302,31 @@ fn is_gear_class(raw: &str) -> bool {
             | "Flail"
             | "Claw"
             | "Dagger"
+            | "OneHandSword"
             | "One Hand Sword"
+            | "OneHandAxe"
             | "One Hand Axe"
+            | "OneHandMace"
             | "One Hand Mace"
+            | "TwoHandSword"
             | "Two Hand Sword"
+            | "TwoHandAxe"
             | "Two Hand Axe"
+            | "TwoHandMace"
             | "Two Hand Mace"
+    )
+}
+
+fn is_known_noncraft_base(name: &str, id: &str) -> bool {
+    if name.contains("[DNT") || id.contains("/DNT") {
+        return true;
+    }
+    matches!(
+        name,
+        "Golden Hoop" | "Ring" | "Abyssal Signet" | "Timeless Jewel" | "Diamond" | "Energy Blade"
+    ) || matches!(
+        id,
+        "Metadata/Items/Rings/Ring" | "Metadata/Items/Jewels/TimelessJewel"
     )
 }
 
@@ -313,8 +345,8 @@ async fn fetch_one(client: &Client, detail_url: &str) -> anyhow::Result<(String,
         Ok::<_, anyhow::Error>(text)
     })
     .await?;
-    let url = pick_base_image_url(&html)
-        .ok_or_else(|| anyhow::anyhow!("no Art/2DItems Basetypes URL on page"))?;
+    let url =
+        pick_base_image_url(&html).ok_or_else(|| anyhow::anyhow!("no Art/2DItems URL on page"))?;
     let file_name = url
         .rsplit('/')
         .next()
@@ -323,13 +355,14 @@ async fn fetch_one(client: &Client, detail_url: &str) -> anyhow::Result<(String,
     Ok((url, file_name))
 }
 
-/// Search the rendered HTML for a poe2db CDN URL matching
-/// `Art/2DItems/.../Basetypes/<File>.webp`. Falls back to the page's
-/// `og:image` if the inline match isn't found.
+/// Search the rendered HTML for a poe2db CDN URL under `Art/2DItems`.
+/// Prefer `.../Basetypes/...` when present, but many weapons and shields use
+/// class-specific paths instead. Falls back to the page's `og:image`.
 fn pick_base_image_url(html: &str) -> Option<String> {
     let lower = html.to_ascii_lowercase();
     let needle = "art/2ditems/";
     let mut from = 0;
+    let mut first_2d_item = None;
     while let Some(rel) = lower[from..].find(needle) {
         let i = from + rel;
         let start = html[..i].rfind("https://").unwrap_or(0);
@@ -338,9 +371,12 @@ fn pick_base_image_url(html: &str) -> Option<String> {
         if candidate.to_ascii_lowercase().contains("/basetypes/") {
             return Some(candidate.to_string());
         }
+        if first_2d_item.is_none() {
+            first_2d_item = Some(candidate.to_string());
+        }
         from = i + needle.len();
     }
-    extract_og_image(html)
+    first_2d_item.or_else(|| extract_og_image(html))
 }
 
 fn extract_og_image(html: &str) -> Option<String> {

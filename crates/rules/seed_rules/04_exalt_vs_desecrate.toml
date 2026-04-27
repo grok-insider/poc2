@@ -321,11 +321,11 @@ tag = "meta"
 kind = "guidance"
 
 # ---------------------------------------------------------------------
-# R223 — Greater Essence on Magic locks one mod, fills to 4 mods total
+# R223 — Greater Essence on Magic preserves existing mods and adds one guaranteed mod
 [[rule]]
 id = "R223-greater-essence-on-magic-fills-to-rare"
 category = "exalt_vs_desecrate"
-explanation = "Greater Essence on a Magic item promotes it to Rare with the essence's specific mod added; existing Magic mods are preserved as-is, and the Rare item carries 4 explicit mods total (the 1-2 Magic mods + the essence mod + filler from the rare-promotion path)."
+explanation = "Greater Essence on a Magic item promotes it to Rare with the essence's specific mod added; existing Magic mods are preserved as-is. The result is the old Magic explicit count plus exactly one essence mod, usually 2 or 3 explicit mods total, not a filler-backed 4-mod rare."
 source = "/docs/34 §4.x (M15.3 R223) + engine Essence::apply_promoting"
 confidence = "verified"
 
@@ -336,7 +336,7 @@ all = [
 ]
 
 [[rule.then]]
-note = "Greater Essence on Magic = Rare with one locked mod. Use this when you've already secured one Magic mod you want to keep — Greater Essence locks in a second, deterministically."
+note = "Greater Essence on Magic = Rare with one guaranteed essence mod added. Use this when you've already secured one or two Magic mods you want to keep; the essence adds one deterministic modifier family if its affix side has room and the family is not already present."
 priority = 75
 tag = "meta"
 [rule.then.action]

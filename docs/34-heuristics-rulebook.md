@@ -4,6 +4,8 @@ A production-rule-style synthesis of the real-time decision rules used by skille
 
 > Conventions used in triggers:
 > - `prefix_count` / `suffix_count` ∈ {0..3}; `mod_count = prefix_count + suffix_count`
+> - Magic items can have at most 1 prefix and 1 suffix. Rare items can have at most 3 prefixes and 3 suffixes.
+> - `mod_group` / modifier family is exclusive across an item: different tiers of the same family cannot appear together.
 > - `ilvl` = item level; `mlvl(mod)` = the item-level requirement of a specific modifier (NOT its tier number)
 > - `cost(craft_so_far)` measured in divines (`d`) or exalts (`ex`)
 > - `expected_sale_price` = current poe.ninja / trade median for the resulting item
@@ -298,6 +300,7 @@ Primary sources scraped (all live as of league 0.4):
 - **AOEAH** — 0.3 Guaranteed Mods Crafting Guide (full multi-recipe walkthroughs); 0.4 Twice-Corrupt guide.
 - **Reddit r/Poe2BudgetCraftGuide** — community decision norms for budget crafters; often cites Tarke Cat / Mosey / Subtractem patterns.
 - **PoE Wiki** — Hinekora's Lock mechanics. `poewiki.net/wiki/Hinekora%27s_Lock`
+- **PoE2DB** — current currency and essence effect tables, including Magic-to-Rare essence behavior. `poe2db.tw/us/Crafting`, `poe2db.tw/us/Essence`
 - **Lidamnmy / Medium** — Desecration Crafting Guide (synergies, omens, abyss essence).
 
 Sources referenced but not deep-scraped (Reddit JSON unsupported by scraper, YouTube transcripts unavailable in batch):

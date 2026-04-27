@@ -55,8 +55,7 @@
   });
 
   $effect(() => {
-    if (!initialClass) return;
-    classFilter = initialClass;
+    classFilter = initialClass ?? null;
   });
 
   async function load() {

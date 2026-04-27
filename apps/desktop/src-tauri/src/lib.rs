@@ -1093,6 +1093,10 @@ struct RecommendArgs {
     top_n: u32,
     #[serde(default = "default_depth")]
     depth: u32,
+    /// Frontend request token echoed by streaming progress events so the UI
+    /// can ignore late events from cancelled requests.
+    #[serde(default)]
+    request_id: Option<u64>,
 }
 
 const fn default_risk() -> f64 {
@@ -1839,6 +1843,78 @@ struct BaseSummary {
     release_state: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum DatabaseSection {
+    Bases,
+    Materials,
+}
+
+#[derive(Debug, Deserialize)]
+struct DatabaseListArgs {
+    section: DatabaseSection,
+    #[serde(default)]
+    search: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DatabaseDetailArgs {
+    section: DatabaseSection,
+    id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseEntrySummary {
+    id: String,
+    name: String,
+    section: String,
+    category: String,
+    kind: String,
+    icon_url: Option<String>,
+    detail_url: Option<String>,
+    tags: Vec<String>,
+    description: Option<String>,
+    base: Option<BaseSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseEntryDetail {
+    summary: DatabaseEntrySummary,
+    base: Option<DatabaseBaseDetail>,
+    material: Option<DatabaseMaterialDetail>,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseBaseDetail {
+    metadata_type: String,
+    drop_level: u32,
+    class_display: String,
+    attribute_pool: String,
+    inventory_width: u8,
+    inventory_height: u8,
+    tags: Vec<String>,
+    derived_stats: Vec<DatabaseStatLine>,
+    requirements: Vec<String>,
+    granted_effects: Vec<DatabaseStatLine>,
+    class_notes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseMaterialDetail {
+    source_section: String,
+    description: String,
+    applies_to: Vec<String>,
+    tags: Vec<String>,
+    raw_fields: Vec<DatabaseStatLine>,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseStatLine {
+    label: String,
+    value: String,
+    help: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct BasesArgs {
     /// PascalCase class id like "BodyArmour". When `None`, returns every base.
@@ -1871,8 +1947,11 @@ fn list_bases(
 
     let mut out = Vec::with_capacity(bundle.base_items.len());
     for base in &bundle.base_items {
-        let display = base.item_class.as_str().to_string();
-        let pascal = pascal_class(&display);
+        if !is_inspectable_base(base) {
+            continue;
+        }
+        let summary = base_summary(base);
+        let pascal = summary.class_pascal.clone();
         if let Some(filter) = &args.class_pascal {
             if filter != &pascal {
                 continue;
@@ -1886,37 +1965,595 @@ fn list_bases(
         {
             continue;
         }
-        out.push(BaseSummary {
-            id: base.id.as_str().to_string(),
-            name: base.name.clone(),
-            class_pascal: pascal,
-            class_display: display,
-            drop_level: base.drop_level,
-            attribute_pool: format!("{:?}", base.attribute_pool).to_ascii_lowercase(),
-            tags: base.tags.iter().map(|t| t.as_str().to_string()).collect(),
-            release_state: format!("{:?}", base.release_state).to_ascii_lowercase(),
-        });
+        out.push(summary);
     }
     out.sort_by(|a, b| a.drop_level.cmp(&b.drop_level).then(a.name.cmp(&b.name)));
     Ok(out)
 }
 
-fn pascal_class(raw: &str) -> String {
-    let mut s = String::with_capacity(raw.len());
-    let mut up = true;
-    for c in raw.chars() {
-        if c.is_whitespace() || c == '-' || c == '_' {
-            up = true;
-        } else if up {
-            for u in c.to_uppercase() {
-                s.push(u);
-            }
-            up = false;
-        } else {
-            s.push(c);
+#[tauri::command]
+fn list_database_entries(
+    args: DatabaseListArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<Vec<DatabaseEntrySummary>, String> {
+    let bundle = read_state_bundle(&state)?;
+    let mut entries = match args.section {
+        DatabaseSection::Bases => database_base_summaries(&bundle),
+        DatabaseSection::Materials => database_material_summaries(&bundle),
+    };
+    if let Some(search) = args
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let q = search.to_ascii_lowercase();
+        entries.retain(|entry| database_entry_matches(entry, &q));
+    }
+    Ok(entries)
+}
+
+#[tauri::command]
+fn database_entry_detail(
+    args: DatabaseDetailArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<DatabaseEntryDetail, String> {
+    let bundle = read_state_bundle(&state)?;
+    match args.section {
+        DatabaseSection::Bases => {
+            let base = bundle
+                .base_items
+                .iter()
+                .find(|base| base.id.as_str() == args.id && is_inspectable_base(base))
+                .ok_or_else(|| format!("unknown database base {}", args.id))?;
+            let summary = database_base_summary(base);
+            Ok(DatabaseEntryDetail {
+                summary,
+                base: Some(database_base_detail(base)),
+                material: None,
+            })
+        }
+        DatabaseSection::Materials => database_material_detail(&bundle, &args.id)
+            .ok_or_else(|| format!("unknown database material {}", args.id)),
+    }
+}
+
+fn read_state_bundle(state: &tauri::State<'_, AdvisorState>) -> Result<Bundle, String> {
+    let path = state
+        .bundle
+        .read()
+        .expect("bundle rwlock poisoned")
+        .bundle_path
+        .clone();
+    let Some(path) = path else {
+        return Ok(Bundle::empty(PatchVersion::PATCH_0_4_0, "desktop-empty"));
+    };
+    poc2_data::io::read_bundle(&path).map_err(|e| e.to_string())
+}
+
+fn database_base_summaries(bundle: &Bundle) -> Vec<DatabaseEntrySummary> {
+    let mut out: Vec<_> = bundle
+        .base_items
+        .iter()
+        .filter(|base| is_inspectable_base(base))
+        .map(database_base_summary)
+        .collect();
+    out.sort_by(|a, b| {
+        a.base
+            .as_ref()
+            .map_or(0, |base| base.drop_level)
+            .cmp(&b.base.as_ref().map_or(0, |base| base.drop_level))
+            .then(a.name.cmp(&b.name))
+    });
+    out
+}
+
+fn database_base_summary(base: &poc2_engine::BaseType) -> DatabaseEntrySummary {
+    let base = base_summary(base);
+    DatabaseEntrySummary {
+        id: base.id.clone(),
+        name: base.name.clone(),
+        section: "bases".into(),
+        category: base.class_display.clone(),
+        kind: base.class_pascal.clone(),
+        icon_url: None,
+        detail_url: None,
+        tags: base.tags.clone(),
+        description: Some(format!(
+            "{} base item, drop level {}, {} attribute pool.",
+            base.class_display, base.drop_level, base.attribute_pool
+        )),
+        base: Some(base),
+    }
+}
+
+fn database_base_detail(base: &poc2_engine::BaseType) -> DatabaseBaseDetail {
+    let class_display = human_class_name(base.item_class.as_str());
+    DatabaseBaseDetail {
+        metadata_type: base.id.as_str().to_string(),
+        drop_level: base.drop_level,
+        class_display,
+        attribute_pool: format!("{:?}", base.attribute_pool).to_ascii_lowercase(),
+        inventory_width: base.inventory.width,
+        inventory_height: base.inventory.height,
+        tags: base.tags.iter().map(|t| t.as_str().to_string()).collect(),
+        derived_stats: derived_base_stats(base),
+        requirements: derived_requirements(base),
+        granted_effects: derived_granted_effects(base),
+        class_notes: derived_class_notes(base),
+    }
+}
+
+fn base_summary(base: &poc2_engine::BaseType) -> BaseSummary {
+    let display = human_class_name(base.item_class.as_str());
+    let pascal = base.item_class.as_str().to_string();
+    BaseSummary {
+        id: base.id.as_str().to_string(),
+        name: base.name.clone(),
+        class_pascal: pascal,
+        class_display: display,
+        drop_level: base.drop_level,
+        attribute_pool: format!("{:?}", base.attribute_pool).to_ascii_lowercase(),
+        tags: base.tags.iter().map(|t| t.as_str().to_string()).collect(),
+        release_state: format!("{:?}", base.release_state).to_ascii_lowercase(),
+    }
+}
+
+fn database_material_summaries(bundle: &Bundle) -> Vec<DatabaseEntrySummary> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for (id, name) in known_currency_assets() {
+        if seen.insert(id.to_string()) {
+            out.push(material_summary(
+                id,
+                name,
+                "currency",
+                known_material_description(id, name),
+                Vec::new(),
+                None,
+            ));
         }
     }
-    s
+    push_material_section(&mut out, &mut seen, &bundle.omens.entries, "omen");
+    push_material_section(&mut out, &mut seen, &bundle.essences.entries, "essence");
+    push_material_section(&mut out, &mut seen, &bundle.bones.entries, "bone");
+    push_material_section(&mut out, &mut seen, &bundle.catalysts.entries, "catalyst");
+    push_material_section(&mut out, &mut seen, &bundle.currencies.entries, "currency");
+    out.sort_by(|a, b| a.category.cmp(&b.category).then(a.name.cmp(&b.name)));
+    out
+}
+
+fn push_material_section(
+    out: &mut Vec<DatabaseEntrySummary>,
+    seen: &mut HashSet<String>,
+    entries: &[serde_json::Value],
+    kind: &str,
+) {
+    for entry in entries {
+        let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let id = entry
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| slug_name(name));
+        if !is_inspectable_material(kind, &id, name) || !seen.insert(id.clone()) {
+            continue;
+        }
+        out.push(material_summary(
+            &id,
+            name,
+            kind,
+            material_description_from_json(entry)
+                .unwrap_or_else(|| known_material_description(&id, name)),
+            tags_from_json(entry),
+            None,
+        ));
+    }
+}
+
+fn material_summary(
+    id: &str,
+    name: &str,
+    kind: &str,
+    description: String,
+    tags: Vec<String>,
+    icon_url: Option<String>,
+) -> DatabaseEntrySummary {
+    DatabaseEntrySummary {
+        id: id.to_string(),
+        name: name.to_string(),
+        section: "materials".into(),
+        category: material_category(kind),
+        kind: kind.to_string(),
+        icon_url,
+        detail_url: None,
+        tags,
+        description: Some(description),
+        base: None,
+    }
+}
+
+fn database_material_detail(bundle: &Bundle, id: &str) -> Option<DatabaseEntryDetail> {
+    let summaries = database_material_summaries(bundle);
+    let summary = summaries.into_iter().find(|entry| entry.id == id)?;
+    let raw = find_material_json(bundle, id, &summary.name, &summary.kind);
+    let description = raw
+        .and_then(material_description_from_json)
+        .or_else(|| summary.description.clone())
+        .unwrap_or_else(|| known_material_description(&summary.id, &summary.name));
+    let tags = raw
+        .map(tags_from_json)
+        .filter(|tags| !tags.is_empty())
+        .unwrap_or_else(|| summary.tags.clone());
+    Some(DatabaseEntryDetail {
+        material: Some(DatabaseMaterialDetail {
+            source_section: summary.kind.clone(),
+            description,
+            applies_to: material_applies_to(&summary.id, &summary.kind),
+            tags,
+            raw_fields: raw.map(raw_json_fields).unwrap_or_default(),
+        }),
+        summary,
+        base: None,
+    })
+}
+
+fn find_material_json<'a>(
+    bundle: &'a Bundle,
+    id: &str,
+    name: &str,
+    kind: &str,
+) -> Option<&'a serde_json::Value> {
+    let entries = match kind {
+        "omen" => &bundle.omens.entries,
+        "essence" => &bundle.essences.entries,
+        "bone" => &bundle.bones.entries,
+        "catalyst" => &bundle.catalysts.entries,
+        "currency" => &bundle.currencies.entries,
+        _ => return None,
+    };
+    entries.iter().find(|entry| {
+        entry.get("id").and_then(serde_json::Value::as_str) == Some(id)
+            || entry.get("name").and_then(serde_json::Value::as_str) == Some(name)
+    })
+}
+
+fn database_entry_matches(entry: &DatabaseEntrySummary, q: &str) -> bool {
+    entry.name.to_ascii_lowercase().contains(q)
+        || entry.category.to_ascii_lowercase().contains(q)
+        || entry.kind.to_ascii_lowercase().contains(q)
+        || entry.id.to_ascii_lowercase().contains(q)
+        || entry
+            .description
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .contains(q)
+        || entry
+            .tags
+            .iter()
+            .any(|tag| tag.to_ascii_lowercase().contains(q))
+}
+
+fn is_inspectable_base(base: &poc2_engine::BaseType) -> bool {
+    matches!(
+        base.release_state,
+        poc2_engine::base::ReleaseState::Released
+    ) && is_inspectable_base_class(base.item_class.as_str())
+        && !is_known_noncraft_base(base)
+}
+
+fn is_known_noncraft_base(base: &poc2_engine::BaseType) -> bool {
+    // RePoE currently carries some unique placeholders, PoE1 carryovers,
+    // and deprecated bases that still have valid item classes. Keep them
+    // out until the refreshed local item DB has authoritative craftability.
+    matches!(
+        base.name.as_str(),
+        "Golden Hoop" | "Ring" | "Abyssal Signet" | "Timeless Jewel" | "Diamond"
+    ) || matches!(
+        base.id.as_str(),
+        "Metadata/Items/Rings/Ring" | "Metadata/Items/Jewels/TimelessJewel"
+    )
+}
+
+fn is_inspectable_base_class(class: &str) -> bool {
+    matches!(
+        class,
+        "OneHandSword"
+            | "TwoHandSword"
+            | "OneHandAxe"
+            | "TwoHandAxe"
+            | "OneHandMace"
+            | "TwoHandMace"
+            | "Bow"
+            | "Crossbow"
+            | "Spear"
+            | "Flail"
+            | "Staff"
+            | "Warstaff"
+            | "Quarterstaff"
+            | "Sceptre"
+            | "Wand"
+            | "Dagger"
+            | "Claw"
+            | "Shield"
+            | "Focus"
+            | "Helmet"
+            | "Boots"
+            | "Gloves"
+            | "Belt"
+            | "Ring"
+            | "Amulet"
+            | "BodyArmour"
+            | "Jewel"
+    )
+}
+
+fn is_inspectable_material(kind: &str, id: &str, name: &str) -> bool {
+    let haystack = format!("{} {} {}", kind, id, name).to_ascii_lowercase();
+    if [
+        "skillgem",
+        "flask",
+        "charm",
+        "key",
+        "contract",
+        "blueprint",
+        "logbook",
+        "treasure",
+        "incubator",
+        "sanctum",
+    ]
+    .iter()
+    .any(|blocked| haystack.contains(blocked))
+    {
+        return false;
+    }
+    matches!(
+        kind,
+        "currency" | "omen" | "essence" | "catalyst" | "bone" | "soul_core" | "rune"
+    )
+}
+
+fn material_category(kind: &str) -> String {
+    match kind {
+        "omen" => "Omen",
+        "essence" => "Essence",
+        "bone" => "Abyssal Bone",
+        "catalyst" => "Catalyst",
+        "currency" => "Currency",
+        "soul_core" => "Soul Core",
+        "rune" => "Rune",
+        other => other,
+    }
+    .to_string()
+}
+
+fn material_description_from_json(entry: &serde_json::Value) -> Option<String> {
+    ["tooltip", "description", "effect", "text"]
+        .iter()
+        .find_map(|key| entry.get(*key).and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn tags_from_json(entry: &serde_json::Value) -> Vec<String> {
+    entry
+        .get("tags")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn raw_json_fields(entry: &serde_json::Value) -> Vec<DatabaseStatLine> {
+    let Some(obj) = entry.as_object() else {
+        return Vec::new();
+    };
+    obj.iter()
+        .filter(|(key, value)| {
+            matches!(
+                key.as_str(),
+                "id" | "name" | "corrupt" | "tags" | "tooltip" | "description"
+            ) && !value.is_null()
+        })
+        .map(|(key, value)| DatabaseStatLine {
+            label: key.clone(),
+            value: value
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| value.to_string()),
+            help: None,
+        })
+        .collect()
+}
+
+fn known_material_description(id: &str, name: &str) -> String {
+    match id {
+        "OrbOfTransmutation" | "GreaterOrbOfTransmutation" | "PerfectOrbOfTransmutation" => {
+            format!("{name} upgrades a normal item into a magic item.")
+        }
+        "OrbOfAugmentation" | "GreaterOrbOfAugmentation" | "PerfectOrbOfAugmentation" => {
+            format!("{name} adds a modifier to a magic item with an open affix slot.")
+        }
+        "RegalOrb" | "GreaterRegalOrb" | "PerfectRegalOrb" => {
+            format!("{name} upgrades a magic item into a rare item.")
+        }
+        "OrbOfAlchemy" => "Orb of Alchemy upgrades a normal item into a rare item.".into(),
+        "ExaltedOrb" | "GreaterExaltedOrb" | "PerfectExaltedOrb" => {
+            format!("{name} adds a modifier to a rare item with an open affix slot.")
+        }
+        "OrbOfAnnulment" => "Orb of Annulment removes a random modifier from an item.".into(),
+        "ChaosOrb" | "GreaterChaosOrb" | "PerfectChaosOrb" => {
+            format!("{name} reforges modifiers on a rare item.")
+        }
+        "DivineOrb" => "Divine Orb rerolls modifier values within their existing tiers.".into(),
+        "VaalOrb" => "Vaal Orb corrupts an item, causing an unpredictable crafting outcome.".into(),
+        "HinekorasLock" => {
+            "Hinekora's Lock previews the next crafting outcome before committing it.".into()
+        }
+        "FracturingOrb" => "Fracturing Orb locks one modifier in place by fracturing it.".into(),
+        _ => format!("{name} is a crafting material used by the advisor."),
+    }
+}
+
+fn material_applies_to(id: &str, kind: &str) -> Vec<String> {
+    match kind {
+        "catalyst" => vec![
+            "Ring".into(),
+            "Amulet".into(),
+            "Belt".into(),
+            "Jewel".into(),
+        ],
+        "bone" => vec![
+            "Armour".into(),
+            "Weapons".into(),
+            "Jewellery".into(),
+            "Jewel".into(),
+        ],
+        "essence" => vec!["Base items".into()],
+        "omen" => vec!["Currency actions".into()],
+        "currency" if id == "HinekorasLock" => vec!["Next craft action".into()],
+        "currency" => vec!["Craftable items".into()],
+        _ => Vec::new(),
+    }
+}
+
+fn derived_base_stats(base: &poc2_engine::BaseType) -> Vec<DatabaseStatLine> {
+    let class = base.item_class.as_str();
+    let pool = format!("{:?}", base.attribute_pool).to_ascii_lowercase();
+    let mut out = Vec::new();
+    if class == "Sceptre" {
+        out.push(DatabaseStatLine {
+            label: "Spirit".into(),
+            value: "100".into(),
+            help: Some(glossary_help("Spirit")),
+        });
+        return out;
+    }
+    if matches!(
+        class,
+        "BodyArmour" | "Helmet" | "Boots" | "Gloves" | "Shield"
+    ) {
+        if pool.contains("str") {
+            out.push(helped_stat("Armour", "base defensive stat"));
+        }
+        if pool.contains("dex") {
+            out.push(helped_stat("Evasion", "base defensive stat"));
+        }
+        if pool.contains("int") {
+            out.push(helped_stat("Energy Shield", "base defensive stat"));
+        }
+    }
+    if class == "BodyArmour" {
+        out.push(DatabaseStatLine {
+            label: "Base Movement Speed".into(),
+            value: "varies by base".into(),
+            help: Some(
+                "Exact local base movement speed will come from the refreshed item database."
+                    .into(),
+            ),
+        });
+    }
+    out
+}
+
+fn derived_granted_effects(base: &poc2_engine::BaseType) -> Vec<DatabaseStatLine> {
+    if base.item_class.as_str() != "Sceptre" {
+        return Vec::new();
+    }
+    if base.implicits.is_empty() {
+        return vec![DatabaseStatLine {
+            label: "Grants Skill".into(),
+            value: "varies by base".into(),
+            help: Some(
+                "Exact granted skill names will come from the refreshed local item database."
+                    .into(),
+            ),
+        }];
+    }
+    base.implicits
+        .iter()
+        .map(|implicit| DatabaseStatLine {
+            label: "Implicit".into(),
+            value: implicit.as_str().to_string(),
+            help: Some(
+                "Sceptre implicits represent the granted skill/effect carried by that base.".into(),
+            ),
+        })
+        .collect()
+}
+
+fn derived_class_notes(base: &poc2_engine::BaseType) -> Vec<String> {
+    if base.item_class.as_str() != "Sceptre" {
+        return Vec::new();
+    }
+    vec![
+        "Sceptres are one-handed weapons that require Strength and Intelligence to equip.".into(),
+        "They can be equipped in your main hand or off hand, but you cannot dual wield two Sceptres.".into(),
+        "Sceptres cannot be used to Attack and do not grant bonuses to Spellcasting. Instead, they grant Spirit and can provide bonuses to allies.".into(),
+    ]
+}
+
+fn helped_stat(label: &str, value: &str) -> DatabaseStatLine {
+    DatabaseStatLine {
+        label: label.into(),
+        value: value.into(),
+        help: Some(glossary_help(label)),
+    }
+}
+
+fn derived_requirements(base: &poc2_engine::BaseType) -> Vec<String> {
+    let mut out = vec![format!("Level {}", base.drop_level)];
+    let pool = format!("{:?}", base.attribute_pool).to_ascii_lowercase();
+    if pool.contains("str") {
+        out.push("Strength requirement varies by base".into());
+    }
+    if pool.contains("dex") {
+        out.push("Dexterity requirement varies by base".into());
+    }
+    if pool.contains("int") {
+        out.push("Intelligence requirement varies by base".into());
+    }
+    out
+}
+
+fn glossary_help(label: &str) -> String {
+    match label {
+        "Energy Shield" => "Energy Shield protects Life by taking damage first and rapidly recharges after avoiding damage.".into(),
+        "Armour" => "Armour mitigates physical hit damage. Larger hits require more Armour to mitigate effectively.".into(),
+        "Evasion" => "Evasion gives a chance to avoid attacks before they hit.".into(),
+        "Spirit" => "Spirit reserves persistent skills, minions, and buffs. Sceptres grant a fixed Spirit baseline.".into(),
+        _ => "Local glossary entry.".into(),
+    }
+}
+
+fn human_class_name(raw: &str) -> String {
+    match raw {
+        "BodyArmour" => "Body Armour".into(),
+        "OneHandSword" => "One Hand Sword".into(),
+        "TwoHandSword" => "Two Hand Sword".into(),
+        "OneHandAxe" => "One Hand Axe".into(),
+        "TwoHandAxe" => "Two Hand Axe".into(),
+        "OneHandMace" => "One Hand Mace".into(),
+        "TwoHandMace" => "Two Hand Mace".into(),
+        "Sceptre" => "Sceptres".into(),
+        other => {
+            let mut out = String::new();
+            for (i, c) in other.chars().enumerate() {
+                if i > 0 && c.is_ascii_uppercase() {
+                    out.push(' ');
+                }
+                out.push(c);
+            }
+            out
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -2205,6 +2842,173 @@ fn eligible_mods(
 }
 
 // ---------------------------------------------------------------------
+// rerollable_mods — backs the Divine Orb outcome dialog.
+//
+// Returns one entry per non-corrupted slot of the item (implicit /
+// prefix / suffix), describing what would be rerolled and the value
+// bounds the user must record. The bounds widen to `[min × 0.8,
+// max × 1.2]` when `omen == "OmenOfSanctification"` (per the
+// canonical Sanctification mechanics). When `omen ==
+// "OmenOfTheBlessed"`, only implicit slots are returned (Blessed
+// restricts Divine to implicits only).
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct RerollableModsArgs {
+    item: Item,
+    /// Active omen id, if any. Recognised values:
+    /// - `"OmenOfTheBlessed"` → only implicits returned.
+    /// - `"OmenOfSanctification"` → widened sanctified bounds in stats.
+    /// - other / `None` → plain Divine.
+    #[serde(default)]
+    omen: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RerollableStatView {
+    stat_id: String,
+    /// Lower bound the player can record. For sanctification this is
+    /// `def.min × 0.8`; otherwise `def.min`.
+    min: f64,
+    /// Upper bound the player can record. For sanctification this is
+    /// `def.max × 1.2`; otherwise `def.max`.
+    max: f64,
+    /// Strict (non-sanctified) lower bound. Surfaced so the UI can label
+    /// the widened band even when sanctification is active.
+    strict_min: f64,
+    /// Strict (non-sanctified) upper bound.
+    strict_max: f64,
+    /// Currently rolled value for this stat.
+    current: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct RerollableMod {
+    /// `"implicit"`, `"prefix"`, or `"suffix"`.
+    slot: String,
+    /// Slot-local index.
+    index: usize,
+    mod_id: String,
+    name: Option<String>,
+    text_template: Option<String>,
+    /// Tier number within the mod-group ladder (1 = highest).
+    tier_index: u32,
+    /// Total tiers in the ladder.
+    tier_count: u32,
+    /// Fractured mods are skipped by Divine; the UI greys them out.
+    is_fractured: bool,
+    stats: Vec<RerollableStatView>,
+}
+
+#[derive(Debug, Serialize)]
+struct RerollableModsResponse {
+    /// Patch the registry was loaded for.
+    patch: String,
+    /// Whether the active omen widens value bounds (Sanctification).
+    sanctify: bool,
+    /// Whether the active omen restricts Divine to implicits (Blessed).
+    implicits_only: bool,
+    mods: Vec<RerollableMod>,
+}
+
+#[tauri::command]
+fn rerollable_mods(
+    args: RerollableModsArgs,
+    state: tauri::State<'_, AdvisorState>,
+) -> Result<RerollableModsResponse, String> {
+    let bundle = state.bundle.read().expect("bundle rwlock poisoned");
+    let registry = bundle.registry.clone();
+    let patch = bundle.bundle_patch.unwrap_or(PatchVersion::PATCH_0_4_0);
+    drop(bundle);
+
+    let omen = args.omen.as_deref();
+    let sanctify = matches!(omen, Some("OmenOfSanctification"));
+    let implicits_only = matches!(omen, Some("OmenOfTheBlessed"));
+
+    let item = &args.item;
+    let mut out: Vec<RerollableMod> = Vec::new();
+
+    let push = |out: &mut Vec<RerollableMod>,
+                slot: &str,
+                index: usize,
+                roll: &poc2_engine::item::ModRoll|
+     -> Result<(), String> {
+        let def = match registry.get(&roll.mod_id) {
+            Some(d) => d,
+            None => return Ok(()), // unknown mod (legacy data) — skip silently
+        };
+        // Tier ladder for this mod-group: order by descending required_level.
+        let group_members = registry.group_members(&def.mod_group.0);
+        let mut levels: Vec<u32> = group_members
+            .iter()
+            .filter_map(|i| registry.at(*i).map(|m| m.required_level))
+            .collect();
+        levels.sort_unstable_by(|a, b| b.cmp(a));
+        levels.dedup();
+        let tier_count = levels.len().max(1) as u32;
+        let tier_index = levels
+            .iter()
+            .position(|l| *l == def.required_level)
+            .map(|p| (p + 1) as u32)
+            .unwrap_or(1);
+
+        let stats: Vec<RerollableStatView> = def
+            .stats
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let current = roll.values.get(i).copied().unwrap_or(s.min);
+                let (lo, hi) = if sanctify {
+                    (s.min * 0.8, s.max * 1.2)
+                } else {
+                    (s.min, s.max)
+                };
+                RerollableStatView {
+                    stat_id: s.stat_id.as_str().to_string(),
+                    min: lo,
+                    max: hi,
+                    strict_min: s.min,
+                    strict_max: s.max,
+                    current,
+                }
+            })
+            .collect();
+
+        out.push(RerollableMod {
+            slot: slot.to_string(),
+            index,
+            mod_id: roll.mod_id.as_str().to_string(),
+            name: def.name.clone(),
+            text_template: def.text_template.clone(),
+            tier_index,
+            tier_count,
+            is_fractured: roll.is_fractured,
+            stats,
+        });
+        Ok(())
+    };
+
+    for (i, roll) in item.implicits.iter().enumerate() {
+        push(&mut out, "implicit", i, roll)?;
+    }
+    if !implicits_only {
+        for (i, roll) in item.prefixes.iter().enumerate() {
+            push(&mut out, "prefix", i, roll)?;
+        }
+        for (i, roll) in item.suffixes.iter().enumerate() {
+            push(&mut out, "suffix", i, roll)?;
+        }
+    }
+
+    Ok(RerollableModsResponse {
+        patch: format!("{patch}"),
+        sanctify,
+        implicits_only,
+        mods: out,
+    })
+}
+
+// ---------------------------------------------------------------------
 // check_can_apply (v2 plan, Phase A.2 IPC surface)
 //
 // Returns the engine's structured CannotApply reason for an
@@ -2350,9 +3154,33 @@ enum OutcomeKind {
         #[serde(default)]
         roll: Option<f64>,
     },
+    /// Reroll the values of one or more existing mods within their current
+    /// tier ranges — used for Divine Orb (and its omen variants). The
+    /// player's rolled numbers come in absolute (not normalized) form
+    /// because that is what the in-game tooltip shows.
+    ///
+    /// `sanctify == true` switches the value bounds from `[min, max]` to
+    /// `[min × 0.8, max × 1.2]` (per Omen of Sanctification mechanics) and
+    /// sets `Item.sanctified = true`. Sanctification requires Rare rarity.
+    RerollValues {
+        rolls: Vec<RerolledMod>,
+        #[serde(default)]
+        sanctify: bool,
+    },
     /// Manual rarity bump (no mod change). Used when the engine doesn't
     /// know what to roll for the currency yet.
     SetRarity { rarity: String },
+}
+
+/// One mod's worth of rerolled values. `slot` is `"implicit"`, `"prefix"`,
+/// or `"suffix"`; `index` is the slot-local index. `values` carries one
+/// absolute number per stat in the parent mod definition's `stats` array,
+/// in the same order.
+#[derive(Debug, Deserialize)]
+struct RerolledMod {
+    slot: String,
+    index: usize,
+    values: Vec<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2498,6 +3326,9 @@ fn record_outcome(
                 explanation: format!("replaced {removed_id} with {add_mod_id}"),
             })
         }
+        OutcomeKind::RerollValues { rolls, sanctify } => {
+            apply_reroll_values(&mut item, registry.as_ref(), &rolls, sanctify)
+        }
         OutcomeKind::SetRarity { rarity } => {
             let r: poc2_engine::item::Rarity = serde_json::from_value(serde_json::json!(rarity))
                 .map_err(|e| format!("invalid rarity {rarity}: {e}"))?;
@@ -2509,6 +3340,125 @@ fn record_outcome(
             })
         }
     }
+}
+
+/// Apply a Divine-Orb-style value reroll to one or more existing mods.
+///
+/// - `slot` ∈ {`"implicit"`, `"prefix"`, `"suffix"`}; index is slot-local.
+/// - Each mod's `mod_id`/`affix_type` is preserved (Divine never changes
+///   the tier).
+/// - Fractured mods are rejected (the engine's Divine impl skips them
+///   silently; here we surface the error so the dialog can warn).
+/// - When `sanctify == false`: each value must lie in `[def.stats[i].min,
+///   def.stats[i].max]`.
+/// - When `sanctify == true`: requires Rare rarity; values may lie in
+///   `[def.stats[i].min × 0.8, def.stats[i].max × 1.2]` (Omen of
+///   Sanctification mechanics) and `Item.sanctified` is set.
+/// - Corrupted items are rejected (engine semantics).
+fn apply_reroll_values(
+    item: &mut Item,
+    registry: &poc2_engine::registry::ModRegistry,
+    rolls: &[RerolledMod],
+    sanctify: bool,
+) -> Result<RecordOutcomeResponse, String> {
+    use poc2_engine::item::{ModRoll, Rarity};
+
+    if item.corrupted {
+        return Err("Divine Orb cannot be applied to a corrupted item".into());
+    }
+    if sanctify && item.rarity != Rarity::Rare {
+        return Err("Omen of Sanctification requires a Rare item".into());
+    }
+
+    let mut updated: usize = 0;
+    let mut by_slot: std::collections::HashMap<&str, Vec<&RerolledMod>> =
+        std::collections::HashMap::new();
+    for r in rolls {
+        by_slot.entry(r.slot.as_str()).or_default().push(r);
+    }
+
+    for (slot, entries) in &by_slot {
+        // Pre-validate each entry against the chosen slot before mutating.
+        let target_len = match *slot {
+            "implicit" => item.implicits.len(),
+            "prefix" => item.prefixes.len(),
+            "suffix" => item.suffixes.len(),
+            other => return Err(format!("invalid slot: {other}")),
+        };
+        for r in entries {
+            if r.index >= target_len {
+                return Err(format!("{slot} index {} out of range", r.index));
+            }
+        }
+    }
+
+    for (slot, entries) in by_slot {
+        for r in entries {
+            let target: &mut ModRoll = match slot {
+                "implicit" => &mut item.implicits[r.index],
+                "prefix" => &mut item.prefixes[r.index],
+                "suffix" => &mut item.suffixes[r.index],
+                _ => unreachable!("validated above"),
+            };
+            if target.is_fractured {
+                return Err(format!(
+                    "{slot} {} is fractured; Divine cannot reroll it",
+                    r.index
+                ));
+            }
+            let def = registry
+                .get(&target.mod_id)
+                .ok_or_else(|| format!("unknown mod id: {}", target.mod_id.as_str()))?;
+            if r.values.len() != def.stats.len() {
+                return Err(format!(
+                    "{slot} {} expects {} stat values, got {}",
+                    r.index,
+                    def.stats.len(),
+                    r.values.len()
+                ));
+            }
+            for (i, v) in r.values.iter().enumerate() {
+                let stat = &def.stats[i];
+                let (lo, hi) = if sanctify {
+                    (stat.min * 0.8, stat.max * 1.2)
+                } else {
+                    (stat.min, stat.max)
+                };
+                if !v.is_finite() || *v < lo || *v > hi {
+                    return Err(format!(
+                        "{slot} {} stat {} value {v} outside allowed range [{lo:.4}, {hi:.4}]",
+                        r.index, i,
+                    ));
+                }
+            }
+            target.values = r.values.iter().copied().collect();
+            updated += 1;
+        }
+    }
+
+    if sanctify {
+        item.sanctified = true;
+    }
+
+    Ok(RecordOutcomeResponse {
+        item: item.clone(),
+        change: if sanctify {
+            "sanctified".into()
+        } else {
+            "rerolled".into()
+        },
+        explanation: if sanctify {
+            format!(
+                "sanctified {updated} mod{}; values rerolled within widened bounds and item locked",
+                if updated == 1 { "" } else { "s" }
+            )
+        } else {
+            format!(
+                "rerolled values on {updated} mod{}",
+                if updated == 1 { "" } else { "s" }
+            )
+        },
+    })
 }
 
 fn remove_outcome_slot(item: &mut Item, affix: &str, index: usize) -> Result<String, String> {
@@ -2556,6 +3506,21 @@ struct PersistedState {
     /// Last top-N value (1..=10).
     #[serde(default)]
     top_n: Option<u32>,
+    /// Last item the user was crafting. Stored as JSON so the engine Item
+    /// serde shape is preserved across schema bumps.
+    #[serde(default)]
+    item_json: Option<String>,
+    /// Last selected market league.
+    #[serde(default)]
+    league: Option<String>,
+    /// Price auto-refresh interval in minutes.
+    #[serde(default)]
+    auto_refresh_minutes: Option<u32>,
+    /// Free-form per-project notes. Surfaced in the desktop Notes
+    /// panel; persisted alongside the goal so reopening the app
+    /// restores the user's last saved scratchpad.
+    #[serde(default)]
+    notes: Option<String>,
 }
 
 fn state_file_path() -> Option<PathBuf> {
@@ -2943,6 +3908,8 @@ fn run_n_trials(
 
 #[derive(Debug, Serialize, Clone)]
 struct StreamingProgressEvent {
+    /// Frontend request token supplied with `recommend_streaming`.
+    request_id: Option<u64>,
     /// Beam-search depth this batch was computed at.
     depth: u32,
     /// Top-N recommendations at this depth.
@@ -2983,6 +3950,7 @@ async fn recommend_streaming(
     let risk = args.risk;
     let top_n = args.top_n;
     let depth = args.depth;
+    let request_id = args.request_id;
 
     let task = tokio::task::spawn_blocking(move || {
         let bundle_guard = bundle.read().expect("bundle rwlock poisoned");
@@ -3028,6 +3996,7 @@ async fn recommend_streaming(
         }
         plan_streaming(&input, &depths, |progress: StreamingProgress| {
             let event = StreamingProgressEvent {
+                request_id,
                 depth: progress.depth,
                 recommendations: progress.recommendations,
                 is_final: progress.is_final,
@@ -3189,9 +4158,12 @@ pub fn run() {
             save_state,
             recovery_hints,
             eligible_mods,
+            rerollable_mods,
             check_can_apply,
             record_outcome,
             list_bases,
+            list_database_entries,
+            database_entry_detail,
             list_leagues,
             list_recipes,
             save_recipe,
@@ -3208,4 +4180,456 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod item_database_tests {
+    use super::*;
+    use poc2_engine::base::{InventorySize, ReleaseState};
+    use poc2_engine::ids::{BaseTypeId, ItemClassId, ModId};
+    use poc2_engine::item_class::AttributePool;
+    use poc2_engine::patch::PatchRange;
+    use smallvec::smallvec;
+
+    fn base(class: &str, release_state: ReleaseState) -> poc2_engine::BaseType {
+        named_base(class, &format!("{class} Base"), release_state)
+    }
+
+    fn named_base(class: &str, name: &str, release_state: ReleaseState) -> poc2_engine::BaseType {
+        poc2_engine::BaseType {
+            id: BaseTypeId::from(format!("Metadata/Test/{class}/{name}")),
+            name: name.to_string(),
+            item_class: ItemClassId::from(class),
+            attribute_pool: AttributePool::None,
+            drop_level: 1,
+            tags: smallvec![],
+            implicits: smallvec![],
+            inventory: InventorySize {
+                width: 1,
+                height: 1,
+            },
+            release_state,
+            patch_range: PatchRange::ALL,
+        }
+    }
+
+    fn sceptre() -> poc2_engine::BaseType {
+        let mut b = named_base("Sceptre", "Rattling Sceptre", ReleaseState::Released);
+        b.attribute_pool = AttributePool::StrInt;
+        b.implicits = smallvec![ModId::from("GrantedSkillSkeletalWarrior")];
+        b
+    }
+
+    #[test]
+    fn database_base_filter_keeps_only_requested_craft_targets() {
+        for class in [
+            "BodyArmour",
+            "Ring",
+            "Amulet",
+            "Belt",
+            "Jewel",
+            "OneHandSword",
+            "Shield",
+            "Focus",
+        ] {
+            assert!(
+                is_inspectable_base(&base(class, ReleaseState::Released)),
+                "{class} should be inspectable"
+            );
+        }
+
+        for class in [
+            "ActiveSkillGem",
+            "SupportSkillGem",
+            "LifeFlask",
+            "UtilityFlask",
+            "Charm",
+            "VaultKey",
+            "Talisman",
+            "Quiver",
+        ] {
+            assert!(
+                !is_inspectable_base(&base(class, ReleaseState::Released)),
+                "{class} should be excluded"
+            );
+        }
+
+        assert!(!is_inspectable_base(&base("Jewel", ReleaseState::Unique)));
+        assert!(!is_inspectable_base(&base(
+            "BodyArmour",
+            ReleaseState::Legacy
+        )));
+    }
+
+    #[test]
+    fn database_base_filter_excludes_known_deprecated_and_placeholder_bases() {
+        for (class, name) in [
+            ("Ring", "Golden Hoop"),
+            ("Ring", "Ring"),
+            ("Ring", "Abyssal Signet"),
+            ("Jewel", "Timeless Jewel"),
+            ("Jewel", "Diamond"),
+        ] {
+            assert!(
+                !is_inspectable_base(&named_base(class, name, ReleaseState::Released)),
+                "{name} should be excluded"
+            );
+        }
+
+        assert!(is_inspectable_base(&named_base(
+            "Ring",
+            "Iron Ring",
+            ReleaseState::Released
+        )));
+        assert!(is_inspectable_base(&named_base(
+            "Jewel",
+            "Ruby",
+            ReleaseState::Released
+        )));
+        assert!(is_inspectable_base(&named_base(
+            "Jewel",
+            "Time-Lost Ruby",
+            ReleaseState::Released
+        )));
+    }
+
+    #[test]
+    fn sceptre_detail_uses_spirit_and_class_notes() {
+        let b = sceptre();
+        assert!(is_inspectable_base(&b));
+        let detail = database_base_detail(&b);
+        assert!(detail
+            .derived_stats
+            .iter()
+            .any(|stat| stat.label == "Spirit" && stat.value == "100"));
+        assert!(!detail
+            .derived_stats
+            .iter()
+            .any(|stat| matches!(stat.label.as_str(), "Armour" | "Evasion" | "Energy Shield")));
+        assert!(!detail.granted_effects.is_empty());
+        assert!(detail
+            .class_notes
+            .iter()
+            .any(|note| note.contains("cannot be used to Attack")));
+    }
+
+    #[test]
+    fn material_filter_keeps_craft_altering_items_not_collectibles() {
+        assert!(is_inspectable_material("currency", "VaalOrb", "Vaal Orb"));
+        assert!(is_inspectable_material(
+            "currency",
+            "HinekorasLock",
+            "Hinekora's Lock"
+        ));
+        assert!(is_inspectable_material(
+            "omen",
+            "OmenOfLight",
+            "Omen of Light"
+        ));
+        assert!(!is_inspectable_material(
+            "currency",
+            "VaultKey",
+            "Vault Key"
+        ));
+        assert!(!is_inspectable_material(
+            "currency",
+            "LifeFlask",
+            "Life Flask"
+        ));
+        assert!(!is_inspectable_material("currency", "Charm", "Charm"));
+    }
+}
+
+#[cfg(test)]
+mod reroll_tests {
+    //! Tests for the Divine Orb (and omen variants) reroll handler. We
+    //! exercise [`apply_reroll_values`] directly with hand-built
+    //! `ModRegistry`/`Item` fixtures so the tests don't need the Tauri
+    //! `State` plumbing.
+    use super::*;
+    use poc2_engine::ids::{ItemClassId, ModGroupId, ModId, StatId, TagId};
+    use poc2_engine::item::{
+        AffixType, BoneSize, BoneSubtype, HiddenDesecratedSlot, ModRoll, QualityKind, Rarity,
+    };
+    use poc2_engine::mods::{
+        ModDefinition, ModDomain, ModFlags, ModGroup, ModKind, ModStat, SpawnWeight,
+    };
+    use poc2_engine::patch::PatchRange;
+    use poc2_engine::registry::ModRegistry;
+    use smallvec::{smallvec, SmallVec};
+
+    fn def(id: &str, group: &str, affix: AffixType, stat: &str, lo: f64, hi: f64) -> ModDefinition {
+        ModDefinition {
+            id: ModId::from(id),
+            name: Some(id.to_string()),
+            mod_group: ModGroup(ModGroupId::from(group)),
+            affix_type: affix,
+            kind: ModKind::Explicit,
+            domain: ModDomain::Item,
+            tags: SmallVec::new(),
+            concept_set: SmallVec::new(),
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from("default"),
+                weight: 1,
+            }],
+            stats: smallvec![ModStat {
+                stat_id: StatId::from(stat),
+                min: lo,
+                max: hi,
+            }],
+            required_level: 1,
+            allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: None,
+        }
+    }
+
+    fn roll(id: &str, affix: AffixType, value: f64) -> ModRoll {
+        let mut r = ModRoll::new(ModId::from(id), affix, ModKind::Explicit);
+        r.values = smallvec![value];
+        r
+    }
+
+    fn rare_item() -> Item {
+        Item {
+            base: ItemClassId::from("BodyArmour").as_str().into(),
+            ilvl: 82,
+            rarity: Rarity::Rare,
+            corrupted: false,
+            sanctified: false,
+            mirrored: false,
+            quality: 0,
+            quality_kind: QualityKind::Untagged,
+            implicits: SmallVec::new(),
+            prefixes: SmallVec::new(),
+            suffixes: SmallVec::new(),
+            enchantments: SmallVec::new(),
+            hidden_desecrated: None,
+            sockets: SmallVec::new(),
+            hinekora_lock: None,
+        }
+    }
+
+    #[test]
+    fn reroll_happy_path_updates_values_in_place() {
+        let registry = ModRegistry::from_mods(
+            vec![def("ESPrefix", "ES", AffixType::Prefix, "es", 50.0, 100.0)],
+            vec![],
+        );
+        let mut item = rare_item();
+        item.prefixes
+            .push(roll("ESPrefix", AffixType::Prefix, 60.0));
+
+        let rolls = vec![RerolledMod {
+            slot: "prefix".into(),
+            index: 0,
+            values: vec![92.5],
+        }];
+        let r = apply_reroll_values(&mut item, &registry, &rolls, false).unwrap();
+        assert_eq!(r.change, "rerolled");
+        assert_eq!(item.prefixes[0].values.as_slice(), &[92.5]);
+        // mod_id and affix preserved.
+        assert_eq!(item.prefixes[0].mod_id.as_str(), "ESPrefix");
+        assert_eq!(item.prefixes[0].affix_type, AffixType::Prefix);
+        // sanctification flag untouched on plain Divine.
+        assert!(!item.sanctified);
+    }
+
+    #[test]
+    fn reroll_rejects_fractured_mods() {
+        let registry = ModRegistry::from_mods(
+            vec![def("ESPrefix", "ES", AffixType::Prefix, "es", 50.0, 100.0)],
+            vec![],
+        );
+        let mut item = rare_item();
+        let mut frac = roll("ESPrefix", AffixType::Prefix, 60.0);
+        frac.is_fractured = true;
+        item.prefixes.push(frac);
+
+        let rolls = vec![RerolledMod {
+            slot: "prefix".into(),
+            index: 0,
+            values: vec![80.0],
+        }];
+        let err = apply_reroll_values(&mut item, &registry, &rolls, false).unwrap_err();
+        assert!(err.contains("fractured"), "got: {err}");
+    }
+
+    #[test]
+    fn reroll_rejects_value_out_of_range() {
+        let registry = ModRegistry::from_mods(
+            vec![def("ESPrefix", "ES", AffixType::Prefix, "es", 50.0, 100.0)],
+            vec![],
+        );
+        let mut item = rare_item();
+        item.prefixes
+            .push(roll("ESPrefix", AffixType::Prefix, 60.0));
+
+        let rolls = vec![RerolledMod {
+            slot: "prefix".into(),
+            index: 0,
+            values: vec![150.0],
+        }];
+        let err = apply_reroll_values(&mut item, &registry, &rolls, false).unwrap_err();
+        assert!(err.contains("outside allowed range"), "got: {err}");
+    }
+
+    #[test]
+    fn reroll_rejects_stat_count_mismatch() {
+        let registry = ModRegistry::from_mods(
+            vec![def("ESPrefix", "ES", AffixType::Prefix, "es", 50.0, 100.0)],
+            vec![],
+        );
+        let mut item = rare_item();
+        item.prefixes
+            .push(roll("ESPrefix", AffixType::Prefix, 60.0));
+
+        let rolls = vec![RerolledMod {
+            slot: "prefix".into(),
+            index: 0,
+            values: vec![80.0, 90.0], // mod has 1 stat, payload has 2
+        }];
+        let err = apply_reroll_values(&mut item, &registry, &rolls, false).unwrap_err();
+        assert!(err.contains("expects 1 stat values"), "got: {err}");
+    }
+
+    #[test]
+    fn reroll_rejects_index_out_of_range() {
+        let registry = ModRegistry::from_mods(
+            vec![def("ESPrefix", "ES", AffixType::Prefix, "es", 50.0, 100.0)],
+            vec![],
+        );
+        let mut item = rare_item();
+        item.prefixes
+            .push(roll("ESPrefix", AffixType::Prefix, 60.0));
+
+        let rolls = vec![RerolledMod {
+            slot: "prefix".into(),
+            index: 7,
+            values: vec![80.0],
+        }];
+        let err = apply_reroll_values(&mut item, &registry, &rolls, false).unwrap_err();
+        assert!(err.contains("out of range"), "got: {err}");
+    }
+
+    #[test]
+    fn reroll_rejects_corrupted_item() {
+        let registry = ModRegistry::from_mods(vec![], vec![]);
+        let mut item = rare_item();
+        item.corrupted = true;
+        let err = apply_reroll_values(&mut item, &registry, &[], false).unwrap_err();
+        assert!(err.contains("corrupted"), "got: {err}");
+    }
+
+    #[test]
+    fn sanctify_widens_bounds_and_locks_item() {
+        let registry = ModRegistry::from_mods(
+            vec![def("ESPrefix", "ES", AffixType::Prefix, "es", 50.0, 100.0)],
+            vec![],
+        );
+        let mut item = rare_item();
+        item.prefixes
+            .push(roll("ESPrefix", AffixType::Prefix, 60.0));
+
+        // 100 * 1.2 = 120 — outside strict band, inside sanctified band.
+        let rolls = vec![RerolledMod {
+            slot: "prefix".into(),
+            index: 0,
+            values: vec![118.0],
+        }];
+        let r = apply_reroll_values(&mut item, &registry, &rolls, true).unwrap();
+        assert_eq!(r.change, "sanctified");
+        assert_eq!(item.prefixes[0].values.as_slice(), &[118.0]);
+        assert!(item.sanctified);
+    }
+
+    #[test]
+    fn sanctify_rejects_non_rare() {
+        let registry = ModRegistry::from_mods(vec![], vec![]);
+        let mut item = rare_item();
+        item.rarity = Rarity::Magic;
+        let err = apply_reroll_values(&mut item, &registry, &[], true).unwrap_err();
+        assert!(err.contains("Rare"), "got: {err}");
+    }
+
+    #[test]
+    fn sanctify_rejects_value_outside_widened_band() {
+        let registry = ModRegistry::from_mods(
+            vec![def("ESPrefix", "ES", AffixType::Prefix, "es", 50.0, 100.0)],
+            vec![],
+        );
+        let mut item = rare_item();
+        item.prefixes
+            .push(roll("ESPrefix", AffixType::Prefix, 60.0));
+
+        // 100 * 1.2 = 120 — 121 is outside even the sanctified band.
+        let rolls = vec![RerolledMod {
+            slot: "prefix".into(),
+            index: 0,
+            values: vec![121.0],
+        }];
+        let err = apply_reroll_values(&mut item, &registry, &rolls, true).unwrap_err();
+        assert!(err.contains("outside allowed range"), "got: {err}");
+    }
+
+    #[test]
+    fn reroll_multi_slot_batch_updates_all_listed_slots() {
+        let registry = ModRegistry::from_mods(
+            vec![
+                def("Implicit", "Imp", AffixType::Implicit, "im", 0.0, 10.0),
+                def("Prefix1", "P1", AffixType::Prefix, "p1", 50.0, 100.0),
+                def("Suffix1", "S1", AffixType::Suffix, "s1", 5.0, 20.0),
+            ],
+            vec![],
+        );
+        let mut item = rare_item();
+        item.implicits
+            .push(roll("Implicit", AffixType::Implicit, 5.0));
+        item.prefixes.push(roll("Prefix1", AffixType::Prefix, 60.0));
+        item.suffixes.push(roll("Suffix1", AffixType::Suffix, 10.0));
+
+        let rolls = vec![
+            RerolledMod {
+                slot: "implicit".into(),
+                index: 0,
+                values: vec![9.5],
+            },
+            RerolledMod {
+                slot: "prefix".into(),
+                index: 0,
+                values: vec![88.0],
+            },
+            RerolledMod {
+                slot: "suffix".into(),
+                index: 0,
+                values: vec![18.0],
+            },
+        ];
+        apply_reroll_values(&mut item, &registry, &rolls, false).unwrap();
+        assert_eq!(item.implicits[0].values.as_slice(), &[9.5]);
+        assert_eq!(item.prefixes[0].values.as_slice(), &[88.0]);
+        assert_eq!(item.suffixes[0].values.as_slice(), &[18.0]);
+    }
+
+    #[test]
+    fn reroll_unknown_slot_label_fails() {
+        let registry = ModRegistry::from_mods(vec![], vec![]);
+        let mut item = rare_item();
+        // Touch a known field so the test variable isn't flagged as
+        // dead in case the assertion changes shape later.
+        item.hidden_desecrated = Some(HiddenDesecratedSlot {
+            affix_type: AffixType::Suffix,
+            bone_size: BoneSize::Preserved,
+            bone_subtype: BoneSubtype::Rib,
+            abyss_lord: None,
+        });
+        let rolls = vec![RerolledMod {
+            slot: "enchantment".into(),
+            index: 0,
+            values: vec![1.0],
+        }];
+        let err = apply_reroll_values(&mut item, &registry, &rolls, false).unwrap_err();
+        assert!(err.contains("invalid slot"), "got: {err}");
+    }
 }

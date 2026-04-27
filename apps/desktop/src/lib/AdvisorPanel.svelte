@@ -21,16 +21,35 @@
     item: Item;
     goal: Goal;
     assetIndex?: AssetIndex;
+    /** When true, the parent (App.svelte) is supplying the panel
+     * chrome (outer card, tab strip, "Step-by-Step Guide" title) so we
+     * skip our own `<section class="panel">` wrapper and the redundant
+     * h2 header. The toolbar, success chip, and recommendations list
+     * still render — embedded mode is purely a layout flag. */
+    embedded?: boolean;
     /** Optional callback so the App.svelte parent can lift the latest
      * recommendation list (used by the RecoveryPanel to display the
      * current top recommendation's step recovery hints). */
     onRecommendations?: (recs: Recommendation[]) => void;
     /** Called when a step outcome updates the item state. */
-    onItemUpdate?: (item: Item, change: string, explanation: string) => void;
+    onItemUpdate?: (
+      item: Item,
+      change: string,
+      explanation: string,
+      recommendation: Recommendation | null,
+    ) => void;
   };
 
-  let { item, goal, assetIndex = new Map(), onRecommendations, onItemUpdate }: Props = $props();
+  let {
+    item,
+    goal,
+    assetIndex = new Map(),
+    embedded = false,
+    onRecommendations,
+    onItemUpdate,
+  }: Props = $props();
   let outcomeAction = $state<AdvisorAction | null>(null);
+  let outcomeRecommendation = $state<Recommendation | null>(null);
 
   let recommendations = $state<Recommendation[]>([]);
   let meta = $state<{
@@ -51,6 +70,7 @@
   let useStreaming = $state(true);
   let failedAssetIds = $state<string[]>([]);
   let unlistenStream: UnlistenFn | null = null;
+  let activeRequestId = $state(0);
 
   // Subscribe to the streaming-planner event channel exactly once.
   $effect(() => {
@@ -58,6 +78,7 @@
     listen<StreamingProgressEvent>(ADVISOR_PROGRESS_EVENT, (ev) => {
       if (cancelled) return;
       const p = ev.payload;
+      if (p.request_id !== activeRequestId) return;
       recommendations = p.recommendations;
       onRecommendations?.(recommendations);
       streamingDepth = p.depth;
@@ -118,8 +139,12 @@
   }
 
   async function refresh() {
+    const requestId = activeRequestId + 1;
+    activeRequestId = requestId;
     loading = true;
     error = null;
+    recommendations = [];
+    onRecommendations?.(recommendations);
     try {
       const args: RecommendArgs = {
         item,
@@ -128,6 +153,7 @@
         risk,
         top_n: 5,
         depth,
+        request_id: requestId,
       };
       if (useStreaming) {
         // Streaming: emits via the advisor://progress event listener
@@ -136,6 +162,7 @@
         // Always also fire one synchronous call so meta counts are
         // populated even when streaming hasn't completed yet.
         const response = await invoke<RecommendResponse>('recommend', { args });
+        if (requestId !== activeRequestId) return;
         if (recommendations.length === 0) {
           recommendations = response.recommendations;
           onRecommendations?.(recommendations);
@@ -152,6 +179,7 @@
         return; // loading cleared by the final stream event
       }
       const response = await invoke<RecommendResponse>('recommend', { args });
+      if (requestId !== activeRequestId) return;
       recommendations = response.recommendations;
       onRecommendations?.(recommendations);
       meta = {
@@ -162,10 +190,11 @@
         bundle_path: response.bundle_path,
       };
     } catch (err) {
+      if (requestId !== activeRequestId) return;
       error = String(err);
       recommendations = [];
     } finally {
-      if (!useStreaming) loading = false;
+      if (requestId === activeRequestId && !useStreaming) loading = false;
     }
   }
 
@@ -246,6 +275,7 @@
     const currencies = uniqueCurrenciesFromRecommendations(recommendations);
     const itemSnapshot = item;
     let cancelled = false;
+    cannotApplyByCurrency = {};
     Promise.all(
       currencies.map(async (c) => {
         const view = await checkCanApply(itemSnapshot, c);
@@ -295,6 +325,48 @@
       }
     }
     return null;
+  }
+
+  function recordUnsupportedReason(a: AdvisorAction): string | null {
+    if (a.kind === 'apply_currency') {
+      const id = a.currency;
+      const supported = new Set([
+        'OrbOfAnnulment',
+        'OrbOfTransmutation',
+        'GreaterOrbOfTransmutation',
+        'PerfectOrbOfTransmutation',
+        'OrbOfAugmentation',
+        'GreaterOrbOfAugmentation',
+        'PerfectOrbOfAugmentation',
+        'ExaltedOrb',
+        'GreaterExaltedOrb',
+        'PerfectExaltedOrb',
+        'RegalOrb',
+        'GreaterRegalOrb',
+        'PerfectRegalOrb',
+        'ChaosOrb',
+        'GreaterChaosOrb',
+        'PerfectChaosOrb',
+        'DivineOrb',
+      ]);
+      if (supported.has(id) || id.includes('Essence')) return null;
+      if (id === 'FracturingOrb') return 'fracture recording is not implemented yet';
+      if (id === 'VaalOrb') return 'corruption outcome recording is not implemented yet';
+      return `${prettifyId(id)} outcome recording is not implemented yet`;
+    }
+    if (a.kind === 'guidance') return 'guidance is informational';
+    if (a.kind === 'stop') return 'nothing to record';
+    if (a.kind === 'abandon') return 'abandon does not change the item';
+    if (a.kind === 'reveal') return 'reveal outcome recording is not implemented yet';
+    if (a.kind === 'recurring') return 'record the concrete inner action instead';
+    if (a.kind === 'apply_hinekoras_lock') return "Hinekora's Lock recording is not implemented yet";
+    if (a.kind === 'activate_omen') return 'omen-only recording is not implemented yet';
+    if (a.kind === 'recombine') return 'recombine recording is not implemented yet';
+    return null;
+  }
+
+  function displayCost(r: Recommendation): { min: number; expected: number; max: number } {
+    return r.loop_estimate?.total_cost ?? r.expected_cost;
   }
 
   /** Phase D.1 — render the StopPredicate as a friendly string. */
@@ -362,18 +434,20 @@
   }
 </script>
 
-<section class="panel advisor">
-  <header class="advisor-head">
-    <h2>Step-by-Step Guide</h2>
-    <div class="success-box" title="Top recommendation's MC-aggregated success probability">
-      <span>Success</span>
-      <strong>
-        {recommendations[0]
-          ? (recommendations[0].expected_prob * 100).toFixed(1)
-          : '—'}{recommendations[0] ? '%' : ''}
-      </strong>
-    </div>
-  </header>
+<svelte:element this={embedded ? 'div' : 'section'} class={embedded ? 'advisor advisor-embedded' : 'panel advisor'}>
+  {#if !embedded}
+    <header class="advisor-head">
+      <h2>Step-by-Step Guide</h2>
+      <div class="success-box" title="Top recommendation's MC-aggregated success probability">
+        <span>Success</span>
+        <strong>
+          {recommendations[0]
+            ? (recommendations[0].expected_prob * 100).toFixed(1)
+            : '—'}{recommendations[0] ? '%' : ''}
+        </strong>
+      </div>
+    </header>
+  {/if}
 
   <div class="controls">
     <label class="slider">
@@ -467,7 +541,7 @@
             <span></span>
           </div>
           <div class="meta-row">
-            <span class="cost">{fmtDiv(r.expected_cost)}</span>
+            <span class="cost">{fmtDiv(displayCost(r))}</span>
             <span class="dot">·</span>
             <span class="depth">d{r.depth}</span>
             <span class="dot">·</span>
@@ -476,6 +550,9 @@
             </span>
             {#if cannotApplyReason(r.action)}
               <span class="cannot-badge">cannot apply · {cannotApplyReason(r.action)}</span>
+            {/if}
+            {#if recordUnsupportedReason(r.action)}
+              <span class="cannot-badge">not recordable · {recordUnsupportedReason(r.action)}</span>
             {/if}
           </div>
           {#if r.action.kind === 'recurring'}
@@ -522,7 +599,7 @@
             </p>
             <p>
               <strong>Cost:</strong>
-              {fmtDiv(r.expected_cost)}
+              {fmtDiv(displayCost(r))}
             </p>
             <p class="hint">
               Click "I just used this" to record what actually rolled. The advisor
@@ -534,8 +611,12 @@
             <button
               class="step-cta"
               type="button"
-              disabled={cannotApplyReason(r.action) !== null}
-              onclick={() => (outcomeAction = r.action)}
+              disabled={cannotApplyReason(r.action) !== null || recordUnsupportedReason(r.action) !== null}
+              title={recordUnsupportedReason(r.action) ?? cannotApplyReason(r.action) ?? 'Record this outcome'}
+              onclick={() => {
+                outcomeAction = r.action;
+                outcomeRecommendation = r;
+              }}
             >
               I just used this →
             </button>
@@ -544,25 +625,36 @@
       </li>
     {/each}
   </ol>
-</section>
+</svelte:element>
 
 <OutcomeDialog
   {item}
   action={outcomeAction}
   onApply={(updated, change, explanation) => {
-    onItemUpdate?.(updated, change, explanation);
+    onItemUpdate?.(updated, change, explanation, outcomeRecommendation);
   }}
-  onClose={() => (outcomeAction = null)}
+  onClose={() => {
+    outcomeAction = null;
+    outcomeRecommendation = null;
+  }}
 />
 
 <style>
   .advisor {
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
+    gap: 0.8rem;
     height: 100%;
     min-height: 0;
     overflow: hidden;
+  }
+
+  /* When the parent renders the panel chrome (App.svelte left column
+   * with its own tab strip), strip the outer padding and let the
+   * recommendations list fill the remaining space. */
+  .advisor.advisor-embedded {
+    gap: 0.6rem;
+    height: 100%;
   }
 
   .advisor-head {
@@ -570,8 +662,8 @@
     justify-content: space-between;
     gap: 0.8rem;
     align-items: center;
-    border-bottom: 1px solid rgba(197, 143, 61, 0.25);
-    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    padding-bottom: 0.7rem;
   }
 
   h2 {
@@ -586,8 +678,8 @@
 
   .success-box {
     min-width: 110px;
-    border: 1px solid rgba(114, 255, 88, 0.42);
-    background: radial-gradient(circle, rgba(47, 123, 18, 0.22), rgba(0, 0, 0, 0.35));
+    border: 1px solid rgba(114, 255, 88, 0.32);
+    background: radial-gradient(circle, rgba(47, 123, 18, 0.2), rgba(0, 0, 0, 0.22));
     color: #72ff58;
     padding: 0.3rem 0.7rem;
     display: inline-flex;
@@ -611,24 +703,31 @@
 
   .controls {
     display: flex;
-    gap: 0.55rem;
+    gap: 0.7rem;
     align-items: center;
     flex-wrap: wrap;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(197, 143, 61, 0.22);
-    padding: 0.4rem 0.55rem;
-    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    padding: 0.55rem 0.7rem;
+    border-radius: 12px;
+    flex-shrink: 0;
   }
 
   .controls label.slider {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 0.5rem;
     font-size: 0.7rem;
     color: var(--fg-muted);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    min-width: 110px;
+    min-width: 150px;
+  }
+
+  .controls label.slider input[type='range'] {
+    width: 100%;
+    min-width: 70px;
   }
 
   .controls label.slider em {
@@ -645,7 +744,7 @@
     background: linear-gradient(180deg, rgba(220, 165, 70, 0.95), rgba(150, 105, 30, 0.95));
     color: #1a1100;
     border: 1px solid rgba(255, 211, 122, 0.85);
-    border-radius: 4px;
+    border-radius: 10px;
     padding: 0.45rem 0.85rem;
     font-weight: 700;
     cursor: pointer;
@@ -684,12 +783,12 @@
   }
 
   button.secondary {
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.28);
     color: var(--fg-muted);
     border: 1px solid var(--border);
     font-weight: 400;
     padding: 0.4rem 0.75rem;
-    border-radius: 4px;
+    border-radius: 10px;
     cursor: pointer;
   }
 
@@ -728,7 +827,7 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.65rem;
     overflow-y: auto;
     overflow-x: hidden;
     flex: 1 1 auto;
@@ -741,16 +840,17 @@
     grid-template-columns: 30px 48px minmax(0, 1fr);
     gap: 0.6rem;
     align-items: stretch;
-    background: linear-gradient(90deg, rgba(15, 20, 19, 0.98), rgba(6, 9, 11, 0.98));
-    border: 1px solid rgba(197, 143, 61, 0.32);
-    border-radius: 4px;
-    padding: 0.55rem 0.7rem;
+    background: linear-gradient(90deg, rgba(18, 23, 24, 0.98), rgba(8, 11, 13, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 16px;
+    padding: 0.72rem 0.82rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
   }
 
   .recommendations li.current {
-    border-color: rgba(114, 255, 88, 0.55);
-    background: linear-gradient(90deg, rgba(15, 32, 18, 0.98), rgba(6, 9, 11, 0.98));
-    box-shadow: inset 0 0 0 1px rgba(114, 255, 88, 0.12), 0 0 22px rgba(114, 255, 88, 0.08);
+    border-color: rgba(114, 255, 88, 0.38);
+    background: linear-gradient(90deg, rgba(16, 31, 20, 0.98), rgba(8, 11, 13, 0.98));
+    box-shadow: inset 0 1px 0 rgba(114, 255, 88, 0.12), 0 18px 32px rgba(0, 0, 0, 0.16);
   }
 
   .step-rail {
@@ -793,7 +893,7 @@
     place-items: center;
     border: 1px solid rgba(197, 143, 61, 0.28);
     background: radial-gradient(circle, rgba(197, 143, 61, 0.15), rgba(0, 0, 0, 0.5));
-    border-radius: 4px;
+    border-radius: 12px;
   }
 
   .step-icon img {
@@ -855,7 +955,7 @@
   .prob-bar {
     height: 6px;
     background: rgba(255, 255, 255, 0.06);
-    border-radius: 3px;
+    border-radius: 999px;
     overflow: hidden;
     border: 1px solid rgba(197, 143, 61, 0.18);
   }
@@ -913,7 +1013,7 @@
   }
 
   .step-cta {
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.28);
     color: var(--gold);
     border: 1px solid var(--border-gold);
     border-radius: 999px;
@@ -1002,8 +1102,8 @@
   }
 
   .why {
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
+    border: 1px solid rgba(197, 143, 61, 0.22);
+    border-radius: 10px;
     background: rgba(0, 0, 0, 0.25);
     padding: 0.35rem 0.5rem;
   }
