@@ -1,0 +1,282 @@
+# Training corpus (M16.6).
+#
+# Each `[[goal]]` describes one training task the offline `train-advisor`
+# binary processes: starting from a Normal-rarity item of the given
+# class/ilvl, the trained policy attempts to reach the listed target
+# concepts under the budget.
+#
+# v3 ships a representative set covering the major gear classes; the
+# full ~50-goal corpus from `docs/81-engine-training-and-rule-encoding-plan.md`
+# §6.6 lands incrementally as the bundle's CoE weight coverage broadens
+# to cover non-recombinable bases (Charms / Tablets / Waystones, M14.7).
+#
+# Format:
+# - id: stable identifier (matches strategy ids when appropriate)
+# - display_name: human-readable
+# - item_class: PascalCase ItemClassId
+# - ilvl: starting item level
+# - budget_div: divine-equivalent ceiling
+# - target.prefixes / target.suffixes: list of TargetSpec entries
+#   (concept / concept_any / count / min_tier / allow_hybrid)
+
+# =====================================================================
+# Body armour
+# =====================================================================
+[[goal]]
+id = "body-armour-3xt1-es-tri-res"
+display_name = "3xT1 ES BodyArmour with Tri-Res"
+item_class = "BodyArmour"
+ilvl = 82
+budget_div = 200.0
+
+[[goal.target.prefixes]]
+concept = "EnergyShield"
+count = 3
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 2
+min_tier = 2
+
+# ---------------------------------------------------------------------
+[[goal]]
+id = "body-armour-3xt1-life-tri-res"
+display_name = "3xT1 Life BodyArmour with Tri-Res (str-base)"
+item_class = "BodyArmour"
+ilvl = 82
+budget_div = 150.0
+
+[[goal.target.prefixes]]
+concept = "Life"
+count = 3
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 2
+min_tier = 2
+
+# =====================================================================
+# Helmet
+# =====================================================================
+[[goal]]
+id = "helmet-life-accuracy-tri-res"
+display_name = "Life + Accuracy + Tri-Res Helmet"
+item_class = "Helmet"
+ilvl = 82
+budget_div = 80.0
+
+[[goal.target.prefixes]]
+concept = "Life"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept = "AccuracyRating"
+count = 1
+min_tier = 2
+
+[[goal.target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 3
+min_tier = 2
+
+# =====================================================================
+# Boots
+# =====================================================================
+[[goal]]
+id = "boots-30ms-life-tri-res"
+display_name = "30%MS + Life + Tri-Res Boots"
+item_class = "Boots"
+ilvl = 82
+budget_div = 60.0
+
+[[goal.target.prefixes]]
+concept = "MovementSpeed"
+count = 1
+min_tier = 1
+
+[[goal.target.prefixes]]
+concept = "Life"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 3
+min_tier = 2
+
+# =====================================================================
+# Gloves
+# =====================================================================
+[[goal]]
+id = "gloves-attack-speed-tri-res"
+display_name = "AS + Life + Tri-Res Gloves"
+item_class = "Gloves"
+ilvl = 82
+budget_div = 80.0
+
+[[goal.target.prefixes]]
+concept = "AttackSpeed"
+count = 1
+min_tier = 1
+
+[[goal.target.prefixes]]
+concept = "Life"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept = "AccuracyRating"
+count = 1
+min_tier = 2
+
+[[goal.target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 2
+min_tier = 2
+
+# =====================================================================
+# Belt
+# =====================================================================
+[[goal]]
+id = "belt-life-stun-tri-res"
+display_name = "Life + Stun + Tri-Res Belt"
+item_class = "Belt"
+ilvl = 82
+budget_div = 50.0
+
+[[goal.target.prefixes]]
+concept = "Life"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept = "StunThreshold"
+count = 1
+min_tier = 2
+
+[[goal.target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 3
+min_tier = 2
+
+# =====================================================================
+# Weapon — 1H physical
+# =====================================================================
+[[goal]]
+id = "1h-attack-physical-tri"
+display_name = "1H Phys Weapon"
+item_class = "OneHandSword"
+ilvl = 82
+budget_div = 150.0
+
+[[goal.target.prefixes]]
+concept = "IncreasedPhysicalDamage"
+count = 1
+min_tier = 1
+
+[[goal.target.prefixes]]
+concept = "AddedPhysicalDamage"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept = "AttackSpeed"
+count = 1
+min_tier = 2
+
+[[goal.target.suffixes]]
+concept = "AccuracyRating"
+count = 1
+min_tier = 2
+
+# =====================================================================
+# Bow
+# =====================================================================
+[[goal]]
+id = "bow-projectile-attack"
+display_name = "Bow Projectile Phys"
+item_class = "Bow"
+ilvl = 82
+budget_div = 150.0
+
+[[goal.target.prefixes]]
+concept = "IncreasedPhysicalDamage"
+count = 1
+min_tier = 1
+
+[[goal.target.prefixes]]
+concept = "AddedPhysicalDamage"
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept = "AttackSpeed"
+count = 1
+min_tier = 2
+
+[[goal.target.suffixes]]
+concept = "ProjectileSpeed"
+count = 1
+min_tier = 2
+
+# =====================================================================
+# Caster Weapon
+# =====================================================================
+[[goal]]
+id = "caster-weapon-spell-skill"
+display_name = "Caster Weapon: SpellDamage + Skill + Cast Speed"
+item_class = "Wand"
+ilvl = 82
+budget_div = 150.0
+
+[[goal.target.prefixes]]
+concept = "SpellDamage"
+count = 1
+min_tier = 1
+
+[[goal.target.prefixes]]
+concept = "AddedSkillLevel"
+count = 1
+min_tier = 1
+
+[[goal.target.suffixes]]
+concept = "CastSpeed"
+count = 1
+min_tier = 2
+
+[[goal.target.suffixes]]
+concept = "Intelligence"
+count = 1
+min_tier = 2
+
+# =====================================================================
+# Jewel
+# =====================================================================
+[[goal]]
+id = "jewel-cranium-desecrate"
+display_name = "Jewel Cranium Desecrate"
+item_class = "Jewel"
+ilvl = 82
+budget_div = 60.0
+
+[[goal.target.prefixes]]
+concept_any = ["Life", "EnergyShield", "IncreasedPhysicalDamage", "SpellDamage"]
+count = 1
+min_tier = 1
+allow_hybrid = true
+
+[[goal.target.suffixes]]
+concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
+count = 1
+min_tier = 2

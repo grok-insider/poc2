@@ -20,9 +20,17 @@ path = "src/bin/fetch_base_icons.rs"
 name = "regen-poe2db-fixtures"
 path = "src/bin/regen_poe2db_fixtures.rs"
 
+[[bin]]
+name = "train-advisor"
+path = "src/bin/train_advisor.rs"
+
 [dependencies]
 poc2-engine.workspace = true
 poc2-data.workspace = true
+poc2-advisor.workspace = true
+poc2-market.workspace = true
+poc2-rules.workspace = true
+poc2-strategies.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
