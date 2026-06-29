@@ -23,12 +23,17 @@
 //!    ≥ `0.72`, or at a low floor of `0.55` only when it beats the
 //!    second-best skeleton candidate by a margin ≥ `0.18`.
 //!
-//! The matcher carries no locale knowledge: translation (mapping a
-//! localized name to its canonical English key) is a separate concern with
-//! a clearly-marked seam in [`NameIndex::resolve`].
+//! Localized clients (German, French, Portuguese, Russian, Spanish) print
+//! item names in their own language, while the price feeds key everything
+//! in English. [`NameTranslator`] bridges that gap: it maps a localized
+//! display name back to its canonical English key *before* the fuzzy
+//! pipeline runs. English clients are a no-op (the translator simply passes
+//! the query through). Translation is wired into [`NameIndex::resolve_with`]
+//! at the seam [`NameIndex::resolve`] documents.
 
 use std::collections::HashMap;
 
+use serde::Deserialize;
 use strsim::levenshtein as strsim_levenshtein;
 
 /// Fuzzy similarity floor for an accepted Levenshtein match.
@@ -257,17 +262,35 @@ impl NameIndex {
     }
 
     /// Resolve `query` to its best canonical key, or `None` if nothing
-    /// clears the acceptance thresholds.
+    /// clears the acceptance thresholds. No locale translation is applied;
+    /// the query is assumed already English (or an English client).
+    ///
+    /// To resolve a localized display name, use [`NameIndex::resolve_with`]
+    /// with a [`NameTranslator`].
+    #[must_use]
+    pub fn resolve(&self, query: &str) -> Option<NameMatch> {
+        self.resolve_with(query, None)
+    }
+
+    /// Resolve `query`, optionally translating a localized display name to
+    /// its canonical English form first via `translator`. When `translator`
+    /// is `None` (or it has no entry for the query) the query is scored
+    /// as-is — so this is a strict superset of [`NameIndex::resolve`].
     // Lengths cast to `f64` for the prefix score are short item names; the
     // cast cannot lose precision in practice.
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
-    pub fn resolve(&self, query: &str) -> Option<NameMatch> {
-        // TODO(locales): a NameTranslator would run here first — map a
-        // localized display name to its canonical English form before any
-        // normalization/scoring. Locales are a separate follow-up; for now
-        // resolution operates directly on the (folded) query.
-        let q = normalize(&fold(query));
+    pub fn resolve_with(
+        &self,
+        query: &str,
+        translator: Option<&NameTranslator>,
+    ) -> Option<NameMatch> {
+        // Locale seam: a localized name (e.g. "Spiegel von Kalandra") is
+        // mapped to its English form ("Mirror of Kalandra") before any
+        // normalization/scoring. English queries pass through unchanged.
+        let translated = translator.and_then(|t| t.translate(query));
+        let source = translated.as_deref().unwrap_or(query);
+        let q = normalize(&fold(source));
         if q.is_empty() {
             return None;
         }
@@ -348,6 +371,150 @@ impl NameIndex {
 
         None
     }
+}
+
+// ─────────────────────────── locale translation ───────────────────────────
+
+/// On-disk schema of a `data/locales/<code>.json` file. `entries` maps the
+/// canonical **English** name to its **localized** display name (English-keyed
+/// so the files diff cleanly and a missing translation is obvious).
+#[derive(Debug, Clone, Deserialize)]
+pub struct LocaleFile {
+    /// Human-readable language name (e.g. `"German"`).
+    pub language: String,
+    /// Short locale code (e.g. `"de"`).
+    pub code: String,
+    /// Provenance tag (e.g. `"curated-starter"` or `"poe2db"`).
+    #[serde(default)]
+    pub source: String,
+    /// Free-form note about coverage/regeneration.
+    #[serde(default)]
+    pub note: String,
+    /// `English name → localized name`.
+    pub entries: HashMap<String, String>,
+}
+
+/// Maps a localized item display name back to its canonical English name.
+///
+/// Built by inverting a [`LocaleFile`]'s `English → localized` entries into a
+/// `localized → English` lookup, in two layers:
+///
+/// 1. an **exact** map keyed by the normalized localized name, and
+/// 2. a **folded** map keyed by the normalized+folded localized name, so an
+///    OCR/client that drops or mangles diacritics still resolves. Folded keys
+///    that would collide on two *different* English targets are dropped as
+///    ambiguous (the exact map still carries them).
+///
+/// [`translate`](NameTranslator::translate) returns the English name (the
+/// caller then feeds it to [`NameIndex::resolve`]); an unknown name yields
+/// `None` so English clients pass straight through.
+#[derive(Debug, Clone, Default)]
+pub struct NameTranslator {
+    code: String,
+    /// normalized localized name → English name.
+    exact: HashMap<String, String>,
+    /// normalized+folded localized name → English name (ambiguous dropped).
+    folded: HashMap<String, String>,
+}
+
+impl NameTranslator {
+    /// Build a translator from an `English → localized` entry map and a code.
+    #[must_use]
+    pub fn from_entries(code: impl Into<String>, entries: &HashMap<String, String>) -> Self {
+        let mut exact = HashMap::new();
+        // Track folded-key collisions: a folded key mapping to ≥2 distinct
+        // English targets is ambiguous and must not be trusted.
+        let mut folded_targets: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+        let mut folded: HashMap<String, String> = HashMap::new();
+
+        for (english, localized) in entries {
+            let norm = normalize(localized);
+            if norm.is_empty() {
+                continue;
+            }
+            exact.entry(norm.clone()).or_insert_with(|| english.clone());
+
+            let fkey = normalize(&fold(localized));
+            folded_targets
+                .entry(fkey.clone())
+                .or_default()
+                .insert(english.clone());
+            folded.entry(fkey).or_insert_with(|| english.clone());
+        }
+        // Drop folded keys that resolve to more than one English target.
+        folded.retain(|k, _| folded_targets.get(k).is_none_or(|set| set.len() == 1));
+
+        Self {
+            code: code.into(),
+            exact,
+            folded,
+        }
+    }
+
+    /// Build a translator from a parsed [`LocaleFile`].
+    #[must_use]
+    pub fn from_locale_file(file: &LocaleFile) -> Self {
+        Self::from_entries(&file.code, &file.entries)
+    }
+
+    /// Parse a `data/locales/<code>.json` string into a translator.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        let file: LocaleFile = serde_json::from_str(json)?;
+        Ok(Self::from_locale_file(&file))
+    }
+
+    /// The locale code this translator was built for.
+    #[must_use]
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    /// Number of translatable names.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.exact.len()
+    }
+
+    /// Whether the translator holds no entries.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.exact.is_empty()
+    }
+
+    /// Translate a localized display name to its canonical English name.
+    /// Tries the exact normalized map, then the diacritic-folded map.
+    /// Returns `None` when the name isn't known (English clients, or names
+    /// not in this locale's table) so the caller scores the original query.
+    #[must_use]
+    pub fn translate(&self, localized: &str) -> Option<String> {
+        let norm = normalize(localized);
+        if let Some(en) = self.exact.get(&norm) {
+            return Some(en.clone());
+        }
+        let fkey = normalize(&fold(localized));
+        self.folded.get(&fkey).cloned()
+    }
+}
+
+/// The bundled locale files, embedded so the WASM build needs no filesystem.
+/// `(code, json)` pairs; codes mirror the PoeAncients locale naming.
+pub const BUNDLED_LOCALES: &[(&str, &str)] = &[
+    ("de", include_str!("../data/locales/de.json")),
+    ("fr", include_str!("../data/locales/fr.json")),
+    ("pt", include_str!("../data/locales/pt.json")),
+    ("ru", include_str!("../data/locales/ru.json")),
+    ("sp", include_str!("../data/locales/sp.json")),
+];
+
+/// Build a [`NameTranslator`] for a bundled locale `code`
+/// (one of `de`, `fr`, `pt`, `ru`, `sp`). Returns `None` for unknown codes.
+#[must_use]
+pub fn bundled_translator(code: &str) -> Option<NameTranslator> {
+    let target = code.trim().to_lowercase();
+    BUNDLED_LOCALES
+        .iter()
+        .find(|(c, _)| *c == target)
+        .and_then(|(_, json)| NameTranslator::from_json(json).ok())
 }
 
 #[cfg(test)]
@@ -465,5 +632,118 @@ mod tests {
     fn empty_query_returns_none() {
         let idx = sample_index();
         assert!(idx.resolve("   !!!  ").is_none());
+    }
+
+    // ─────────────────────────── translator ───────────────────────────
+
+    #[test]
+    fn all_bundled_locales_parse() {
+        for (code, _) in BUNDLED_LOCALES {
+            let t =
+                bundled_translator(code).unwrap_or_else(|| panic!("locale {code} should parse"));
+            assert_eq!(t.code(), *code);
+            assert!(!t.is_empty(), "locale {code} has no entries");
+        }
+        assert!(bundled_translator("xx").is_none());
+        assert!(
+            bundled_translator("DE").is_some(),
+            "code match is case-insensitive"
+        );
+    }
+
+    #[test]
+    fn translator_maps_localized_to_english() {
+        let de = bundled_translator("de").unwrap();
+        assert_eq!(
+            de.translate("Spiegel von Kalandra").as_deref(),
+            Some("Mirror of Kalandra")
+        );
+        // Case/punctuation-insensitive via normalize.
+        assert_eq!(
+            de.translate("  spiegel von kalandra  ").as_deref(),
+            Some("Mirror of Kalandra")
+        );
+        // Unknown name → None (English passes straight through downstream).
+        assert!(de.translate("Mirror of Kalandra").is_none());
+    }
+
+    #[test]
+    fn translator_folds_dropped_diacritics() {
+        let de = bundled_translator("de").unwrap();
+        // "Göttliche Kugel" with the umlaut dropped by a client/OCR.
+        assert_eq!(
+            de.translate("Gottliche Kugel").as_deref(),
+            Some("Divine Orb")
+        );
+    }
+
+    #[test]
+    fn resolve_with_translator_resolves_localized_name() {
+        let idx = NameIndex::new([
+            "mirror of kalandra",
+            "divine orb",
+            "exalted orb",
+            "greater vision rune",
+        ]);
+        let fr = bundled_translator("fr").unwrap();
+        // Localized → English → fuzzy-resolved canonical key.
+        let m = idx
+            .resolve_with("Miroir de Kalandra", Some(&fr))
+            .expect("localized resolve");
+        assert_eq!(m.key, "mirror of kalandra");
+        // The translator yields an EXACT English hit (score 1.0), strictly
+        // better than the bare query's best (a lower-confidence fuzzy hit, if
+        // any). This is the value of translating before scoring.
+        assert_eq!(m.method, "exact");
+        let bare = idx.resolve("Miroir de Kalandra");
+        assert!(
+            bare.is_none_or(|b| b.score < m.score),
+            "translated match must beat the untranslated one"
+        );
+
+        // A localized name with no English-ish cognate only resolves WITH the
+        // translator (bare query finds nothing).
+        let m2 = idx
+            .resolve_with("Rune de vision majeure", Some(&fr))
+            .expect("localized resolve 2");
+        assert_eq!(m2.key, "greater vision rune");
+        assert!(idx.resolve("Rune de vision majeure").is_none());
+    }
+
+    #[test]
+    fn resolve_with_none_matches_plain_resolve() {
+        let idx = sample_index();
+        assert_eq!(
+            idx.resolve_with("Mirror of Kalandra", None),
+            idx.resolve("Mirror of Kalandra")
+        );
+    }
+
+    #[test]
+    fn russian_cyrillic_exact_round_trips() {
+        let ru = bundled_translator("ru").unwrap();
+        // Cyrillic passes through the Latin-only fold; the exact map carries it.
+        assert_eq!(
+            ru.translate("Зеркало Каландры").as_deref(),
+            Some("Mirror of Kalandra")
+        );
+    }
+
+    #[test]
+    fn english_keys_consistent_across_locales() {
+        // Every locale should translate back to the SAME English key set
+        // (catches a typo'd English key in one file).
+        let mut reference: Option<std::collections::BTreeSet<String>> = None;
+        for (code, _) in BUNDLED_LOCALES {
+            let t = bundled_translator(code).unwrap();
+            let targets: std::collections::BTreeSet<String> = t.exact.values().cloned().collect();
+            match &reference {
+                None => reference = Some(targets),
+                Some(r) => assert_eq!(
+                    &targets, r,
+                    "locale {code} English target set differs from the first locale"
+                ),
+            }
+        }
     }
 }

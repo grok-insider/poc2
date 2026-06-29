@@ -44,7 +44,9 @@ pub use meta::{
     fetch_meta_snapshot, off_meta, MetaBuild, MetaError, MetaSnapshot, NicheTarget,
     POE_NINJA_BUILDS_BASE_URL, POE_NINJA_DEFAULT_LEAGUE,
 };
-pub use name_match::{NameIndex, NameMatch};
+pub use name_match::{
+    bundled_translator, LocaleFile, NameIndex, NameMatch, NameTranslator, BUNDLED_LOCALES,
+};
 pub use prices::{
     apply_feed_to_valuator, apply_ninja_to_valuator, default_id_mapping, NinjaExchangeSnapshot,
     NinjaPriceEntry, PoeScoutCurrencyEntry, PoeScoutLeague, PoeScoutSnapshot, PriceError,

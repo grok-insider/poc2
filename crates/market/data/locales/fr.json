@@ -1,0 +1,22 @@
+{
+  "language": "French",
+  "code": "fr",
+  "source": "curated-starter",
+  "note": "Starter set of common PoE2 currency/rune display names (French client). English keys must match the canonical names the matcher indexes. Extend via scripts/regen-locales.mjs (poe2db) with human review.",
+  "entries": {
+    "Orb of Transmutation": "Orbe de transmutation",
+    "Orb of Augmentation": "Orbe d'augmentation",
+    "Orb of Alchemy": "Orbe d'alchimie",
+    "Orb of Annulment": "Orbe d'annulation",
+    "Regal Orb": "Orbe régale",
+    "Exalted Orb": "Orbe divine",
+    "Divine Orb": "Orbe sacrée",
+    "Chaos Orb": "Orbe du chaos",
+    "Vaal Orb": "Orbe Vaal",
+    "Mirror of Kalandra": "Miroir de Kalandra",
+    "Greater Vision Rune": "Rune de vision majeure",
+    "Vision Rune": "Rune de vision",
+    "Fracturing Orb": "Orbe de fracturation",
+    "Hinekora's Lock": "Verrou d'Hinekora"
+  }
+}

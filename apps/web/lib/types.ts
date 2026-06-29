@@ -429,6 +429,12 @@ export interface ResolveNameArgs {
    * matcher resolves over the valuator's currency display names.
    */
   candidates?: string[];
+  /**
+   * Optional locale code (`de` | `fr` | `pt` | `ru` | `sp`). When set, a
+   * localized client/OCR name is translated to its canonical English form
+   * before fuzzy scoring. Omit for English clients.
+   */
+  locale?: "de" | "fr" | "pt" | "ru" | "sp";
 }
 
 /// Result returned by the engine's `resolveName`.
