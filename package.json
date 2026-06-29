@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "wasm": "bun scripts/build-wasm.mjs",
+    "ocr:assets": "bun scripts/fetch-ocr-assets.mjs",
     "dev": "cd apps/web && bun run dev",
     "build": "cd apps/web && bun run build",
     "typecheck": "cd apps/web && bun run typecheck",
