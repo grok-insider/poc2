@@ -18,6 +18,9 @@ out/
 /public/genesis-icons/
 # mod → trade-API stat-id table (regenerate with `cargo run -p poc2-pipeline --bin fetch-trade-stats`)
 /public/trade-stats.json
+# vendored Tesseract.js OCR runtime — worker + core wasm + eng model
+# (regenerate with `bun run ocr:assets`; large blob, fetched not committed)
+/public/ocr/
 
 # misc
 *.tsbuildinfo

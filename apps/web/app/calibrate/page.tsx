@@ -35,6 +35,15 @@ export default function CalibratePage() {
 
   useEffect(() => {
     setHasBridge(getDesktopBridge() !== null);
+    // Esc cancels an in-progress selection (main also hides the window on Esc).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        dragging.current = false;
+        setDrag(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const onDown = useCallback((e: React.MouseEvent) => {
