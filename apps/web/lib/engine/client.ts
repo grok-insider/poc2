@@ -27,6 +27,8 @@ import type {
   Recommendation,
   RecoveryStepView,
   RerollableModsResponse,
+  ResolveNameArgs,
+  ResolveView,
   TrialDistribution,
 } from "../types";
 
@@ -143,6 +145,10 @@ export const engine = {
   /** Apply a browser-fetched poe2scout snapshot to the engine's valuator. */
   applyPrices: (snapshot: PoeScoutSnapshot) =>
     call<ApplyPricesView>("applyPrices", [snapshot]),
+
+  // ---- resolve -----------------------------------------------------------
+  /** Fuzzy-resolve a noisy item/currency name onto a canonical key. */
+  resolveName: (args: ResolveNameArgs) => call<ResolveView>("resolveName", [args]),
 
   // ---- genesis tree ------------------------------------------------------
   /** The Genesis Tree view (0.5): wombs, nodes, goal presets, farming notes. */

@@ -346,6 +346,28 @@ impl Engine {
         serde_json::to_string(&view).map_err(|e| JsError::new(&format!("serialize failed: {e}")))
     }
 
+    // ===== resolve =====
+    /// Fuzzy-resolve a noisy item/currency name onto a canonical key.
+    /// `args_json` is JSON of `{ raw, candidates? }`: with `candidates` the
+    /// lookup is over that ad-hoc list; without it, over the engine
+    /// valuator's currency display names (the matched `CurrencyId` string).
+    /// Returns JSON of `ResolveView` (`{ key, score, method }`).
+    #[wasm_bindgen(js_name = resolveName)]
+    pub fn resolve_name(&self, args_json: &str) -> Result<String, JsError> {
+        #[derive(serde::Deserialize)]
+        struct ResolveNameArgs {
+            raw: String,
+            #[serde(default)]
+            candidates: Option<Vec<String>>,
+        }
+
+        let args: ResolveNameArgs = serde_json::from_str(args_json)
+            .map_err(|e| JsError::new(&format!("bad resolve args json: {e}")))?;
+        let view =
+            commands::resolve::resolve_name(&self.state.valuator, &args.raw, args.candidates);
+        serde_json::to_string(&view).map_err(|e| JsError::new(&format!("serialize failed: {e}")))
+    }
+
     // ===== database =====
     /// List craftable base items. `args_json` is JSON of `BasesArgs`
     /// (`{ class_pascal?, include_legacy? }`); returns JSON of `Vec<BaseSummary>`.
