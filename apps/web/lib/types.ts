@@ -397,6 +397,27 @@ export interface ApplyPricesView {
   unmatched: string[];
 }
 
+/// Arguments for the engine's `resolveName` fuzzy matcher.
+export interface ResolveNameArgs {
+  /** The noisy / OCR-supplied name to resolve. */
+  raw: string;
+  /**
+   * Optional ad-hoc candidate keys to match against. When omitted, the
+   * matcher resolves over the valuator's currency display names.
+   */
+  candidates?: string[];
+}
+
+/// Result returned by the engine's `resolveName`.
+export interface ResolveView {
+  /** The matched canonical key, or `null` when nothing resolved. */
+  key: string | null;
+  /** Confidence score in `[0, 1]` (`0` when unmatched). */
+  score: number;
+  /** Match stage: `exact` | `prefix` | `fuzzy` | `skeleton` | `currency` | `none`. */
+  method: string;
+}
+
 export interface PriceRefreshMeta {
   league: string;
   fetched_at: string;

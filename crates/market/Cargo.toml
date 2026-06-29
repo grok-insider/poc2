@@ -16,6 +16,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 ahash.workspace = true
+# Pure-Rust string-similarity (Levenshtein) for the fuzzy name matcher.
+# WASM-safe; already present transitively in Cargo.lock.
+strsim = "0.11"
 # Network/disk price-feed deps are optional so the advisor (and the WASM build)
 # can depend on this crate for the `Valuator` type alone, without pulling in
 # reqwest/tokio (which don't build for wasm32-unknown-unknown).

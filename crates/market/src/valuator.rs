@@ -247,6 +247,56 @@ impl Valuator {
     pub fn is_empty(&self) -> bool {
         self.table.is_empty()
     }
+
+    /// Resolve a noisy, user/OCR-supplied currency name onto a known
+    /// [`CurrencyId`], using the fuzzy [`NameIndex`] matcher.
+    ///
+    /// The valuator only knows currencies by their PascalCase engine ids
+    /// (e.g. `"GreaterOrbOfTransmutation"`); those are de-cased to human
+    /// display names (`"greater orb of transmutation"`) and indexed. A
+    /// successful resolve maps the matched display name back to its id.
+    ///
+    /// Returns `None` when nothing clears the matcher's thresholds.
+    #[must_use]
+    pub fn resolve_name(&self, raw: &str) -> Option<CurrencyId> {
+        // The table is small (tens of entries) and `resolve_name` is a
+        // one-shot per user action, so we build the index on demand rather
+        // than carry interior-mutable cache state through `Clone`/`Default`.
+        // (Lazy caching can be layered on later without touching callers.)
+        let mut display_to_id: AHashMap<String, CurrencyId> = AHashMap::new();
+        for id in self.table.keys() {
+            let display = crate::name_match::normalize(&decase(id.as_str()));
+            if display.is_empty() {
+                continue;
+            }
+            display_to_id.entry(display).or_insert_with(|| id.clone());
+        }
+        let index = crate::name_match::NameIndex::new(display_to_id.keys());
+        let matched = index.resolve(raw)?;
+        display_to_id.get(&matched.key).cloned()
+    }
+}
+
+/// Split a PascalCase / camelCase engine id into space-separated words.
+///
+/// `"GreaterOrbOfTransmutation"` → `"Greater Orb Of Transmutation"`;
+/// digit↔letter boundaries are also split (`"Tier2Rune"` → `"Tier 2 Rune"`).
+/// Normalization downstream handles lowercasing and spacing collapse.
+fn decase(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut prev: Option<char> = None;
+    for ch in s.chars() {
+        if let Some(p) = prev {
+            let boundary = (ch.is_uppercase() && !p.is_uppercase())
+                || (ch.is_ascii_digit() != p.is_ascii_digit());
+            if boundary {
+                out.push(' ');
+            }
+        }
+        out.push(ch);
+        prev = Some(ch);
+    }
+    out
 }
 
 impl Default for Valuator {
@@ -330,5 +380,28 @@ mod tests {
         );
         let d = v.get(&CurrencyId::from("CustomCurrency")).unwrap();
         assert!(approx(d.expected, 50.0, 1e-9));
+    }
+
+    #[test]
+    fn resolve_name_maps_noisy_input_to_currency_id() {
+        let v = Valuator::default();
+
+        // Exact (de-cased) display name.
+        assert_eq!(
+            v.resolve_name("Orb of Transmutation"),
+            Some(CurrencyId::from("OrbOfTransmutation"))
+        );
+        // Typo recovers to the right id.
+        assert_eq!(
+            v.resolve_name("perfect exalted ohb"),
+            Some(CurrencyId::from("PerfectExaltedOrb"))
+        );
+        // Prefix truncation (≥10 chars, unique completion).
+        assert_eq!(
+            v.resolve_name("mirror of kal"),
+            Some(CurrencyId::from("MirrorOfKalandra"))
+        );
+        // Pure gibberish stays unresolved.
+        assert!(v.resolve_name("zzzz qqqq not a currency").is_none());
     }
 }

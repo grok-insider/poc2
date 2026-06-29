@@ -10,4 +10,5 @@ pub mod parse;
 pub mod prices;
 pub mod recovery;
 pub mod reroll;
+pub mod resolve;
 pub mod sim;

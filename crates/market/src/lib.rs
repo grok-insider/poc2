@@ -30,6 +30,7 @@
 pub mod cache;
 #[cfg(feature = "net")]
 pub mod meta;
+pub mod name_match;
 pub mod prices;
 pub mod valuator;
 
@@ -43,6 +44,7 @@ pub use meta::{
     fetch_meta_snapshot, off_meta, MetaBuild, MetaError, MetaSnapshot, NicheTarget,
     POE_NINJA_BUILDS_BASE_URL, POE_NINJA_DEFAULT_LEAGUE,
 };
+pub use name_match::{NameIndex, NameMatch};
 #[cfg(feature = "net")]
 pub use prices::fetch_snapshot;
 pub use prices::{
