@@ -4,7 +4,13 @@
 // change them in both places or not at all.
 import { BrowserWindow, app, ipcMain, shell } from "electron";
 import { captureItemText, status as captureStatus } from "./capture";
+import type { Capabilities } from "./capture/capabilities";
+import { captureRegion, coerceRect, type CaptureRect } from "./capture/screen";
+import { isAllowlistedUrl } from "./fetchAllowlist";
 import { tradeFetch, tradeSearch } from "./trade/proxy";
+
+// Re-export so callers/tests have one import site (impl is electron-free).
+export { isAllowlistedUrl } from "./fetchAllowlist";
 
 export const CHANNELS = {
   itemText: "poc2:item-text", // main → renderer (push)
@@ -15,18 +21,36 @@ export const CHANNELS = {
   tradeFetch: "poc2:trade-fetch", // renderer → main (invoke)
   fetchJson: "poc2:fetch-json", // renderer → main (invoke)
   versions: "poc2:versions", // renderer → main (invoke, sync-ish)
+  // --- ADR-0013: region capture + price overlay / calibration ---
+  capabilities: "poc2:capabilities", // renderer → main (invoke)
+  captureRegion: "poc2:capture-region", // renderer → main (invoke)
+  overlayShow: "poc2:overlay-show", // renderer → main (invoke)
+  overlayHide: "poc2:overlay-hide", // renderer → main (invoke)
+  overlaySetRegion: "poc2:overlay-set-region", // renderer → main (invoke)
+  calibrateRegion: "poc2:calibrate-region", // renderer → main (invoke / push-back)
+  regionCalibrated: "poc2:region-calibrated", // main → renderer (push)
+  overlayState: "poc2:overlay-state", // main → renderer (push: show/hide/degraded)
 } as const;
 
-/** Hosts the renderer may fetch JSON from via main (CORS bypass). */
-const FETCH_ALLOWLIST = ["poe2scout.com", "www.pathofexile.com"];
-
-export function isAllowlistedUrl(raw: string): boolean {
-  try {
-    const u = new URL(raw);
-    return u.protocol === "https:" && FETCH_ALLOWLIST.includes(u.hostname);
-  } catch {
-    return false;
-  }
+/**
+ * Window/overlay surface that main.ts owns; injected into `registerIpc` so this
+ * module never creates BrowserWindows. The renderer's overlay/calibration
+ * channels delegate here. All members are optional-safe (degraded sessions may
+ * not have an overlay window at all).
+ */
+export interface OverlayController {
+  /** Current capability gate result (computed once at startup). */
+  capabilities(): Capabilities;
+  /** Show the click-through overlay (full mode only; no-op when degraded). */
+  showOverlay(): void;
+  /** Hide the overlay window. */
+  hideOverlay(): void;
+  /** Reposition the overlay over the given region. */
+  setOverlayRegion(rect: CaptureRect): void;
+  /** Open the full-screen calibration window. */
+  openCalibration(): void;
+  /** Persist a calibrated region and notify listeners (called from calibrate). */
+  applyCalibration(rect: CaptureRect): void;
 }
 
 /** Run a capture and push the result to the window. Used by hotkey + IPC. */
@@ -40,7 +64,10 @@ export async function runCapture(win: BrowserWindow, advanced: boolean): Promise
   return false;
 }
 
-export function registerIpc(getWindow: () => BrowserWindow | null): void {
+export function registerIpc(
+  getWindow: () => BrowserWindow | null,
+  overlay?: OverlayController,
+): void {
   ipcMain.handle(CHANNELS.captureNow, async (_e, advanced: unknown) => {
     const win = getWindow();
     if (!win) return false;
@@ -48,6 +75,48 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   });
 
   ipcMain.handle(CHANNELS.captureStatus, () => ({ ...captureStatus }));
+
+  // --- ADR-0013: capabilities + region capture + overlay/calibration ---
+
+  ipcMain.handle(CHANNELS.capabilities, () => overlay?.capabilities() ?? null);
+
+  ipcMain.handle(CHANNELS.captureRegion, async (_e, rect: unknown) => {
+    if (!coerceRect(rect)) {
+      return { ok: false as const, reason: "invalid-rect" as const };
+    }
+    const silent = overlay?.capabilities().silentRegionCapture ?? false;
+    return captureRegion(rect, silent);
+  });
+
+  ipcMain.handle(CHANNELS.overlayShow, () => {
+    overlay?.showOverlay();
+    return overlay?.capabilities().overlayMode ?? "degraded";
+  });
+
+  ipcMain.handle(CHANNELS.overlayHide, () => {
+    overlay?.hideOverlay();
+    return true;
+  });
+
+  ipcMain.handle(CHANNELS.overlaySetRegion, (_e, rect: unknown) => {
+    const parsed = coerceRect(rect);
+    if (!parsed) throw new Error("overlaySetRegion: invalid rect");
+    overlay?.setOverlayRegion(parsed);
+    return true;
+  });
+
+  // Calibration is bi-directional: the renderer may *open* the calibrator
+  // (no arg) or *report* a calibrated rect back (the drag-select result).
+  ipcMain.handle(CHANNELS.calibrateRegion, (_e, rect: unknown) => {
+    if (rect === undefined || rect === null) {
+      overlay?.openCalibration();
+      return true;
+    }
+    const parsed = coerceRect(rect);
+    if (!parsed) throw new Error("calibrateRegion: invalid rect");
+    overlay?.applyCalibration(parsed);
+    return true;
+  });
 
   ipcMain.handle(CHANNELS.openExternal, async (_e, url: unknown) => {
     if (typeof url !== "string" || !/^https?:\/\//.test(url)) return false;

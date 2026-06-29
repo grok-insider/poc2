@@ -39,6 +39,18 @@ describe("getDesktopBridge", () => {
       tradeFetch: async () => ({}),
       fetchJson: async () => ({}),
       versions: async () => ({ electron: "41.0.0" }),
+      capabilities: async () => ({
+        silentRegionCapture: true,
+        overlayMode: "full",
+        sessionKind: "win32",
+      }),
+      captureRegion: async () => ({ ok: true, dataUrl: "data:,", width: 1, height: 1 }),
+      overlayShow: async () => "full",
+      overlayHide: async () => true,
+      overlaySetRegion: async () => true,
+      calibrateRegion: async () => true,
+      onRegionCalibrated: () => () => seen.push("off-region"),
+      onOverlayState: () => () => seen.push("off-overlay"),
     };
     g.window = { poc2Desktop: bridge };
 

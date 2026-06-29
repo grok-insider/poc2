@@ -11,7 +11,23 @@ const CHANNELS = {
   tradeFetch: "poc2:trade-fetch",
   fetchJson: "poc2:fetch-json",
   versions: "poc2:versions",
+  // --- ADR-0013: region capture + price overlay / calibration ---
+  capabilities: "poc2:capabilities",
+  captureRegion: "poc2:capture-region",
+  overlayShow: "poc2:overlay-show",
+  overlayHide: "poc2:overlay-hide",
+  overlaySetRegion: "poc2:overlay-set-region",
+  calibrateRegion: "poc2:calibrate-region",
+  regionCalibrated: "poc2:region-calibrated",
+  overlayState: "poc2:overlay-state",
 } as const;
+
+interface CaptureRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 contextBridge.exposeInMainWorld("poc2Desktop", {
   onItemText(cb: (text: string) => void): () => void {
@@ -39,5 +55,39 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   },
   versions(): Promise<Record<string, string>> {
     return ipcRenderer.invoke(CHANNELS.versions);
+  },
+
+  // --- ADR-0013 ---
+  capabilities(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.capabilities);
+  },
+  captureRegion(rect: CaptureRect): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.captureRegion, rect);
+  },
+  overlayShow(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.overlayShow);
+  },
+  overlayHide(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.overlayHide);
+  },
+  overlaySetRegion(rect: CaptureRect): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.overlaySetRegion, rect);
+  },
+  /** Open the calibrator (no arg) or report a calibrated rect back to main. */
+  calibrateRegion(rect?: CaptureRect): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.calibrateRegion, rect ?? null);
+  },
+  /** Subscribe to "a region was calibrated" pushes. Returns an unsubscribe. */
+  onRegionCalibrated(cb: (rect: CaptureRect) => void): () => void {
+    const listener = (_e: unknown, rect: CaptureRect) => cb(rect);
+    ipcRenderer.on(CHANNELS.regionCalibrated, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.regionCalibrated, listener);
+  },
+  /** Subscribe to overlay state pushes (show/hide + degraded signal). */
+  onOverlayState(cb: (state: { visible: boolean; degraded: boolean }) => void): () => void {
+    const listener = (_e: unknown, state: { visible: boolean; degraded: boolean }) =>
+      cb(state);
+    ipcRenderer.on(CHANNELS.overlayState, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.overlayState, listener);
   },
 });

@@ -34,3 +34,37 @@ export function trackWindowState(win: BrowserWindow): void {
   win.on("moved", save);
   win.on("resized", save);
 }
+
+// --- ADR-0013: calibrated capture region + xdg portal token persistence ---
+
+const REGION_FILE = () =>
+  path.join(app.getPath("userData"), "capture-region.json");
+
+export interface PersistedCaptureRegion {
+  /** Calibrated screen rectangle (global logical px) for the price overlay. */
+  rect?: Rectangle;
+  /**
+   * xdg-desktop-portal restore token (Wayland). Reused on subsequent grabs so
+   * the user is only prompted once. Opaque; persisted verbatim.
+   */
+  portalToken?: string;
+}
+
+/** Load the persisted region + portal token; {} on first run / parse error. */
+export function loadCaptureRegion(): PersistedCaptureRegion {
+  try {
+    return JSON.parse(readFileSync(REGION_FILE(), "utf8")) as PersistedCaptureRegion;
+  } catch {
+    return {};
+  }
+}
+
+/** Persist (merge) the calibrated region / portal token. Best-effort. */
+export function saveCaptureRegion(patch: PersistedCaptureRegion): void {
+  try {
+    const merged = { ...loadCaptureRegion(), ...patch };
+    writeFileSync(REGION_FILE(), JSON.stringify(merged));
+  } catch {
+    // best-effort
+  }
+}
