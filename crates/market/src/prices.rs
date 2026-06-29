@@ -106,6 +106,60 @@ pub struct PoeScoutSnapshot {
     pub fetched_at: String,
 }
 
+// ===========================================================================
+// poe.ninja PoE2 exchange economy — a PARALLEL live price source.
+//
+// poe.ninja exposes a bulk-currency "exchange" economy overview at
+// `…/economy/exchange/current/overview`, queried per *type* (Currency,
+// Runes, …). Unlike poe2scout (slug → CurrencyId table), this source is
+// keyed by *display name* and resolved onto engine ids via the fuzzy
+// [`Valuator::resolve_name`] matcher, so it needs no hand-maintained slug
+// map. Only the HTTP fetch ([`fetch_ninja_exchange`]) is `net`-gated; the
+// snapshot types and [`apply_ninja_to_valuator`] build everywhere.
+// ===========================================================================
+
+/// poe.ninja PoE2 exchange-economy overview endpoint.
+pub const POE_NINJA_EXCHANGE_BASE: &str =
+    "https://poe.ninja/poe2/api/economy/exchange/current/overview";
+
+/// The exchange `type`s the advisor consults. Each is fetched as a separate
+/// `?type=<Type>` request and merged into one snapshot.
+pub const POE_NINJA_EXCHANGE_TYPES: &[&str] =
+    &["Currency", "Runes", "Expedition", "Verisium", "UncutGems"];
+
+/// One currency's price as derived from the poe.ninja exchange overview.
+///
+/// Both `divine_value` and `exalt_value` are populated from the raw
+/// `primaryValue` via the league's conversion rates (see
+/// [`fetch_ninja_exchange`]); `has_market_data` is `false` when poe.ninja
+/// reports a `null` primary value (no listings yet).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NinjaPriceEntry {
+    /// Price expressed in divine orbs.
+    pub divine_value: f64,
+    /// Price expressed in exalted orbs.
+    pub exalt_value: f64,
+    /// Whether poe.ninja had a non-null market value for this item.
+    pub has_market_data: bool,
+}
+
+/// Composite snapshot returned by [`fetch_ninja_exchange`].
+///
+/// `entries` is keyed by [`name_match::normalize`]d display name (e.g.
+/// `"divine orb"`); the caller resolves each onto a `CurrencyId` via the
+/// fuzzy matcher in [`apply_ninja_to_valuator`].
+///
+/// [`name_match::normalize`]: crate::name_match::normalize
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NinjaExchangeSnapshot {
+    /// League the snapshot was taken against.
+    pub league: String,
+    /// `normalize(name) → entry` map.
+    pub entries: HashMap<String, NinjaPriceEntry>,
+    /// ISO-8601 timestamp of the fetch.
+    pub fetched_at: String,
+}
+
 /// Errors a price fetch can raise.
 #[derive(Debug, thiserror::Error)]
 pub enum PriceError {
@@ -380,6 +434,245 @@ pub fn default_id_mapping() -> HashMap<String, CurrencyId> {
     m
 }
 
+// ===========================================================================
+// poe.ninja exchange fetch + apply.
+// ===========================================================================
+
+/// poe.ninja exchange `overview` response (one per `type`).
+///
+/// The response splits the catalogue (`items[]`: id → display name) from the
+/// live prices (`lines[]`: id → `primaryValue`), with a `core` block naming
+/// the `primary` currency and the conversion `rates` to divine/exalt.
+#[cfg(feature = "net")]
+#[derive(Debug, Clone, Deserialize)]
+struct NinjaOverviewResponse {
+    #[serde(default)]
+    core: NinjaCore,
+    #[serde(default)]
+    items: Vec<NinjaItem>,
+    #[serde(default)]
+    lines: Vec<NinjaLine>,
+}
+
+/// The `core` block: which currency prices are denominated in, and the
+/// divine/exalt conversion rates for that currency.
+#[cfg(feature = "net")]
+#[derive(Debug, Clone, Default, Deserialize)]
+struct NinjaCore {
+    /// `"divine"` (softcore) or `"exalted"` (hardcore), typically.
+    #[serde(default)]
+    primary: String,
+    #[serde(default)]
+    rates: NinjaRates,
+}
+
+/// Conversion rates from the primary currency to divine / exalt. The rate of
+/// the primary currency itself is `1.0`.
+#[cfg(feature = "net")]
+#[derive(Debug, Clone, Default, Deserialize)]
+struct NinjaRates {
+    #[serde(default)]
+    divine: Option<f64>,
+    #[serde(default)]
+    exalted: Option<f64>,
+}
+
+/// One catalogue entry: `id → name`.
+#[cfg(feature = "net")]
+#[derive(Debug, Clone, Deserialize)]
+struct NinjaItem {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+}
+
+/// One price line: `id → primaryValue` (denominated in `core.primary`).
+#[cfg(feature = "net")]
+#[derive(Debug, Clone, Deserialize)]
+struct NinjaLine {
+    #[serde(default, rename = "itemId")]
+    item_id: String,
+    #[serde(default, rename = "primaryValue")]
+    primary_value: Option<f64>,
+}
+
+/// Lowercase a poe.ninja `type` into its URL slug for the `Referer` header
+/// (`"UncutGems"` → `"uncutgems"`); poe.ninja's economy pages use the
+/// lowercased type as the path segment.
+#[cfg(feature = "net")]
+fn ninja_type_slug(ty: &str) -> String {
+    ty.to_ascii_lowercase()
+}
+
+/// Lowercase + hyphenate a league name into its poe.ninja URL slug
+/// (`"Fate of the Vaal"` → `"fate-of-the-vaal"`), used only for the
+/// `Referer` header.
+#[cfg(feature = "net")]
+fn ninja_league_slug(league: &str) -> String {
+    crate::name_match::normalize(league).replace(' ', "-")
+}
+
+/// Fetch the live exchange snapshot from poe.ninja PoE2.
+///
+/// `types` defaults to [`POE_NINJA_EXCHANGE_TYPES`] when empty. Each type is
+/// fetched concurrently; per type we request
+/// `…/overview?league=<league>&type=<Type>` with a `User-Agent` and a
+/// `Referer` pointing at the matching economy page (poe.ninja gates the API
+/// on a plausible referer).
+///
+/// Price derivation: `core.primary` names the denominating currency
+/// (`"divine"` softcore, `"exalted"` hardcore) and `core.rates.{divine,
+/// exalted}` give the conversion. For a line's `primaryValue` we compute
+/// `divine_value` and `exalt_value` by multiplying through those rates (the
+/// primary currency's own rate is `1.0`). Lines with a `null` primaryValue
+/// land as `has_market_data: false`.
+#[cfg(feature = "net")]
+pub async fn fetch_ninja_exchange(
+    client: &reqwest::Client,
+    league: &str,
+    types: &[&str],
+) -> Result<NinjaExchangeSnapshot, PriceError> {
+    let tys: &[&str] = if types.is_empty() {
+        POE_NINJA_EXCHANGE_TYPES
+    } else {
+        types
+    };
+
+    let league_slug = ninja_league_slug(league);
+    let fetches = tys.iter().map(|ty| {
+        let referer = format!(
+            "https://poe.ninja/poe2/economy/{league_slug}/{ty_slug}",
+            ty_slug = ninja_type_slug(ty),
+        );
+        let url = format!(
+            "{POE_NINJA_EXCHANGE_BASE}?league={league}&type={ty}",
+            league = urlencoding::encode(league),
+        );
+        async move {
+            client
+                .get(&url)
+                .header(reqwest::header::USER_AGENT, "poc2-desktop (+github issues)")
+                .header(reqwest::header::REFERER, referer)
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<NinjaOverviewResponse>()
+                .await
+        }
+    });
+
+    let responses = futures::future::try_join_all(fetches).await?;
+
+    let mut entries: HashMap<String, NinjaPriceEntry> = HashMap::new();
+    for resp in responses {
+        merge_ninja_overview(&resp, &mut entries);
+    }
+
+    Ok(NinjaExchangeSnapshot {
+        league: league.to_string(),
+        entries,
+        fetched_at: now_iso8601(),
+    })
+}
+
+/// Fold one overview response into `entries`, keyed by normalized name.
+#[cfg(feature = "net")]
+fn merge_ninja_overview(resp: &NinjaOverviewResponse, out: &mut HashMap<String, NinjaPriceEntry>) {
+    // id → display name.
+    let names: HashMap<&str, &str> = resp
+        .items
+        .iter()
+        .map(|it| (it.id.as_str(), it.name.as_str()))
+        .collect();
+
+    // Rate of the primary currency is 1.0; the cross-rate converts to the
+    // other denomination. For SC the primary is divine (divine-rate 1, the
+    // exalt cross-rate prices in exalts); for HC the primary is exalted.
+    let (divine_rate, exalt_rate) = ninja_rates(&resp.core);
+
+    for line in &resp.lines {
+        let Some(name) = names.get(line.item_id.as_str()) else {
+            continue;
+        };
+        let key = crate::name_match::normalize(name);
+        if key.is_empty() {
+            continue;
+        }
+        let entry = match line.primary_value {
+            Some(primary) => NinjaPriceEntry {
+                divine_value: primary * divine_rate,
+                exalt_value: primary * exalt_rate,
+                has_market_data: true,
+            },
+            None => NinjaPriceEntry {
+                divine_value: 0.0,
+                exalt_value: 0.0,
+                has_market_data: false,
+            },
+        };
+        out.insert(key, entry);
+    }
+}
+
+/// Resolve `(divine_rate, exalt_rate)` to multiply a `primaryValue` by.
+///
+/// When `primary == "divine"`, prices are already in divines so the divine
+/// rate is `1.0` and `rates.exalted` carries exalts-per-divine. When
+/// `primary == "exalted"`, the exalt rate is `1.0` and `rates.divine`
+/// carries divines-per-exalt. Missing rates fall back to `1.0` (price passes
+/// through unchanged) so a schema drift degrades rather than zeroes prices.
+#[cfg(feature = "net")]
+fn ninja_rates(core: &NinjaCore) -> (f64, f64) {
+    let divine = core.rates.divine.unwrap_or(1.0);
+    let exalted = core.rates.exalted.unwrap_or(1.0);
+    match core.primary.as_str() {
+        "divine" => (1.0, exalted),
+        "exalted" => (divine, 1.0),
+        // Unknown primary: trust the published rates as-is.
+        _ => (divine, exalted),
+    }
+}
+
+/// Apply a poe.ninja exchange snapshot to a [`Valuator`].
+///
+/// For each entry with market data, the display name is fuzzy-resolved onto a
+/// [`CurrencyId`] via [`Valuator::resolve_name`] and the divine price is set
+/// as a [`DivEquiv`] band: `expected = divine_value`, `min = expected * 0.7`,
+/// `max = expected * 1.5` — the same margins the poe2scout path uses.
+///
+/// Returns the number of entries applied. Entries whose name doesn't resolve
+/// (or that carry no market data) are skipped.
+pub fn apply_ninja_to_valuator(valuator: &mut Valuator, snap: &NinjaExchangeSnapshot) -> usize {
+    let mut applied = 0_usize;
+    // Collect first so we don't borrow the valuator immutably (resolve_name)
+    // and mutably (set) at the same time.
+    let mut resolved: Vec<(CurrencyId, f64)> = Vec::new();
+    for (key, entry) in &snap.entries {
+        if !entry.has_market_data {
+            continue;
+        }
+        // Keys are already `normalize`d; `resolve_name` re-normalizes (the op
+        // is idempotent), so the stored key feeds straight back in.
+        if let Some(id) = valuator.resolve_name(key) {
+            resolved.push((id, entry.divine_value));
+        }
+    }
+    for (id, expected) in resolved {
+        valuator.set(
+            id,
+            DivEquiv {
+                min: expected * 0.7,
+                expected,
+                max: expected * 1.5,
+            },
+        );
+        applied += 1;
+    }
+    applied
+}
+
 #[cfg(any(feature = "net", test))]
 fn now_iso8601() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -606,6 +899,142 @@ mod tests {
                 || is_essence_id(s);
             assert!(known, "slug {slug:?} maps to unknown engine id {s:?}");
         }
+    }
+
+    // ===== poe.ninja exchange =====
+
+    fn ninja_snapshot(entries: &[(&str, f64, bool)]) -> NinjaExchangeSnapshot {
+        NinjaExchangeSnapshot {
+            league: "test".into(),
+            entries: entries
+                .iter()
+                .map(|(name, div, has)| {
+                    (
+                        crate::name_match::normalize(name),
+                        NinjaPriceEntry {
+                            divine_value: *div,
+                            exalt_value: *div * 200.0,
+                            has_market_data: *has,
+                        },
+                    )
+                })
+                .collect(),
+            fetched_at: now_iso8601(),
+        }
+    }
+
+    #[test]
+    fn apply_ninja_resolves_names_and_sets_divine_band() {
+        let snap = ninja_snapshot(&[
+            ("Divine Orb", 1.0, true),
+            ("Exalted Orb", 0.005, true),
+            ("Chaos Orb", 0.1, true),
+        ]);
+        let mut v = Valuator::default();
+        let applied = apply_ninja_to_valuator(&mut v, &snap);
+        assert_eq!(applied, 3);
+
+        let div = v.get(&CurrencyId::from("DivineOrb")).unwrap();
+        assert!((div.expected - 1.0).abs() < 1e-9);
+        // Band margins mirror the poe2scout apply path (x0.7 / x1.5).
+        assert!((div.min - 0.7).abs() < 1e-9);
+        assert!((div.max - 1.5).abs() < 1e-9);
+
+        let ex = v.get(&CurrencyId::from("ExaltedOrb")).unwrap();
+        assert!((ex.expected - 0.005).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_ninja_skips_entries_without_market_data() {
+        let snap = ninja_snapshot(&[("Divine Orb", 0.0, false)]);
+        let mut v = Valuator::default();
+        let applied = apply_ninja_to_valuator(&mut v, &snap);
+        assert_eq!(applied, 0);
+        // Should not have overwritten the conservative default band with 0.
+        let div = v.get(&CurrencyId::from("DivineOrb")).unwrap();
+        assert!(div.expected > 0.0);
+    }
+
+    #[test]
+    fn apply_ninja_skips_unresolvable_names() {
+        let snap = ninja_snapshot(&[("Zzzz Not A Currency", 5.0, true)]);
+        let mut v = Valuator::default();
+        let applied = apply_ninja_to_valuator(&mut v, &snap);
+        assert_eq!(applied, 0);
+    }
+
+    #[cfg(feature = "net")]
+    #[test]
+    fn ninja_rates_sc_divine_primary() {
+        // Softcore: prices already in divines (divine rate 1.0), exalt cross
+        // rate prices in exalts.
+        let core = NinjaCore {
+            primary: "divine".into(),
+            rates: NinjaRates {
+                divine: Some(1.0),
+                exalted: Some(200.0),
+            },
+        };
+        assert_eq!(ninja_rates(&core), (1.0, 200.0));
+    }
+
+    #[cfg(feature = "net")]
+    #[test]
+    fn ninja_rates_hc_exalt_primary() {
+        // Hardcore: prices in exalts (exalt rate 1.0), divine cross rate
+        // converts to divines.
+        let core = NinjaCore {
+            primary: "exalted".into(),
+            rates: NinjaRates {
+                divine: Some(0.005),
+                exalted: Some(1.0),
+            },
+        };
+        assert_eq!(ninja_rates(&core), (0.005, 1.0));
+    }
+
+    #[cfg(feature = "net")]
+    #[test]
+    fn merge_ninja_overview_derives_both_denominations() {
+        let resp = NinjaOverviewResponse {
+            core: NinjaCore {
+                primary: "divine".into(),
+                rates: NinjaRates {
+                    divine: Some(1.0),
+                    exalted: Some(200.0),
+                },
+            },
+            items: vec![
+                NinjaItem {
+                    id: "div".into(),
+                    name: "Divine Orb".into(),
+                },
+                NinjaItem {
+                    id: "noprice".into(),
+                    name: "Mystery Orb".into(),
+                },
+            ],
+            lines: vec![
+                NinjaLine {
+                    item_id: "div".into(),
+                    primary_value: Some(1.0),
+                },
+                NinjaLine {
+                    item_id: "noprice".into(),
+                    primary_value: None,
+                },
+            ],
+        };
+        let mut out = HashMap::new();
+        merge_ninja_overview(&resp, &mut out);
+
+        let div = &out["divine orb"];
+        assert!(div.has_market_data);
+        assert!((div.divine_value - 1.0).abs() < 1e-9);
+        assert!((div.exalt_value - 200.0).abs() < 1e-9);
+
+        let mystery = &out["mystery orb"];
+        assert!(!mystery.has_market_data);
     }
 
     /// Regression for the audit-found mismatches: poe2scout's blackblooded /

@@ -20,6 +20,7 @@ import type {
   GenesisTreeView,
   Goal,
   Item,
+  NinjaExchangeSnapshot,
   ParseClipboardResponse,
   PoeScoutSnapshot,
   RecordOutcome,
@@ -145,6 +146,10 @@ export const engine = {
   /** Apply a browser-fetched poe2scout snapshot to the engine's valuator. */
   applyPrices: (snapshot: PoeScoutSnapshot) =>
     call<ApplyPricesView>("applyPrices", [snapshot]),
+
+  /** Apply a browser-fetched poe.ninja exchange snapshot (parallel source). */
+  applyNinjaPrices: (snapshot: NinjaExchangeSnapshot) =>
+    call<ApplyPricesView>("applyNinjaPrices", [snapshot]),
 
   // ---- resolve -----------------------------------------------------------
   /** Fuzzy-resolve a noisy item/currency name onto a canonical key. */

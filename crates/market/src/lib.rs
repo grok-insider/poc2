@@ -45,11 +45,12 @@ pub use meta::{
     POE_NINJA_BUILDS_BASE_URL, POE_NINJA_DEFAULT_LEAGUE,
 };
 pub use name_match::{NameIndex, NameMatch};
-#[cfg(feature = "net")]
-pub use prices::fetch_snapshot;
 pub use prices::{
-    apply_feed_to_valuator, default_id_mapping, PoeScoutCurrencyEntry, PoeScoutLeague,
-    PoeScoutSnapshot, PriceError, POE2SCOUT_BASE_URL, POE2SCOUT_DEFAULT_CATEGORIES,
-    POE2SCOUT_DEFAULT_LEAGUE, POE2SCOUT_REALM,
+    apply_feed_to_valuator, apply_ninja_to_valuator, default_id_mapping, NinjaExchangeSnapshot,
+    NinjaPriceEntry, PoeScoutCurrencyEntry, PoeScoutLeague, PoeScoutSnapshot, PriceError,
+    POE2SCOUT_BASE_URL, POE2SCOUT_DEFAULT_CATEGORIES, POE2SCOUT_DEFAULT_LEAGUE, POE2SCOUT_REALM,
+    POE_NINJA_EXCHANGE_BASE, POE_NINJA_EXCHANGE_TYPES,
 };
+#[cfg(feature = "net")]
+pub use prices::{fetch_ninja_exchange, fetch_snapshot};
 pub use valuator::{DivEquiv, Valuator};

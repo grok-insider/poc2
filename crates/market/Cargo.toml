@@ -25,12 +25,14 @@ strsim = "0.11"
 reqwest = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 urlencoding = { version = "2.1", optional = true }
+# Concurrent multi-`type` poe.ninja fetches (try_join_all); net-only.
+futures = { workspace = true, optional = true }
 
 [features]
 default = ["net"]
 # `net` enables the live price/meta pollers + on-disk snapshot cache
 # (`prices`, `meta`, `cache` modules). Without it, only `valuator` is built.
-net = ["dep:reqwest", "dep:tokio", "dep:urlencoding"]
+net = ["dep:reqwest", "dep:tokio", "dep:urlencoding", "dep:futures"]
 
 [dev-dependencies]
 insta.workspace = true
