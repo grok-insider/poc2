@@ -23,6 +23,7 @@ import {
 import { probeOverlaySupport } from "./capture/overlayProbe";
 import type { CaptureRect } from "./capture/screen";
 import { CHANNELS, type OverlayController, registerIpc, runCapture } from "./ipc";
+import { startPriceScheduler } from "./prices/scheduler";
 import { APP_ORIGIN, handleAppScheme, registerAppScheme } from "./serve";
 import {
   loadCaptureRegion,
@@ -83,6 +84,11 @@ if (!gotLock) {
 
     registerIpc(() => mainWindow, overlayController);
     createWindow();
+
+    // poe2scout price cache: refresh on startup + hourly. League is empty here
+    // (auto-detected from poe2scout's IsCurrent); the renderer syncs the user's
+    // chosen league via pricesSetLeague once the store hydrates.
+    startPriceScheduler(app.getPath("userData"), "");
 
     // Global hotkeys: native on Windows/X11; on Wayland these need the
     // GlobalShortcuts portal (run with --enable-features=GlobalShortcutsPortal

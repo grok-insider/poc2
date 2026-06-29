@@ -20,6 +20,11 @@ const CHANNELS = {
   calibrateRegion: "poc2:calibrate-region",
   regionCalibrated: "poc2:region-calibrated",
   overlayState: "poc2:overlay-state",
+  // --- poe2scout price cache ---
+  pricesSnapshot: "poc2:prices-snapshot",
+  pricesStatus: "poc2:prices-status",
+  pricesRefresh: "poc2:prices-refresh",
+  pricesSetLeague: "poc2:prices-set-league",
 } as const;
 
 interface CaptureRect {
@@ -89,5 +94,23 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
       cb(state);
     ipcRenderer.on(CHANNELS.overlayState, listener);
     return () => ipcRenderer.removeListener(CHANNELS.overlayState, listener);
+  },
+
+  // --- poe2scout price cache ---
+  /** Flattened price snapshot for the active league (names + normalized→price). */
+  pricesSnapshot(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.pricesSnapshot);
+  },
+  /** Price-cache status (count, fetchedAt, backend, lastError). */
+  pricesStatus(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.pricesStatus);
+  },
+  /** Force an immediate poe2scout refresh. Resolves true if rows were stored. */
+  pricesRefresh(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.pricesRefresh);
+  },
+  /** Point the cache at a league (refreshes now; keeps the hourly cadence). */
+  pricesSetLeague(league: string): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.pricesSetLeague, league);
   },
 });

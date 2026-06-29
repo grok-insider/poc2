@@ -7,6 +7,7 @@ import { captureItemText, status as captureStatus } from "./capture";
 import type { Capabilities } from "./capture/capabilities";
 import { captureRegion, coerceRect, type CaptureRect } from "./capture/screen";
 import { isAllowlistedUrl } from "./fetchAllowlist";
+import { getPriceSnapshot, getPriceStatus, refreshNow, setPriceLeague } from "./prices/scheduler";
 import { tradeFetch, tradeSearch } from "./trade/proxy";
 
 // Re-export so callers/tests have one import site (impl is electron-free).
@@ -30,6 +31,11 @@ export const CHANNELS = {
   calibrateRegion: "poc2:calibrate-region", // renderer → main (invoke / push-back)
   regionCalibrated: "poc2:region-calibrated", // main → renderer (push)
   overlayState: "poc2:overlay-state", // main → renderer (push: show/hide/degraded)
+  // --- poe2scout price cache (hourly poe2scout → node:sqlite) ---
+  pricesSnapshot: "poc2:prices-snapshot", // renderer → main (invoke)
+  pricesStatus: "poc2:prices-status", // renderer → main (invoke)
+  pricesRefresh: "poc2:prices-refresh", // renderer → main (invoke)
+  pricesSetLeague: "poc2:prices-set-league", // renderer → main (invoke)
 } as const;
 
 /**
@@ -169,4 +175,14 @@ export function registerIpc(
     chrome: process.versions.chrome ?? "unknown",
     node: process.versions.node ?? "unknown",
   }));
+
+  // --- poe2scout price cache ---
+  ipcMain.handle(CHANNELS.pricesSnapshot, () => getPriceSnapshot());
+  ipcMain.handle(CHANNELS.pricesStatus, () => getPriceStatus());
+  ipcMain.handle(CHANNELS.pricesRefresh, () => refreshNow());
+  ipcMain.handle(CHANNELS.pricesSetLeague, (_e, league: unknown) => {
+    if (typeof league !== "string" || !league) throw new Error("pricesSetLeague: league required");
+    setPriceLeague(league);
+    return true;
+  });
 }
