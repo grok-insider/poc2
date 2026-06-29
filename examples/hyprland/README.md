@@ -39,6 +39,36 @@ programs.ydotool.enable = true;   # uinput fallback injector
 # wl-clipboard + grim come from your Hyprland environment as usual.
 ```
 
+## Price overlay — DEGRADED mode on wlroots (ADR-0013)
+
+The screen-region price overlay is **capability-gated**
+([ADR-0013](../../docs/adr/0013-item-capture-ocr-overlay.md)):
+
+| Session | Overlay |
+|---|---|
+| win32 / Linux-X11 (incl. XWayland) | **full** — its own transparent click-through Electron window |
+| GNOME/KDE Wayland that passes the runtime probe | **full** |
+| **Hyprland / wlroots Wayland** | **degraded** — no click-through window |
+
+On Hyprland/wlroots the app runs the overlay in **degraded** mode: Electron's
+transparent click-through window is unreliable here and a real layer-shell
+surface stays deferred (ADR-0009). The price panel renders **inside the main
+window** instead. To get an overlay-like HUD anyway, the shipped
+`float`/`pin`/`move 100% 0` rules already make the main window hover over PoE2;
+the `windowrulev2 = float, …` line in `poc2-windowrules.conf` is the focused
+fallback for this mode.
+
+Scan / recalibrate binds (single OCR pass over the calibrated region) use the
+same second-instance flag path as `--capture`:
+
+```conf
+bind = CTRL SHIFT, S, exec, poc2-desktop --scan
+bind = CTRL SHIFT, C, exec, poc2-desktop --recalibrate
+```
+
+Recalibrate opens the full-screen calibrator; drag-select the price region and
+the rectangle is persisted (reused on every later scan).
+
 ## Behaviour
 
 | Rule | Effect |

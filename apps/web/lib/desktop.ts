@@ -18,6 +18,44 @@ export interface TradeSearchResponse {
   total: number;
 }
 
+/** A screen rectangle in global logical (CSS) pixels. */
+export interface CaptureRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Compositor capability gate result (ADR-0013). */
+export interface DesktopCapabilities {
+  /** Region capture can be taken without a per-grab permission prompt. */
+  silentRegionCapture: boolean;
+  /** Whether a real click-through overlay window is usable. */
+  overlayMode: "full" | "degraded";
+  /** Classified session, for diagnostics + fallback copy. */
+  sessionKind:
+    | "win32"
+    | "linux-x11"
+    | "linux-wayland-wlroots"
+    | "linux-wayland-other";
+}
+
+/** Raw cropped frame from a region capture; preprocessing is renderer-side. */
+export type CaptureRegionResult =
+  | { ok: true; dataUrl: string; width: number; height: number }
+  | {
+      ok: false;
+      reason: "invalid-rect" | "no-display" | "portal-denied" | "capture-failed";
+      message?: string;
+    };
+
+/** Overlay window state pushed from main (show/hide + degraded signal). */
+export interface OverlayState {
+  visible: boolean;
+  /** True ⇒ no click-through window exists; render the in-app panel instead. */
+  degraded: boolean;
+}
+
 export interface Poc2DesktopBridge {
   /** Subscribe to item text captured by the shell. Returns an unsubscribe. */
   onItemText(cb: (text: string) => void): () => void;
@@ -31,10 +69,29 @@ export interface Poc2DesktopBridge {
   tradeSearch(league: string, query: unknown): Promise<TradeSearchResponse>;
   /** trade2 fetch for up to 10 result ids. */
   tradeFetch(ids: string[], searchId: string): Promise<unknown>;
-  /** GET JSON from an allowlisted host (poe2scout) via main, dodging CORS. */
+  /** GET JSON from an allowlisted host (poe2scout, poe.ninja) via main, dodging CORS. */
   fetchJson(url: string): Promise<unknown>;
   /** Shell/runtime versions, for diagnostics. */
   versions(): Promise<Record<string, string>>;
+
+  // --- ADR-0013: region capture + price overlay / calibration ---
+
+  /** Compositor capability gate; null only if the shell predates ADR-0013. */
+  capabilities(): Promise<DesktopCapabilities | null>;
+  /** Capture a screen rectangle; raw cropped frame (preprocess renderer-side). */
+  captureRegion(rect: CaptureRect): Promise<CaptureRegionResult>;
+  /** Show the click-through overlay (full mode); returns the active overlay mode. */
+  overlayShow(): Promise<"full" | "degraded">;
+  /** Hide the overlay window. */
+  overlayHide(): Promise<boolean>;
+  /** Reposition the overlay over a screen region. */
+  overlaySetRegion(rect: CaptureRect): Promise<boolean>;
+  /** Open the calibrator (no arg) or report a calibrated rect back to main. */
+  calibrateRegion(rect?: CaptureRect): Promise<boolean>;
+  /** Subscribe to "a region was calibrated" pushes. Returns an unsubscribe. */
+  onRegionCalibrated(cb: (rect: CaptureRect) => void): () => void;
+  /** Subscribe to overlay state pushes (show/hide + degraded). */
+  onOverlayState(cb: (state: OverlayState) => void): () => void;
 }
 
 declare global {
