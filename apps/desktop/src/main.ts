@@ -189,6 +189,14 @@ const overlayController: OverlayController = {
     unregisterEscToHide();
     pushOverlayState(false, this.capabilities().overlayMode !== "full");
   },
+  isOverlayVisible(): boolean {
+    return overlayWindow?.isVisible() ?? false;
+  },
+  setOverlayVisible(visible: boolean): void {
+    if (!overlayWindow) return;
+    if (visible) overlayWindow.showInactive();
+    else overlayWindow.hide();
+  },
   setOverlayRegion(rect: CaptureRect): void {
     if (this.capabilities().overlayMode !== "full") return;
     ensureOverlayWindow();
@@ -198,6 +206,9 @@ const overlayController: OverlayController = {
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
     });
+    // Keep the overlay renderer's cached region in sync with its bounds so a
+    // scan triggered right after positioning has a rect to capture.
+    overlayWindow?.webContents.send(CHANNELS.regionCalibrated, rect);
   },
   openCalibration(): void {
     ensureCalibrationWindow();
@@ -207,8 +218,11 @@ const overlayController: OverlayController = {
   applyCalibration(rect: CaptureRect): void {
     saveCaptureRegion({ rect });
     calibrationWindow?.hide();
-    // Tell the main app (and overlay) that a new region is in effect.
+    // Tell the main app AND the overlay that a new region is in effect — the
+    // overlay's runScan reads its own regionRef, populated via this push, so it
+    // must receive regionCalibrated too (else it reports "no region" on scan).
     mainWindow?.webContents.send(CHANNELS.regionCalibrated, rect);
+    overlayWindow?.webContents.send(CHANNELS.regionCalibrated, rect);
     if (this.capabilities().overlayMode === "full") {
       this.setOverlayRegion(rect);
     }

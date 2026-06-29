@@ -51,6 +51,14 @@ export interface OverlayController {
   openCalibration(): void;
   /** Persist a calibrated region and notify listeners (called from calibrate). */
   applyCalibration(rect: CaptureRect): void;
+  /** Whether the overlay window is currently visible. */
+  isOverlayVisible(): boolean;
+  /**
+   * Briefly toggle the overlay window's visibility. Used to take it out of the
+   * way during a region capture so the click-through overlay can't occlude /
+   * self-capture its own target (full mode positions it AT the region).
+   */
+  setOverlayVisible(visible: boolean): void;
 }
 
 /** Run a capture and push the result to the window. Used by hotkey + IPC. */
@@ -85,7 +93,16 @@ export function registerIpc(
       return { ok: false as const, reason: "invalid-rect" as const };
     }
     const silent = overlay?.capabilities().silentRegionCapture ?? false;
-    return captureRegion(rect, silent);
+    // In full mode the overlay window sits AT the capture region, so it would
+    // occlude / self-capture its own target. Hide it for the duration of the
+    // grab, then restore it so it can render the resulting price plates.
+    const wasVisible = overlay?.isOverlayVisible() ?? false;
+    if (wasVisible) overlay?.setOverlayVisible(false);
+    try {
+      return await captureRegion(rect, silent);
+    } finally {
+      if (wasVisible) overlay?.setOverlayVisible(true);
+    }
   });
 
   ipcMain.handle(CHANNELS.overlayShow, () => {
