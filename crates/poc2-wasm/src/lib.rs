@@ -346,6 +346,21 @@ impl Engine {
         serde_json::to_string(&view).map_err(|e| JsError::new(&format!("serialize failed: {e}")))
     }
 
+    /// Apply a live poe.ninja PoE2 exchange snapshot to the engine's valuator —
+    /// the PARALLEL source to `applyPrices` (poe2scout). `snapshot_json` is JSON
+    /// of `NinjaExchangeSnapshot` (the shape the native `fetch_ninja_exchange`
+    /// poller produces; the browser fetches it instead). Entries are keyed by
+    /// display name and resolved via the fuzzy matcher. Returns JSON of
+    /// `ApplyPricesView` (`{ applied, unmatched }`), where `unmatched` lists
+    /// market-data entries whose name didn't resolve.
+    #[wasm_bindgen(js_name = applyNinjaPrices)]
+    pub fn apply_ninja_prices(&mut self, snapshot_json: &str) -> Result<String, JsError> {
+        let snapshot: poc2_market::NinjaExchangeSnapshot = serde_json::from_str(snapshot_json)
+            .map_err(|e| JsError::new(&format!("bad snapshot json: {e}")))?;
+        let view = commands::ninja_prices::apply_ninja_prices(&mut self.state.valuator, &snapshot);
+        serde_json::to_string(&view).map_err(|e| JsError::new(&format!("serialize failed: {e}")))
+    }
+
     // ===== resolve =====
     /// Fuzzy-resolve a noisy item/currency name onto a canonical key.
     /// `args_json` is JSON of `{ raw, candidates? }`: with `candidates` the

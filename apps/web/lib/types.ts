@@ -397,6 +397,29 @@ export interface ApplyPricesView {
   unmatched: string[];
 }
 
+/// One poe.ninja exchange-economy price entry. Both denominations are derived
+/// from the raw `primaryValue` via the league's conversion rates.
+export interface NinjaPriceEntry {
+  /** Price expressed in divine orbs. */
+  divine_value: number;
+  /** Price expressed in exalted orbs. */
+  exalt_value: number;
+  /** Whether poe.ninja had a non-null market value for this item. */
+  has_market_data: boolean;
+}
+
+/// Composite poe.ninja PoE2 exchange snapshot `applyNinjaPrices` consumes — the
+/// PARALLEL source to poe2scout's `PoeScoutSnapshot`. Entries are keyed by
+/// normalized display name and resolved onto engine currency ids via the fuzzy
+/// matcher; the same shape the native `fetch_ninja_exchange` poller produces.
+export interface NinjaExchangeSnapshot {
+  league: string;
+  /** normalize(name) → entry. */
+  entries: Record<string, NinjaPriceEntry>;
+  /** ISO-8601 timestamp of the fetch. */
+  fetched_at: string;
+}
+
 /// Arguments for the engine's `resolveName` fuzzy matcher.
 export interface ResolveNameArgs {
   /** The noisy / OCR-supplied name to resolve. */

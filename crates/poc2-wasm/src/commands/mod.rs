@@ -5,6 +5,7 @@ pub mod canapply;
 pub mod database;
 pub mod eligible;
 pub mod genesis;
+pub mod ninja_prices;
 pub mod outcome;
 pub mod parse;
 pub mod prices;
