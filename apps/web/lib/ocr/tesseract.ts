@@ -43,8 +43,11 @@ export async function createOcrWorker(
   const Tess = (await import("tesseract.js")).default;
   const worker = await Tess.createWorker("eng", Tess.OEM.LSTM_ONLY, {
     workerPath: `${OCR_ASSET_BASE}/worker.min.js`,
-    // Directory form: tesseract.js appends `/tesseract-core-<variant>.wasm.js`.
-    corePath: OCR_ASSET_BASE,
+    // Pin the explicit NON-SIMD LSTM core file rather than the directory form.
+    // Letting tesseract.js feature-detect can pick a SIMD core whose intrinsics
+    // (e.g. DotProductSSE) abort under some Chromium/Electron wasm runtimes —
+    // observed on the Electron 41 desktop shell. LSTM_ONLY needs the -lstm core.
+    corePath: `${OCR_ASSET_BASE}/tesseract-core-lstm.wasm.js`,
     langPath: OCR_ASSET_BASE,
     // The model is served origin-relative every run; no IndexedDB caching.
     cacheMethod: "none",
