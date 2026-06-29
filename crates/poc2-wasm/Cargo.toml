@@ -1,0 +1,41 @@
+[package]
+name = "poc2-wasm"
+description = "Path of Crafting 2 — WebAssembly bindings exposing the advisor to a browser UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib → the .wasm artifact; rlib → so it can be unit-tested natively.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+poc2-engine.workspace = true
+poc2-data = { workspace = true, features = ["gzip"] }
+poc2-advisor.workspace = true
+poc2-strategies.workspace = true
+poc2-rules.workspace = true
+poc2-parser.workspace = true
+poc2-market.workspace = true          # Valuator only (net off via workspace default)
+serde.workspace = true
+serde_json.workspace = true
+smallvec.workspace = true
+# Pinned to match the nix-provided wasm-bindgen CLI (flake.nix). The crate and
+# CLI versions must be identical or wasm-bindgen refuses to generate bindings.
+wasm-bindgen = "=0.2.117"
+console_error_panic_hook = { version = "0.1", optional = true }
+
+# On wasm32, the transitive RNG crates need getrandom's browser backend. Two
+# major versions are in the tree: 0.2 (via rand/rand_core → the planner's MC) and
+# 0.3 (via ahash). 0.2 uses the `js` feature; 0.3 uses `wasm_js` + the
+# `getrandom_backend="wasm_js"` cfg set in `.cargo/config.toml`. Native builds
+# don't pull these target deps.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+getrandom_v3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+[features]
+default = ["console_error_panic_hook"]

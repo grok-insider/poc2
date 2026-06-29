@@ -195,3 +195,33 @@ fn rarity_set_iter_is_canonical() {
     let collected: Vec<Rarity> = set.iter().collect();
     assert_eq!(collected, vec![Rarity::Magic, Rarity::Rare]);
 }
+
+/// The apply orchestrator must enforce `can_apply_to`, not just the UI.
+/// Regression: Hinekora's Lock's rarity set (Normal|Magic|Rare) lives only
+/// in `can_apply_to`; before the orchestrator gate it applied to Uniques.
+#[test]
+fn apply_path_enforces_can_apply_to() {
+    use poc2_engine::{apply_currency, ModRegistry, OmenSet, PatchVersion};
+    use rand::SeedableRng;
+
+    let registry = ModRegistry::from_mods(vec![], vec![]);
+    let mut rng = rand_xoshiro::Xoshiro256PlusPlus::seed_from_u64(0);
+    let mut omens = OmenSet::new();
+    let mut item = fresh(Rarity::Unique);
+    let r = apply_currency(
+        &HinekorasLock::new(),
+        &mut item,
+        &registry,
+        &mut rng,
+        PatchVersion::PATCH_0_5_0,
+        &mut omens,
+    );
+    assert!(
+        r.is_err(),
+        "Hinekora's Lock must be rejected on a Unique via the apply path; got {r:?}"
+    );
+    assert!(
+        item.hinekora_lock.is_none(),
+        "lock must not stick on failure"
+    );
+}

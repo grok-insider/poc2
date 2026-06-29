@@ -88,17 +88,25 @@ pub enum CacheError {
     Io(#[from] std::io::Error),
     #[error("serde: {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("no $HOME and no XDG_CONFIG_HOME — cannot resolve cache directory")]
+    #[error(
+        "none of XDG_CONFIG_HOME, HOME, APPDATA, USERPROFILE set — cannot resolve cache directory"
+    )]
     NoConfigHome,
 }
 
 /// Resolve the directory the price cache lives in — typically
 /// `~/.config/poc2/cache/prices`. Honors `XDG_CONFIG_HOME` when set;
-/// falls back to `$HOME/.config`.
+/// falls back to `$HOME/.config`, then on Windows `%APPDATA%` (already a
+/// per-user config root, so `poc2` nests directly under it) and finally
+/// `%USERPROFILE%\.config` (mirrors the unix layout for msys-style shells
+/// without `APPDATA`). Unix behavior is unchanged: `HOME` is checked
+/// before either Windows variable.
 pub fn default_cache_dir() -> Result<PathBuf, CacheError> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .or_else(|| std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".config")))
         .ok_or(CacheError::NoConfigHome)?;
     Ok(base.join("poc2").join("cache").join("prices"))
 }
@@ -214,6 +222,71 @@ mod tests {
         cached.cached_at_unix = 0; // 1970
         assert!(cached.is_stale(DEFAULT_TTL));
         assert!(cached.age_secs() > DEFAULT_TTL.as_secs());
+    }
+
+    /// Snapshots a set of env vars and restores them on drop (panic-safe),
+    /// so env mutation can't leak into other tests in the process.
+    struct EnvGuard {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn capture(keys: &[&'static str]) -> Self {
+            let saved = keys.iter().map(|k| (*k, std::env::var_os(k))).collect();
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    /// All fallback branches in one test: env mutation must stay
+    /// sequential because the test harness shares process env across
+    /// threads, and no other test in this crate reads these vars.
+    #[test]
+    fn default_cache_dir_fallback_chain() {
+        const KEYS: [&str; 4] = ["XDG_CONFIG_HOME", "HOME", "APPDATA", "USERPROFILE"];
+        let _guard = EnvGuard::capture(&KEYS);
+        let clear = || {
+            for key in KEYS {
+                std::env::remove_var(key);
+            }
+        };
+
+        clear();
+        std::env::set_var("XDG_CONFIG_HOME", "/xdg");
+        std::env::set_var("HOME", "/home/u");
+        let dir = default_cache_dir().unwrap();
+        assert_eq!(dir, PathBuf::from("/xdg/poc2/cache/prices"));
+
+        clear();
+        std::env::set_var("HOME", "/home/u");
+        std::env::set_var("APPDATA", "/appdata");
+        let dir = default_cache_dir().unwrap();
+        assert_eq!(dir, PathBuf::from("/home/u/.config/poc2/cache/prices"));
+
+        clear();
+        std::env::set_var("APPDATA", "/appdata");
+        std::env::set_var("USERPROFILE", "/profile");
+        let dir = default_cache_dir().unwrap();
+        assert_eq!(dir, PathBuf::from("/appdata/poc2/cache/prices"));
+
+        clear();
+        std::env::set_var("USERPROFILE", "/profile");
+        let dir = default_cache_dir().unwrap();
+        assert_eq!(dir, PathBuf::from("/profile/.config/poc2/cache/prices"));
+
+        clear();
+        let err = default_cache_dir().unwrap_err();
+        assert!(matches!(err, CacheError::NoConfigHome));
     }
 
     #[test]

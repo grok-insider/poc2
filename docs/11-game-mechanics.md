@@ -1,8 +1,64 @@
 # PoE2 Crafting Mechanics Reference
 
-> Quick reference for the mechanics the engine models. Patch baseline: **0.4 "Fate of the Vaal"** (released Dec 12 2025). See [`13-patch-0.4-changes.md`](13-patch-0.4-changes.md) for what changed in 0.4 and [`12-poe2-vs-poe1.md`](12-poe2-vs-poe1.md) for the PoE1→PoE2 diff.
+> Quick reference for the mechanics the engine models. Patch baseline: **0.5 "Return of the Ancients"** (released May 29 2026), default league **Runes of Aldur**. The mechanics below are common across 0.3 / 0.4 / 0.5; for what *differs* by version (disabled items, lowered floors, new systems) see [`14-crafting-mechanics-cross-version.md`](14-crafting-mechanics-cross-version.md). See [`13-patch-0.4-changes.md`](13-patch-0.4-changes.md) for the 0.4 deltas.
 >
-> The deeper research catalogue lives in [`33-strategy-library.md`](33-strategy-library.md) (codified strategies) and [`34-heuristics-rulebook.md`](34-heuristics-rulebook.md) (~120 expert rules).
+> The deeper research catalogue lives in [`33-strategy-library.md`](33-strategy-library.md) (codified strategies) and [`34-heuristics-rulebook.md`](34-heuristics-rulebook.md) (~120 expert rules). The implementation plan for raising mechanics fidelity is [`83-crafting-fidelity-plan.md`](83-crafting-fidelity-plan.md).
+
+## Modifier weights, item level, and tier pools
+
+This is the heart of the probability model. Three coupled mechanics:
+
+1. **Tiers are separate definitions.** A modifier *family* (`ModGroup`) has
+   several tiers, each a distinct `ModDefinition` with its own
+   `required_level`. An item holds at most one member of a group at a time.
+
+2. **Spawn weight = tag resolution.** Each mod carries a `spawn_weights` list
+   of `(tag, weight)`. To weight a mod on a base: scan the base's tags
+   against the list, **leftmost (most-significant) tag wins**; if its weight
+   is 0 the mod is discarded. Numerical weights are not in the game files —
+   poe2db/Craft of Exile derive them from recombinator math + trade-listing
+   parsing (see `docs/adr/0003-data-sources.md`).
+
+3. **Item level gates the pool.** A tier is eligible only when
+   `required_level <= item.ilvl`. Raising ilvl unlocks higher tiers, so the
+   rollable pool *grows with ilvl*. Two items of the same base but different
+   ilvl have different pools.
+
+**Inclusive tier weighting.** When aiming for a specific tier, its effective
+spawn weight includes the weights of the *higher* tiers of the same mod-type
+that can roll at the current ilvl:
+
+```
+effective_weight(tier m_i) ∝ Σ_{j = m_i}^{m_t0} weight_j
+```
+
+where `m_t0` is the highest tier rollable at this ilvl. This is why "the same
+craft gets cheaper at higher ilvl once a new top tier unlocks" — e.g. a spear
+aiming for Tyrannical %phys gains the next tier's weight at ilvl 82, roughly
+doubling the hit chance. (poe2wiki Recombinator §3; Belton "Modifier Weights
+Explained".)
+
+## Currency variants and Minimum Modifier Level
+
+`Greater` and `Perfect` variants of Transmute/Aug/Regal/Exalt/Chaos behave
+like their base orb but constrain the *added* mod to a **Minimum Modifier
+Level** floor — they roll from a *strictly nested, shrinking* pool:
+
+```
+pool(Exalted) ⊇ pool(Greater Exalted) ⊇ pool(Perfect Exalted)
+```
+
+Floors are **patch-versioned** (0.5 lowered Greater Transmute/Aug) and are
+sourced from the bundle's per-currency `Minimum Modifier Level` rather than
+hard-coded where possible. See [`14-crafting-mechanics-cross-version.md`](14-crafting-mechanics-cross-version.md).
+
+**Keep-≥1-tier exception (important edge case).** The floor excludes *tiers*,
+never an entire mod-*type*. Per GGG's wording, "at least one tier of each mod
+type will always be eligible, respecting item level." If every tier of a
+mod-group is below the floor (e.g. Light Radius, whose max tier requires
+L30, under a Perfect floor of 50), the group's **highest** tier (still
+`<= ilvl`) remains eligible. The engine enforces this in
+`sample_eligible_mod`.
 
 ## Item rarities and slot caps
 
@@ -55,16 +111,24 @@ Hybrid modifiers are still one modifier and one affix slot. They can share conce
 
 ### Greater + Perfect variants
 
-`Greater {Transmute, Aug, Regal, Exalt, Chaos}` and `Perfect {Transmute, Aug, Regal, Exalt, Chaos}` behave as their base variants but constrain the *added* mod to `required_level >= MIN`:
+`Greater {Transmute, Aug, Regal, Exalt, Chaos}` and `Perfect {Transmute, Aug, Regal, Exalt, Chaos}` behave as their base variants but constrain the *added* mod to `required_level >= MIN` (see "Currency variants and Minimum Modifier Level" above for the nested-pool semantics + keep-≥1-tier exception):
 
-| Variant | Min mod-level (engine constants) |
-|---|---|
-| Greater Transmutation | 35 |
-| Greater Augmentation | 55 |
-| Greater Regal | 50 |
-| Greater Exalted | 50 |
-| Greater Chaos | 50 |
-| Perfect (any) | 70 |
+| Variant | Min mod-level (0.3/0.4) | Min mod-level (0.5) | Notes |
+|---|---|---|---|
+| Greater Transmutation | 55 | **44** | 0.5.0 patch notes lowered 55→44 (confirmed poe2db) |
+| Greater Augmentation | 55 | **44** | 0.5.0 patch notes lowered 55→44 (confirmed poe2db) |
+| Greater Regal | 50 | 50 | |
+| Greater Exalted | 35 | 35 | wiki value (not the legacy 50 const) |
+| Greater Chaos | 50 | 50 | |
+| Perfect Exalted | 50 | 50 | wiki value (not 70) |
+| Perfect (Transmute/Aug/Regal/Chaos) | 70 | 70 | |
+
+> Floors are patch + currency specific in `MinModLevelVariant::floor`
+> (`basic.rs`). The Greater Transmute/Aug 0.5 values (44) are confirmed from
+> the 0.5.0 patch notes ("…now have a minimum Modifier Level of 44 (previously
+> 55)") and poe2db's per-currency Minimum Modifier Level; Greater Exalt = 35
+> and Perfect Exalt = 50 are the wiki values (not the legacy 50/70 consts).
+> See [`83-crafting-fidelity-plan.md`](83-crafting-fidelity-plan.md) §1.2.
 
 ### Specialty currencies
 
@@ -72,7 +136,7 @@ Hybrid modifiers are still one modifier and one affix slot. They can share conce
 |---|---|
 | **Fracturing Orb** | Locks one visible non-fractured mod immutably. Requires ≥ 4 explicit mods (hidden desecrated counts). Cannot target hidden mods. |
 | **Hinekora's Lock** | Binds the next operation's RNG to a stored seed. Preview matches commit byte-for-byte. Refuses on corrupted/sanctified/mirrored items. |
-| **Bone** (Gnawed/Preserved/Ancient × Jawbone/Rib/Cranium/Collarbone) | Adds a hidden desecrated mod slot to a Rare item. Reveal at the Well of Souls. |
+| **Bone** (Gnawed/Preserved/Ancient × Jawbone/Rib/Cranium/Collarbone) | Adds a hidden desecrated mod slot to a Rare item. Reveal at the Well of Souls (choose 1 of 3). **Size = ilvl gate**: Gnawed ⇒ max ilvl 64; Preserved ⇒ any ilvl, no floor; Ancient ⇒ Min Modifier Level 40. At ilvl 65+, ≥1 of the 3 options is an exclusive desecrated mod *iff* the class has an exclusive for that affix (helmets have no exclusive prefix). |
 | **Essence** (Lesser/Normal/Greater/Perfect/Corrupted × 19 types) | Adds a guaranteed specific mod. Lesser/Normal/Greater promote Magic→Rare and add exactly 1 specific affix; Perfect/Corrupted remove+add on Rare. |
 | Catalysts (M2.5b — pending) | Tag-targeting quality on rings/amulets |
 | Recombinator (M2.5c — pending) | 2-item combine |
@@ -90,7 +154,7 @@ The engine implements every crafting-relevant omen as one of seven [`OmenEffect`
 | `AbyssalEchoes` | Abyssal Echoes |
 | `PreventNoChange` | Corruption |
 | `Sanctification` / `Blessed` | Sanctification, the Blessed |
-| `LordTarget(Kurgal\|Amanamu\|Ulaman)` | Blackblooded, Liege, Sovereign |
+| `LordTarget(Kurgal\|Amanamu\|Ulaman)` | Blackblooded (Kurgal), Liege (Amanamu), Sovereign (Ulaman). **Weapon/Jewellery ONLY** — no effect on armour/jewels/waystones. Guarantees that lord's pool, blocks the other two lords, and **bricks the Ancient-bone Min-Mod-Level-40 floor** (consumed even if no lord mod is possible). |
 | `CatalystingExaltation` | Catalysing Exaltation |
 | `HomogenisingTagMatch` | Homogenising Exaltation, Coronation (**disabled in 0.4** — `patch_max = 0.3.x`) |
 

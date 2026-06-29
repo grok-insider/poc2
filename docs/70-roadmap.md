@@ -155,7 +155,7 @@
 
 - [ ] Cachix binary cache for fast Nix installs
 - [ ] Hardcore + SSF support
-- [ ] Cross-platform (Windows, macOS) — v2 scope decision
+- [~] Cross-platform — **reopened by ADR-0010** (2026-06): Windows 11 + Linux/NixOS in progress under M10; macOS stays out of scope
 - [ ] Self-hosting pipeline (no external data sources)
 - [ ] Empirical weight derivation from trade samples
 - [ ] MCTS upgrade for the advisor
@@ -164,3 +164,12 @@
 - [ ] Plugin component-model migration (currently raw Wasm per ADR-0008 v2)
 - [ ] tauri-plugin-shell::open → tauri-plugin-opener migration
 - [ ] Beam-search memoization once real plugin workloads push past budget
+
+## M10 Desktop shell + capture + price checking (ADR-0010, 2026-06)
+
+- [ ] `apps/desktop` Electron shell (app:// scheme over the static export, preload bridge `window.poc2Desktop`)
+- [ ] Item capture: hotkey → game Ctrl+C → clipboard → import (per-platform backends; APT semantics)
+- [ ] Price checking: pipeline trade-stat-id table → trade2 search/fetch proxied in main → price panel; browser fallback deep links
+- [ ] Live price snapshot → WASM `applyPrices` → planner valuator
+- [ ] CI: windows-latest lane (rustup + Bun, no Nix) + electron-builder artifacts (AppImage/deb, NSIS)
+

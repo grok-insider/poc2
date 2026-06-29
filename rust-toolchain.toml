@@ -1,5 +1,7 @@
 [toolchain]
 channel = "stable"
 components = ["rust-src", "rust-analyzer", "clippy", "rustfmt"]
-targets = ["x86_64-unknown-linux-gnu"]
+# Host target is implicit; wasm32 is listed so rustup installs it for the
+# web build (scripts/build-wasm.mjs) on any platform, including Windows.
+targets = ["wasm32-unknown-unknown"]
 profile = "default"

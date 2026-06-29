@@ -1,0 +1,49 @@
+.wrap {
+  padding: 0;
+  overflow: hidden;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+}
+.head:hover {
+  background: var(--surface-2);
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--line);
+}
+.fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  font-size: 12px;
+}
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex: 0 0 auto;
+}
+.msg {
+  flex: 1;
+}

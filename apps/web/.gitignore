@@ -1,0 +1,24 @@
+# dependencies
+/node_modules/
+
+# next.js build output / static export
+.next/
+out/
+
+# generated WebAssembly engine (rebuild with `bash scripts/build-wasm.sh`)
+/lib/wasm/
+/public/wasm/
+
+# the data bundle is a static-asset copy of an artifact (also ignored at repo root)
+/public/poc2.bundle.json.gz
+
+# scraped per-base icons (regenerate with `cargo run -p poc2-pipeline --bin fetch-base-icons`)
+/public/base-icons/
+# Genesis Tree art (regenerate with `cargo run -p poc2-pipeline --bin fetch-genesis-assets`)
+/public/genesis-icons/
+# mod → trade-API stat-id table (regenerate with `cargo run -p poc2-pipeline --bin fetch-trade-stats`)
+/public/trade-stats.json
+
+# misc
+*.tsbuildinfo
+next-env.d.ts

@@ -81,10 +81,16 @@ pub fn normalize_fixtures(snapshot: &FixtureSnapshot, bundle: &mut Bundle) -> Pi
             spawn_weights: SmallVec::new(),
             stats: build_stats(&entry.stats),
             required_level: entry.required_level,
+            // Desecrated mods are revealed, not tier-sampled; tier ordinal
+            // is not meaningful for them.
+            tier: None,
             allowed_item_classes: allowed_final,
             patch_range: PatchRange::ALL,
             flags: ModFlags::DESECRATED_ONLY,
-            text_template: Some(entry.name.clone()),
+            // Prefer the cleaned poe2db mod text; the affix name alone
+            // ("Amanamu's") is shared by dozens of mods and useless for
+            // display.
+            text_template: Some(entry.text.clone().unwrap_or_else(|| entry.name.clone())),
         });
         added_desecrated += 1;
     }
@@ -118,6 +124,8 @@ pub fn normalize_fixtures(snapshot: &FixtureSnapshot, bundle: &mut Bundle) -> Pi
             spawn_weights: SmallVec::new(),
             stats: build_stats(&entry.stats),
             required_level: entry.required_level,
+            // Vaal implicits occupy the implicit slot; no tier ladder.
+            tier: None,
             allowed_item_classes: allowed_final,
             patch_range: PatchRange::ALL,
             flags: ModFlags::CORRUPTED_ONLY,
@@ -131,16 +139,118 @@ pub fn normalize_fixtures(snapshot: &FixtureSnapshot, bundle: &mut Bundle) -> Pi
         added_vaal, "fixtures normalized into bundle.mods"
     );
 
+    // ---- Verisium Alloys (0.5) ------------------------------------------
+    // Emit the curated 13-alloy catalogue into `bundle.alloys`. Each entry
+    // binds the alloy currency id + display name to its per-class crafted
+    // mod targets (`Alloy*` mods shipped via RePoE above). Targets whose
+    // mod id is absent from the bundle are dropped with a count (partial
+    // bundles degrade instead of crashing the resolver).
+    let bundle_mod_ids: ahash::AHashSet<&str> = bundle.mods.iter().map(|m| m.id.as_str()).collect();
+    let mut alloy_entries: Vec<serde_json::Value> = Vec::new();
+    let mut dropped_targets = 0usize;
+    for alloy in &snapshot.alloys {
+        let targets: Vec<serde_json::Value> = alloy
+            .targets
+            .iter()
+            .filter(|t| {
+                let present = bundle_mod_ids.contains(t.engine_mod_id.as_str());
+                if !present {
+                    dropped_targets += 1;
+                }
+                present
+            })
+            .map(|t| {
+                serde_json::json!({
+                    "class": t.class,
+                    "engine_mod_id": t.engine_mod_id,
+                })
+            })
+            .collect();
+        if targets.is_empty() {
+            continue;
+        }
+        alloy_entries.push(serde_json::json!({
+            "id": alloy.id,
+            "name": alloy.name,
+            "metadata_id": alloy.metadata_id,
+            "drop_level": alloy.drop_level,
+            "targets": targets,
+        }));
+    }
+    let added_alloys = alloy_entries.len();
+    if added_alloys > 0 {
+        bundle.alloys.section_version = 2;
+        bundle.alloys.entries = alloy_entries;
+    }
+    info!(
+        added_alloys,
+        dropped_targets, "alloy catalogue normalized into bundle.alloys"
+    );
+
+    // ---- Distilled Emotions (0.5 jewel crafting) -------------------------
+    // Emit the 26-emotion catalogue (Liquid / Potent / Ancient). Targets
+    // keep their verbatim modifier text for display; `engine_mod_id` may be
+    // null when the granted mod isn't exported upstream yet (display-only).
+    let mut emotion_entries: Vec<serde_json::Value> = Vec::new();
+    let mut unbound_emotion_targets = 0usize;
+    for emotion in &snapshot.emotions {
+        let targets: Vec<serde_json::Value> = emotion
+            .targets
+            .iter()
+            .map(|t| {
+                let bound = t
+                    .engine_mod_id
+                    .as_deref()
+                    .filter(|m| bundle_mod_ids.contains(*m));
+                if bound.is_none() {
+                    unbound_emotion_targets += 1;
+                }
+                serde_json::json!({
+                    "base": t.base,
+                    "affix": t.affix,
+                    "modifier": t.modifier,
+                    "engine_mod_id": bound,
+                })
+            })
+            .collect();
+        emotion_entries.push(serde_json::json!({
+            "id": emotion.id,
+            "name": emotion.name,
+            "metadata_id": emotion.metadata_id,
+            "drop_level": emotion.drop_level,
+            "kind": emotion.kind,
+            "targets": targets,
+        }));
+    }
+    let added_emotions = emotion_entries.len();
+    if added_emotions > 0 {
+        bundle.emotions.section_version = 1;
+        bundle.emotions.entries = emotion_entries;
+    }
+    info!(
+        added_emotions,
+        unbound_emotion_targets, "emotion catalogue normalized into bundle.emotions"
+    );
+
     bundle.header.sources.0.push(snapshot.revision.clone());
     Ok(())
 }
 
-/// After CoE essence ingestion runs, every mod that an essence targets
-/// should carry the `ESSENCE_ONLY` flag. RePoE-fork already flags most of
-/// them via `is_essence_only`, but the join can drop entries when CoE
-/// references a mod by name that RePoE-fork stores under a different
-/// generation_type label. This pass fixes those drops by walking the
-/// essence catalogue and forcing the flag on every referenced mod.
+/// After CoE essence ingestion runs, mods that essences grant AND that
+/// cannot spawn naturally should carry the `ESSENCE_ONLY` flag. RePoE-fork
+/// already flags most of them via `is_essence_only`, but the join can drop
+/// entries when CoE references a mod by name that RePoE-fork stores under a
+/// different generation_type label. This pass fixes those drops by walking
+/// the essence catalogue and flagging referenced mods **that have no
+/// positive natural spawn weight**.
+///
+/// The natural-spawnability guard is load-bearing (M14 audit): essences
+/// frequently grant a tier of the *natural* mod ladder (e.g. Essence of
+/// Haste → `LocalIncreasedAttackSpeed3`). Force-flagging those bricked the
+/// shared tiers out of every Transmute/Aug/Regal/Exalt/Chaos pool — 118 of
+/// the bundle's 162 flagged mods were natural-roll tiers, and the
+/// Min-Modifier-Level keep-≥1-tier exception then fell back to T1 because
+/// the mid tiers were invisible to basic orbs.
 ///
 /// Idempotent — flag is already a bitset OR.
 pub fn flag_essence_target_mods(bundle: &mut Bundle) -> usize {
@@ -162,7 +272,11 @@ pub fn flag_essence_target_mods(bundle: &mut Bundle) -> usize {
     }
     let mut promoted = 0usize;
     for m in &mut bundle.mods {
-        if targeted.contains(m.id.as_str()) && !m.flags.contains(ModFlags::ESSENCE_ONLY) {
+        let naturally_spawnable = m.spawn_weights.iter().any(|sw| sw.weight > 0);
+        if targeted.contains(m.id.as_str())
+            && !naturally_spawnable
+            && !m.flags.contains(ModFlags::ESSENCE_ONLY)
+        {
             m.flags |= ModFlags::ESSENCE_ONLY;
             promoted += 1;
         }
@@ -170,7 +284,7 @@ pub fn flag_essence_target_mods(bundle: &mut Bundle) -> usize {
     if promoted > 0 {
         info!(
             promoted,
-            "promoted mods to ESSENCE_ONLY via essence catalogue join"
+            "promoted unspawnable essence-target mods to ESSENCE_ONLY"
         );
     }
     promoted
@@ -194,12 +308,15 @@ fn parse_affix(s: &str) -> AffixType {
 fn group_for_desecrated(entry: &DesecratedFixtureEntry) -> String {
     // Group by lord+stat-stem so the engine's mod-group exclusivity stays
     // sensible (a single item shouldn't carry two Amanamu-life-on-hit
-    // mods). The first stat's stat_id provides the stem.
+    // mods, nor two tiers of the same lord's spirit-reservation line).
+    // The first stat's stat_id provides the stem. The lord-less jewel
+    // pool groups under its affix name ("Lightless" / "of the Abyss").
+    let lord = entry.lord.as_deref().unwrap_or(entry.name.as_str());
     let stem = entry
         .stats
         .first()
         .map_or("desecrated_anon", |s| s.stat_id.as_str());
-    format!("Desecrated_{}_{}", entry.lord, stem)
+    format!("Desecrated_{}_{}", lord.replace(' ', ""), stem)
 }
 
 fn group_for_vaal(entry: &VaalImplicitFixtureEntry) -> String {

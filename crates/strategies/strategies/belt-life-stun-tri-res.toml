@@ -10,7 +10,7 @@ attribute_pools = ["str", "str_dex", "str_int"]
 expected_cost_div = [10, 50]
 expected_success_prob = [0.10, 0.30]
 confidence = "community"
-note = "Life belt: Life prefix + StunThreshold suffix + Tri-Res suffix coverage. Adaptive (breach) catalyst boosts late."
+note = "Life belt: Life prefix + StunThreshold suffix + Tri-Res suffix coverage. (0.5: belts cannot be catalysed — catalysts are ring/amulet-only.)"
 
 [source]
 kind = "user"

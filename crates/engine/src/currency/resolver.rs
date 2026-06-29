@@ -18,21 +18,27 @@
 //!   carries the full essence list (id + display name + quality + target
 //!   mod); the resolver clones the matching entry into a trait object.
 //!
-//! Catalysts and Recombinator are not yet implemented and resolve to
-//! `None` — calling code should treat that as "we can't simulate this
-//! currency yet" and skip it rather than crash.
+//! Catalysts, Verisium Alloys and Distilled Emotions are likewise
+//! data-driven from caller-supplied catalogues (`with_catalysts` /
+//! `with_alloys`). Ids the resolver does not recognize resolve to `None` —
+//! calling code should treat that as "we can't simulate this currency yet"
+//! and skip it rather than crash.
 
 use crate::currency::basic::{
-    ChaosOrb, DivineOrb, ExaltedOrb, GreaterChaosOrb, GreaterExaltedOrb, GreaterOrbOfAugmentation,
-    GreaterOrbOfTransmutation, GreaterRegalOrb, OrbOfAlchemy, OrbOfAnnulment, OrbOfAugmentation,
-    OrbOfTransmutation, PerfectChaosOrb, PerfectExaltedOrb, PerfectOrbOfAugmentation,
-    PerfectOrbOfTransmutation, PerfectRegalOrb, RegalOrb, VaalOrb,
+    ChaosOrb, DivineOrb, ExaltedOrb, OrbOfAlchemy, OrbOfAnnulment, OrbOfAugmentation,
+    OrbOfTransmutation, RegalOrb,
 };
 use crate::currency::bone::Bone;
 use crate::currency::catalyst::Catalyst;
 use crate::currency::essence::Essence;
 use crate::currency::fracturing::FracturingOrb;
 use crate::currency::hinekora::HinekorasLock;
+use crate::currency::vaal::VaalOrb;
+use crate::currency::variants::{
+    GreaterChaosOrb, GreaterExaltedOrb, GreaterOrbOfAugmentation, GreaterOrbOfTransmutation,
+    GreaterRegalOrb, PerfectChaosOrb, PerfectExaltedOrb, PerfectOrbOfAugmentation,
+    PerfectOrbOfTransmutation, PerfectRegalOrb,
+};
 use crate::currency::Currency;
 use crate::ids::CurrencyId;
 use crate::item::{BoneSize, BoneSubtype};
@@ -42,6 +48,13 @@ pub trait CurrencyResolver: Send + Sync {
     /// Resolve a currency id to a fresh trait object. Returns `None` if the
     /// id is not recognized (caller decides whether to error or skip).
     fn resolve(&self, id: &CurrencyId) -> Option<Box<dyn Currency>>;
+
+    /// The Verisium Alloy catalogue this resolver carries (0.5+). Used by
+    /// the advisor's candidate generator to enumerate alloy moves; default
+    /// empty so non-bundle resolvers stay unaffected.
+    fn alloys(&self) -> &[crate::currency::Alloy] {
+        &[]
+    }
 }
 
 /// Default resolver covering all currencies the engine implements today.
@@ -53,6 +66,8 @@ pub trait CurrencyResolver: Send + Sync {
 pub struct DefaultCurrencyResolver {
     essences: Vec<Essence>,
     catalysts: Vec<Catalyst>,
+    /// Verisium Alloys (0.5+) — data-driven, like essences.
+    alloys: Vec<crate::currency::Alloy>,
 }
 
 impl DefaultCurrencyResolver {
@@ -73,10 +88,19 @@ impl DefaultCurrencyResolver {
         self
     }
 
-    /// Attach a catalyst catalogue.
+    /// Attach a catalyst catalogue. Bundle entries override same-id
+    /// presets; presets without a bundle counterpart survive the merge —
+    /// CoE only exports the 12 base catalysts, so a wholesale replace
+    /// would silently drop the jewel-gated `Refined` variants (M14 audit).
     #[must_use]
     pub fn with_catalysts(mut self, catalysts: Vec<Catalyst>) -> Self {
-        self.catalysts = catalysts;
+        for c in catalysts {
+            if let Some(slot) = self.catalysts.iter_mut().find(|p| p.id() == c.id()) {
+                *slot = c;
+            } else {
+                self.catalysts.push(c);
+            }
+        }
         self
     }
 
@@ -90,28 +114,39 @@ impl DefaultCurrencyResolver {
         self.catalysts.push(catalyst);
     }
 
+    /// Attach a Verisium Alloy catalogue (0.5+). Each `Alloy` is matched by
+    /// exact `CurrencyId` equality.
+    #[must_use]
+    pub fn with_alloys(mut self, alloys: Vec<crate::currency::Alloy>) -> Self {
+        self.alloys = alloys;
+        self
+    }
+
+    /// Add a single Verisium Alloy to the catalogue.
+    pub fn add_alloy(&mut self, alloy: crate::currency::Alloy) {
+        self.alloys.push(alloy);
+    }
+
     /// Pre-populate the resolver with the engine's catalyst presets so
     /// strategies / rules referring to `FleshCatalyst`, `ReaverCatalyst`,
     /// etc. resolve out of the box. Production callers can extend with
     /// the full bundle catalogue via [`with_catalysts`].
     ///
-    /// `AdaptiveCatalyst` is included with the default `breach` tag —
-    /// the canonical 0.4 use case (R093) and the dominant Breach-reward
-    /// flavour. Bundles that ship richer catalyst catalogues override
-    /// this entry via [`Self::with_catalysts`].
+    /// The preset set is the full PoE2 0.5 catalogue (poe2db
+    /// catalysts.html): 12 base catalysts (ring/amulet-gated) plus their
+    /// 12 `Refined` variants (jewel-gated). The PoE1 names
+    /// `IntrinsicCatalyst` / `UnstableCatalyst` do not exist in 0.5 and
+    /// intentionally resolve to `None`.
     fn register_default_catalyst_presets(&mut self) {
-        self.catalysts.extend([
-            Catalyst::flesh(),
-            Catalyst::intrinsic(),
-            Catalyst::reaver(),
-            Catalyst::carapace(),
-            Catalyst::unstable(),
-            Catalyst::adaptive("breach"),
-        ]);
+        self.catalysts.extend(Catalyst::default_catalogue());
     }
 }
 
 impl CurrencyResolver for DefaultCurrencyResolver {
+    fn alloys(&self) -> &[crate::currency::Alloy] {
+        &self.alloys
+    }
+
     fn resolve(&self, id: &CurrencyId) -> Option<Box<dyn Currency>> {
         let s = id.as_str();
 
@@ -156,6 +191,11 @@ impl CurrencyResolver for DefaultCurrencyResolver {
             return Some(Box::new(e.clone()));
         }
 
+        // Verisium Alloys (0.5+) — caller-supplied catalogue.
+        if let Some(a) = self.alloys.iter().find(|a| a.id().as_str() == s) {
+            return Some(Box::new(a.clone()));
+        }
+
         None
     }
 }
@@ -167,6 +207,9 @@ fn parse_bone_id(s: &str) -> Option<(BoneSize, BoneSubtype)> {
         ("Preserved", rest)
     } else if let Some(rest) = s.strip_prefix("Ancient") {
         ("Ancient", rest)
+    } else if let Some(rest) = s.strip_prefix("Altered") {
+        // 0.5 breach desecration: only "Altered Collarbone" exists.
+        ("Altered", rest)
     } else {
         return None;
     };
@@ -174,6 +217,7 @@ fn parse_bone_id(s: &str) -> Option<(BoneSize, BoneSubtype)> {
         "Gnawed" => BoneSize::Gnawed,
         "Preserved" => BoneSize::Preserved,
         "Ancient" => BoneSize::Ancient,
+        "Altered" => BoneSize::Altered,
         _ => unreachable!(),
     };
     let subtype = match rest {
@@ -183,6 +227,11 @@ fn parse_bone_id(s: &str) -> Option<(BoneSize, BoneSubtype)> {
         "Cranium" => BoneSubtype::Cranium,
         _ => return None,
     };
+    // Size × subtype combinations that do not exist as currency items
+    // (Gnawed/Ancient Cranium, Altered non-Collarbone) do not resolve.
+    if !size.valid_with(subtype) {
+        return None;
+    }
     Some((size, subtype))
 }
 
@@ -275,12 +324,20 @@ mod tests {
     #[test]
     fn default_catalyst_presets_resolve() {
         let r = DefaultCurrencyResolver::new();
+        // The full 0.5 catalogue resolves out of the box (base + Refined).
+        for catalyst in Catalyst::default_catalogue() {
+            assert!(
+                r.resolve(catalyst.id()).is_some(),
+                "did not resolve catalyst {}",
+                catalyst.id().as_str()
+            );
+        }
         for id in [
             "FleshCatalyst",
-            "IntrinsicCatalyst",
             "ReaverCatalyst",
-            "CarapaceCatalyst",
-            "UnstableCatalyst",
+            "AdaptiveCatalyst",
+            "RefinedFleshCatalyst",
+            "RefinedAdaptiveCatalyst",
         ] {
             assert!(
                 r.resolve(&CurrencyId::from(id)).is_some(),
@@ -290,8 +347,47 @@ mod tests {
     }
 
     #[test]
+    fn poe1_catalyst_names_do_not_resolve() {
+        // "Intrinsic Catalyst" / "Unstable Catalyst" are PoE1 names that
+        // do not exist in PoE2 0.5 (poe2db catalysts.html).
+        let r = DefaultCurrencyResolver::new();
+        assert!(r.resolve(&CurrencyId::from("IntrinsicCatalyst")).is_none());
+        assert!(r.resolve(&CurrencyId::from("UnstableCatalyst")).is_none());
+    }
+
+    #[test]
     fn catalyst_catalogue_extension_works() {
-        let r = DefaultCurrencyResolver::new().with_catalysts(vec![Catalyst::adaptive("breach")]);
+        let r = DefaultCurrencyResolver::new().with_catalysts(vec![Catalyst::adaptive()]);
         assert!(r.resolve(&CurrencyId::from("AdaptiveCatalyst")).is_some());
+    }
+
+    #[test]
+    fn alloy_catalogue_round_trips_via_with_alloys() {
+        let alloy = crate::currency::Alloy::new(
+            "AlloyRunicWard",
+            "Verisium Alloy of Runic Ward",
+            ModId::from("RunicWardCrafted"),
+        );
+        let r = DefaultCurrencyResolver::new().with_alloys(vec![alloy]);
+        assert!(
+            r.resolve(&CurrencyId::from("AlloyRunicWard")).is_some(),
+            "seeded alloy id must resolve"
+        );
+        assert!(
+            r.resolve(&CurrencyId::from("AlloyUnknown")).is_none(),
+            "unseeded alloy id must not resolve"
+        );
+    }
+
+    #[test]
+    fn add_alloy_extends_the_catalogue() {
+        let mut r = DefaultCurrencyResolver::new();
+        assert!(r.resolve(&CurrencyId::from("AlloyOfBattle")).is_none());
+        r.add_alloy(crate::currency::Alloy::new(
+            "AlloyOfBattle",
+            "Verisium Alloy of Battle",
+            ModId::from("BattleCrafted"),
+        ));
+        assert!(r.resolve(&CurrencyId::from("AlloyOfBattle")).is_some());
     }
 }

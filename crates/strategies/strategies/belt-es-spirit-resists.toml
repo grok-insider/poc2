@@ -9,7 +9,7 @@ attribute_pools = ["int", "dex_int", "str_int"]
 expected_cost_div = [15, 70]
 expected_success_prob = [0.08, 0.25]
 confidence = "community"
-note = "Caster belt: ES + Spirit prefix coverage + tri-res suffix coverage. Unstable catalyst boosts caster mods."
+note = "Caster belt: ES + Spirit prefix coverage + tri-res suffix coverage. (0.5: belts cannot be catalysed — catalysts are ring/amulet-only.)"
 
 [source]
 kind = "user"

@@ -265,6 +265,7 @@ mod tests {
                 max: 80.0,
             }],
             required_level: 75,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
             patch_range: PatchRange::ALL,
             flags,
@@ -285,6 +286,7 @@ mod tests {
             spawn_weights: smallvec![],
             stats: smallvec![],
             required_level: 1,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),
@@ -498,6 +500,8 @@ mod tests {
             bone_size: poc2_engine::item::BoneSize::Preserved,
             bone_subtype: poc2_engine::item::BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
         item.prefixes.push(ModRoll {
             mod_id: ModId::from("frac1"),

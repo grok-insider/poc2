@@ -1,0 +1,610 @@
+/* ============================================================================
+   Path of Crafting 2 — PoE2 in-game design system.
+   The app must read like a native Path of Exile 2 panel (Options / Character /
+   Genesis Tree screens). See apps/web/DESIGN.md for the full system; the
+   short version: black panels, bronze hairlines, ONE gold accent, Fontin
+   typography, square corners, game-exact rarity colors.
+   ========================================================================== */
+
+/* ---- GGG webfonts (fetched assets — see DESIGN.md §1; graceful fallback) */
+@font-face {
+  font-family: "FontinSmallCaps";
+  src: url("/fonts/fontin-smallcaps-webfont.woff") format("woff");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "FontinRegular";
+  src: url("/fonts/fontin-regular-webfont.woff") format("woff");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* surfaces — black panel on black world (warm, never blue) */
+  --bg-deep: #030303;
+  --bg-base: #070605;   /* app canvas */
+  --surface: #0c0b09;   /* panels */
+  --surface-2: #14110d; /* wells / hover */
+  --surface-3: #1c1813; /* pressed / active */
+  --line: rgba(178, 145, 85, 0.16);        /* bronze hairline */
+  --line-strong: rgba(178, 145, 85, 0.32);
+
+  /* text — warm parchment whites */
+  --fg: #e8e0d2;
+  --fg-muted: #a89a85;
+  --fg-faint: #6f6354;
+  --default-color: #7f7f7f; /* tooltip default text (in-game exact) */
+
+  /* the gold system — the only accent */
+  --gold: #b29155;        /* structural gold: borders, frames */
+  --gold-bright: #e7b478; /* section titles, plaque text */
+  --gold-action: #d29933; /* interactive: CTA, "click to allocate" */
+  --primary: var(--gold-action);
+  --primary-press: #b8851f;
+  --primary-glow: rgba(210, 153, 51, 0.22);
+  --accent: var(--gold-bright);
+  --accent-press: #d2a14d;
+
+  /* status — game palette; always glyph/label-paired */
+  --success: #46a239;
+  --warn: #ebc850;
+  --danger: #d20000;
+  --danger-soft: #ff5555;
+  --success-band: rgba(70, 162, 57, 0.14);
+
+  /* PoE2 rarity / semantic colors (in-game exact — never decorative) */
+  --r-normal: #c8c8c8;
+  --r-magic: #8888ff;
+  --r-rare: #ffff77;
+  --r-unique: #ef6916;
+  --r-currency: #aa9e82;
+  --r-crafted: #b4b4ff;
+  --r-desecrated: #a78fbe;
+  --r-corrupted: #d20000;
+  --r-fractured: #a29162;
+
+  /* shape & depth — the game is square-cornered */
+  --radius: 3px;
+  --radius-sm: 2px;
+  --radius-pill: 3px;
+  --shadow-card: inset 0 1px 0 rgba(231, 180, 120, 0.05),
+    0 12px 30px -16px rgba(0, 0, 0, 0.9);
+  --glow-rec: 0 0 0 1px var(--primary-glow), 0 0 30px -12px var(--primary-glow);
+  --easing: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --font-sans: "FontinSmallCaps", "Fontin SmallCaps", Verdana, Arial, sans-serif;
+  --font-serif: "FontinRegular", Georgia, "Times New Roman", serif;
+  --font-mono: "Fira Code", ui-monospace, "SF Mono", "Cascadia Code", monospace;
+  --font-display: "FontinSmallCaps", "Fontin SmallCaps", Verdana, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg-base);
+  /* faint warm vignette, like panel art bleeding through the black */
+  background-image:
+    radial-gradient(1100px 560px at 70% -12%, rgba(178, 145, 85, 0.04), transparent 62%),
+    radial-gradient(900px 700px at 12% 110%, rgba(120, 80, 40, 0.03), transparent 60%);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+.mono,
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92em;
+}
+
+.serif {
+  font-family: var(--font-serif);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+a {
+  color: var(--gold-action);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--gold-bright);
+}
+
+:focus-visible {
+  outline: 1px solid var(--gold-action);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: var(--fg);
+  background: #050403;
+  border: 1px solid #3a3328;
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+input[type="range"] {
+  accent-color: var(--gold-action);
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--gold-action);
+}
+
+/* the game's skinny bronze scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a241c;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(178, 145, 85, 0.25);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3226;
+}
+
+/* ---- shared primitives ------------------------------------------------- */
+
+/* The black panel: square, bronze hairline, inner gold top-light. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.glass {
+  background: rgba(7, 6, 5, 0.88);
+  backdrop-filter: blur(10px) saturate(100%);
+  -webkit-backdrop-filter: blur(10px) saturate(100%);
+  border: 1px solid var(--line);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: #0a0806;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* The in-game metal-bevel button (Save / Defaults / Close). */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 16px;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #181410, #0b0a08);
+  border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(178, 145, 85, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: var(--fg);
+  letter-spacing: 0.04em;
+  transition: box-shadow 140ms var(--easing), color 140ms var(--easing);
+}
+.btn:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px rgba(231, 180, 120, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+.btn:active:not(:disabled) {
+  background: linear-gradient(180deg, #0b0a08, #181410);
+}
+/* Primary CTA: same metal, gold lettering (the game never floods buttons
+   with color). */
+.btn-primary,
+.btn-gold {
+  background: linear-gradient(180deg, #221a10, #0e0a06);
+  border-color: #000;
+  box-shadow: inset 0 0 0 1px rgba(210, 153, 51, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: var(--gold-bright);
+  font-weight: 500;
+}
+.btn-primary:hover:not(:disabled),
+.btn-gold:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px rgba(231, 180, 120, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #ffd9a0;
+}
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.btn-ghost:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px rgba(178, 145, 85, 0.35);
+}
+
+/* Small-caps gold micro-label (Fontin already renders small caps — no
+   text-transform on top). */
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  font-weight: 400;
+}
+
+/* In-game section header: white smallcaps over a fading gold rule. */
+.section-title,
+.poe-section {
+  font-size: 15px;
+  color: var(--fg);
+  letter-spacing: 0.03em;
+  padding-bottom: 4px;
+  background: linear-gradient(90deg, var(--gold) 0%, transparent 85%) bottom
+    left / 100% 1px no-repeat;
+}
+
+/* Gold title plaque (Options / Character header). */
+.poe-plaque {
+  position: relative;
+  text-align: center;
+  padding: 6px 28px;
+  background: linear-gradient(180deg, #1c1610, #0b0907);
+  border: 1px solid var(--gold);
+  outline: 1px solid #000;
+  border-radius: var(--radius);
+  color: var(--gold-bright);
+  font-size: 17px;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 2px #000;
+}
+.poe-plaque::before,
+.poe-plaque::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 42px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold));
+  transform: translateY(-50%);
+}
+.poe-plaque::before {
+  right: 100%;
+  margin-right: 8px;
+}
+.poe-plaque::after {
+  left: 100%;
+  margin-left: 8px;
+  transform: translateY(-50%) scaleX(-1);
+}
+
+/* rarity helpers */
+.r-normal { color: var(--r-normal); }
+.r-magic { color: var(--r-magic); }
+.r-rare { color: var(--r-rare); }
+.r-unique { color: var(--r-unique); }
+.r-desecrated { color: var(--r-desecrated); }
+.r-corrupted { color: var(--r-corrupted); }
+.r-fractured { color: var(--r-fractured); }
+.r-currency { color: var(--r-currency); }
+.r-crafted { color: var(--r-crafted); }
+
+.muted { color: var(--fg-muted); }
+.faint { color: var(--fg-faint); }
+.gold { color: var(--gold-bright); }
+.success { color: var(--success); }
+.danger { color: var(--danger-soft); }
+
+/* success-probability risk coloring (used across components via data-risk) */
+[data-risk="low"] { color: var(--success); }
+[data-risk="medium"] { color: var(--warn); }
+[data-risk="high"] { color: var(--danger-soft); }
+
+@keyframes pulse-glow {
+  0% { box-shadow: var(--glow-rec); }
+  50% { box-shadow: 0 0 0 1px var(--primary-glow), 0 0 56px -6px var(--primary-glow); }
+  100% { box-shadow: var(--glow-rec); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 37%, var(--surface) 63%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: var(--radius-sm);
+}
+
+/* ---- boot screen ------------------------------------------------------- */
+.boot {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+}
+.boot-card {
+  padding: 28px 32px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 280px;
+}
+.boot-error pre {
+  font-size: 11px;
+  color: var(--danger-soft);
+  white-space: pre-wrap;
+  max-width: 520px;
+  font-family: var(--font-mono);
+}
+.display-mark {
+  font-family: var(--font-display);
+  letter-spacing: 0.18em;
+  font-size: 17px;
+  color: var(--gold-bright);
+  margin-bottom: 6px;
+}
+
+/* ---- shared panel / modal / form primitives ---------------------------- */
+
+/* A scrollable section pane that fills the guide column. */
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  gap: 12px;
+}
+.pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.pane-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  color: var(--gold-bright);
+  text-shadow: 0 1px 2px #000;
+}
+.pane-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding-right: 2px;
+}
+
+/* Text input that fills its row. */
+.field {
+  width: 100%;
+}
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-label {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+}
+
+/* Segmented control (tabs / filters) — in-game tab strip. */
+.seg {
+  display: inline-flex;
+  background: #050403;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 2px;
+  gap: 2px;
+}
+.seg button {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  color: var(--fg-muted);
+  background: linear-gradient(180deg, transparent, transparent) bottom left /
+    100% 2px no-repeat;
+  transition: color 140ms var(--easing), background 140ms var(--easing);
+}
+.seg button:hover {
+  color: var(--fg);
+}
+.seg button.on {
+  color: #fff;
+  background:
+    linear-gradient(90deg, transparent 8%, var(--gold) 50%, transparent 92%)
+      bottom left / 100% 2px no-repeat,
+    var(--surface-3);
+}
+
+/* Modal overlay + dialog. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 2, 2, 0.7);
+  backdrop-filter: blur(3px);
+  animation: fade-in 160ms var(--easing);
+}
+.dialog {
+  width: min(720px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  outline: 1px solid #000;
+  border-radius: var(--radius);
+  box-shadow: 0 24px 70px -20px rgba(0, 0, 0, 0.95);
+  animation: rise-in 200ms var(--easing);
+  overflow: hidden;
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: #0a0806;
+  border: 1px solid var(--line);
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 40px 16px;
+  color: var(--fg-muted);
+}
+
+/* ============================================================================
+   PoE2 item popup (1:1, poe2db metrics) — `.poe-pop` family.
+   Header sprites + separators are fetched assets under
+   /genesis-icons/ui/ (graceful plain fallback when absent).
+   ========================================================================== */
+
+.poe-pop {
+  background: rgba(0, 0, 0, 0.92);
+  color: var(--default-color);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.3;
+  text-align: center;
+  border-radius: 0;
+}
+.poe-pop-header {
+  position: relative;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  line-height: 1em;
+  color: var(--r-normal);
+  background:
+    url("/genesis-icons/ui/header-normal-left.webp") top left / contain no-repeat,
+    url("/genesis-icons/ui/header-normal-right.webp") top right / contain no-repeat,
+    url("/genesis-icons/ui/header-normal-middle.webp") top center / contain repeat-x;
+}
+.poe-pop-header > span {
+  padding: 0 30px;
+  text-shadow: 0 1px 2px #000;
+}
+.poe-pop--currency .poe-pop-header {
+  color: var(--r-currency);
+  background-image: url("/genesis-icons/ui/header-currency-left.webp"),
+    url("/genesis-icons/ui/header-currency-right.webp"),
+    url("/genesis-icons/ui/header-currency-middle.webp");
+}
+.poe-pop--magic .poe-pop-header {
+  color: var(--r-magic);
+  background-image: url("/genesis-icons/ui/header-magic-left.webp"),
+    url("/genesis-icons/ui/header-magic-right.webp"),
+    url("/genesis-icons/ui/header-magic-middle.webp");
+}
+.poe-pop--rare .poe-pop-header {
+  color: var(--r-rare);
+  background-image: url("/genesis-icons/ui/header-rare-left.webp"),
+    url("/genesis-icons/ui/header-rare-right.webp"),
+    url("/genesis-icons/ui/header-rare-middle.webp");
+}
+.poe-pop-content {
+  padding: 0.4em 1em 0.5em;
+}
+.poe-pop-sep {
+  height: 8px;
+  margin: 1px 0;
+  background: url("/genesis-icons/ui/seperator-normal.webp") center no-repeat;
+  background-size: auto 8px;
+}
+.poe-pop--currency .poe-pop-sep {
+  background-image: url("/genesis-icons/ui/seperator-currency.webp");
+}
+.poe-pop--magic .poe-pop-sep {
+  background-image: url("/genesis-icons/ui/seperator-magic.webp");
+}
+.poe-pop--rare .poe-pop-sep {
+  background-image: url("/genesis-icons/ui/seperator-rare.webp");
+}
+.poe-pop-mod {
+  color: var(--r-magic);
+}
+.poe-pop-crafted {
+  color: var(--r-crafted);
+}
+.poe-pop-flavour {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--r-unique);
+}
+.poe-pop-note {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--default-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.08s !important;
+  }
+}

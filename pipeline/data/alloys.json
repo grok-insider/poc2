@@ -1,0 +1,636 @@
+{
+ "entries": [
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy1",
+   "id": "RunicAlloy",
+   "name": "Runic Alloy",
+   "drop_level": 13,
+   "targets": [
+    {
+     "class": "Amulet",
+     "engine_mod_id": "AlloyMaximumRunicWardPercent1"
+    },
+    {
+     "class": "Belt",
+     "engine_mod_id": "AlloyRunicWardRechargeRate1"
+    },
+    {
+     "class": "Ring",
+     "engine_mod_id": "AlloyMaximumRunicWard1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy2",
+   "id": "AdaptiveAlloy",
+   "name": "Adaptive Alloy",
+   "drop_level": 23,
+   "targets": [
+    {
+     "class": "Gloves",
+     "engine_mod_id": "AlloyAttackSpeedIfMissingWardRecently1"
+    },
+    {
+     "class": "Sceptre",
+     "engine_mod_id": "AlloyPuppetMasterChance1"
+    },
+    {
+     "class": "Staff",
+     "engine_mod_id": "AlloyDamageAsExtraFireTwoHandWhileMissingRunicWard1"
+    },
+    {
+     "class": "Wand",
+     "engine_mod_id": "AlloyDamageAsExtraFireWhileMissingRunicWard1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy3",
+   "id": "ProtectiveAlloy",
+   "name": "Protective Alloy",
+   "drop_level": 23,
+   "targets": [
+    {
+     "class": "Belt",
+     "engine_mod_id": "AlloyRecoverRunicWardOnCharmUse1"
+    },
+    {
+     "class": "Bow",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Buckler",
+     "engine_mod_id": "AlloyRunicWardOnBlock1"
+    },
+    {
+     "class": "Crossbow",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Dagger",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Flail",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "OneHandAxe",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "OneHandMace",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "OneHandSword",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Sceptre",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Shield",
+     "engine_mod_id": "AlloyRunicWardOnBlock1"
+    },
+    {
+     "class": "Spear",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Staff",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Talisman",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "TwoHandAxe",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "TwoHandMace",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "TwoHandSword",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Wand",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    },
+    {
+     "class": "Warstaff",
+     "engine_mod_id": "AlloyMaximumRunicWardWeapon1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy4",
+   "id": "ExpansiveAlloy",
+   "name": "Expansive Alloy",
+   "drop_level": 23,
+   "targets": [
+    {
+     "class": "BodyArmour",
+     "engine_mod_id": "AlloyPresenceAreaOfEffect1"
+    },
+    {
+     "class": "Boots",
+     "engine_mod_id": "AlloyTemporaryMinionSkillLimit1"
+    },
+    {
+     "class": "Gloves",
+     "engine_mod_id": "AlloyRemnantPickupRange1"
+    },
+    {
+     "class": "Helmet",
+     "engine_mod_id": "AlloyManaCostEfficiency1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy5",
+   "id": "SwiftAlloy",
+   "name": "Swift Alloy",
+   "drop_level": 45,
+   "targets": [
+    {
+     "class": "Belt",
+     "engine_mod_id": "AlloyFlaskChargesPerSecond1"
+    },
+    {
+     "class": "Buckler",
+     "engine_mod_id": "AlloyTotemPlacementSpeed1"
+    },
+    {
+     "class": "Focus",
+     "engine_mod_id": "AlloyTotemPlacementSpeed1"
+    },
+    {
+     "class": "Gloves",
+     "engine_mod_id": "AlloyCastSpeedGloves1"
+    },
+    {
+     "class": "Ring",
+     "engine_mod_id": "AlloyAttackSpeedRing1"
+    },
+    {
+     "class": "Shield",
+     "engine_mod_id": "AlloyTotemPlacementSpeed1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy6",
+   "id": "CyclonicAlloy",
+   "name": "Cyclonic Alloy",
+   "drop_level": 45,
+   "targets": [
+    {
+     "class": "BodyArmour",
+     "engine_mod_id": "AlloyReducedSlowPotency1"
+    },
+    {
+     "class": "Boots",
+     "engine_mod_id": "AlloySkillEffectDuration1"
+    },
+    {
+     "class": "Gloves",
+     "engine_mod_id": "AlloyDamagingAilmentDuration1"
+    },
+    {
+     "class": "Helmet",
+     "engine_mod_id": "AlloyArchonDuration1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy7",
+   "id": "PrismaticAlloy",
+   "name": "Prismatic Alloy",
+   "drop_level": 45,
+   "targets": [
+    {
+     "class": "Bow",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "Crossbow",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "Dagger",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "Flail",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "Focus",
+     "engine_mod_id": "AlloyExposureEffect1"
+    },
+    {
+     "class": "Gloves",
+     "engine_mod_id": "AlloyElementalPenetration1"
+    },
+    {
+     "class": "OneHandAxe",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "OneHandMace",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "OneHandSword",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "Sceptre",
+     "engine_mod_id": "AlloyMinionDamagingAilmentMagnitude1"
+    },
+    {
+     "class": "Spear",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "Staff",
+     "engine_mod_id": "AlloyExposureEffect1"
+    },
+    {
+     "class": "Talisman",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "TwoHandAxe",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "TwoHandMace",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "TwoHandSword",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    },
+    {
+     "class": "Wand",
+     "engine_mod_id": "AlloyExposureEffect1"
+    },
+    {
+     "class": "Warstaff",
+     "engine_mod_id": "AlloyAilmentMagnitude1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy8",
+   "id": "MysticAlloy",
+   "name": "Mystic Alloy",
+   "drop_level": 45,
+   "targets": [
+    {
+     "class": "Boots",
+     "engine_mod_id": "AlloySpiritOnBoots1"
+    },
+    {
+     "class": "Gloves",
+     "engine_mod_id": "AlloyAttackAreaOfEffect1"
+    },
+    {
+     "class": "Helmet",
+     "engine_mod_id": "AlloySpellAreaOfEffect1"
+    },
+    {
+     "class": "Quiver",
+     "engine_mod_id": "AlloyChanceToChain1"
+    },
+    {
+     "class": "Sceptre",
+     "engine_mod_id": "AlloyMaximumElementalInfusions1"
+    },
+    {
+     "class": "Staff",
+     "engine_mod_id": "AlloyMaximumElementalInfusions1"
+    },
+    {
+     "class": "Wand",
+     "engine_mod_id": "AlloyMaximumElementalInfusions1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy9",
+   "id": "SovereignAlloy",
+   "name": "Sovereign Alloy",
+   "drop_level": 65,
+   "targets": [
+    {
+     "class": "Amulet",
+     "engine_mod_id": "AlloyEffectOfResistanceMods1"
+    },
+    {
+     "class": "Belt",
+     "engine_mod_id": "AlloyEffectOfResistanceMods1"
+    },
+    {
+     "class": "BodyArmour",
+     "engine_mod_id": "AlloyLocalWardIncreasePercent1"
+    },
+    {
+     "class": "Boots",
+     "engine_mod_id": "AlloyLocalWardIncreasePercent1"
+    },
+    {
+     "class": "Bow",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Buckler",
+     "engine_mod_id": "AlloyLocalWardIncreasePercent1"
+    },
+    {
+     "class": "Crossbow",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Dagger",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Flail",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Focus",
+     "engine_mod_id": "AlloyLocalWardIncreasePercent1"
+    },
+    {
+     "class": "Gloves",
+     "engine_mod_id": "AlloyLocalWardIncreasePercent1"
+    },
+    {
+     "class": "Helmet",
+     "engine_mod_id": "AlloyLocalWardIncreasePercent1"
+    },
+    {
+     "class": "OneHandAxe",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "OneHandMace",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "OneHandSword",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Ring",
+     "engine_mod_id": "AlloyEffectOfResistanceMods1"
+    },
+    {
+     "class": "Sceptre",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Shield",
+     "engine_mod_id": "AlloyLocalWardIncreasePercent1"
+    },
+    {
+     "class": "Spear",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Staff",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Talisman",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "TwoHandAxe",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "TwoHandMace",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "TwoHandSword",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Wand",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    },
+    {
+     "class": "Warstaff",
+     "engine_mod_id": "AlloyEffectOfSocketedAugments1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy10",
+   "id": "CelestialAlloy",
+   "name": "Celestial Alloy",
+   "drop_level": 65,
+   "targets": [
+    {
+     "class": "Bow",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "Crossbow",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "Dagger",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "Flail",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "OneHandAxe",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "OneHandMace",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "OneHandSword",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "Spear",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "Staff",
+     "engine_mod_id": "AlloySpellLevelManaHybrid1"
+    },
+    {
+     "class": "Talisman",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "TwoHandAxe",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "TwoHandMace",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "TwoHandSword",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    },
+    {
+     "class": "Wand",
+     "engine_mod_id": "AlloySpellLevelManaHybrid1"
+    },
+    {
+     "class": "Warstaff",
+     "engine_mod_id": "AlloyAccuracyAttackSpeedHybrid1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy11",
+   "id": "TranscendentAlloy",
+   "name": "Transcendent Alloy",
+   "drop_level": 65,
+   "targets": [
+    {
+     "class": "Bow",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "Crossbow",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "Dagger",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "Flail",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "Focus",
+     "engine_mod_id": "AlloyCastSpeedDamageAsExtraColdHybrid1"
+    },
+    {
+     "class": "OneHandAxe",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "OneHandMace",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "OneHandSword",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "Spear",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "Staff",
+     "engine_mod_id": "AlloyCastSpeedDamageAsExtraColdHybrid1"
+    },
+    {
+     "class": "Talisman",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "TwoHandAxe",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "TwoHandMace",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "TwoHandSword",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    },
+    {
+     "class": "Wand",
+     "engine_mod_id": "AlloyCastSpeedDamageAsExtraColdHybrid1"
+    },
+    {
+     "class": "Warstaff",
+     "engine_mod_id": "AlloyAttributeIncreasedLocalPhysicalDamageHybrid1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy12",
+   "id": "TheRunebindersAlloy",
+   "name": "The Runebinder's Alloy",
+   "drop_level": 65,
+   "targets": [
+    {
+     "class": "Bow",
+     "engine_mod_id": "AlloyMarkEffect"
+    },
+    {
+     "class": "Crossbow",
+     "engine_mod_id": "AlloyBallistaLimit1"
+    },
+    {
+     "class": "Sceptre",
+     "engine_mod_id": "AlloyPuppeteerStacks1"
+    },
+    {
+     "class": "Staff",
+     "engine_mod_id": "AlloyNaturesArchon1"
+    },
+    {
+     "class": "Wand",
+     "engine_mod_id": "AlloyElementalSkillLimit1"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/CurrencyVerisiumAlloy13",
+   "id": "TheRunefathersAlloy",
+   "name": "The Runefather's Alloy",
+   "drop_level": 65,
+   "targets": [
+    {
+     "class": "OneHandMace",
+     "engine_mod_id": "AlloyRetainGlory1"
+    },
+    {
+     "class": "Spear",
+     "engine_mod_id": "AlloyMeleeStrikeRange1"
+    },
+    {
+     "class": "Talisman",
+     "engine_mod_id": "AlloyLightningDamageIgnites1"
+    },
+    {
+     "class": "TwoHandMace",
+     "engine_mod_id": "AlloyRetainGlory1"
+    },
+    {
+     "class": "Warstaff",
+     "engine_mod_id": "AlloyBellLimit1"
+    }
+   ]
+  }
+ ]
+}

@@ -16,9 +16,15 @@
 //!    DivinePrice. The resulting feed is merged into a [`Valuator`] via
 //!    [`apply_feed_to_valuator`].
 //!
+//! Only the HTTP fetching ([`fetch_snapshot`]) is gated behind the `net`
+//! feature; the snapshot types, [`apply_feed_to_valuator`] and
+//! [`default_id_mapping`] build everywhere (including the WASM advisor,
+//! which receives the snapshot JSON from the browser).
+//!
 //! [poe2scout.com]: https://poe2scout.com/
 
 use std::collections::HashMap;
+#[cfg(feature = "net")]
 use std::time::Duration;
 
 use poc2_engine::ids::CurrencyId;
@@ -103,6 +109,7 @@ pub struct PoeScoutSnapshot {
 /// Errors a price fetch can raise.
 #[derive(Debug, thiserror::Error)]
 pub enum PriceError {
+    #[cfg(feature = "net")]
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("league {0:?} not found in poe2scout response")]
@@ -115,6 +122,7 @@ pub enum PriceError {
 ///
 /// `league` defaults to [`POE2SCOUT_DEFAULT_LEAGUE`]. Pass `None` for
 /// `categories` to use [`POE2SCOUT_DEFAULT_CATEGORIES`].
+#[cfg(feature = "net")]
 pub async fn fetch_snapshot(
     client: &reqwest::Client,
     league: Option<&str>,
@@ -153,6 +161,7 @@ pub async fn fetch_snapshot(
     })
 }
 
+#[cfg(feature = "net")]
 async fn fetch_category_paginated(
     client: &reqwest::Client,
     league: &str,
@@ -293,8 +302,8 @@ pub fn default_id_mapping() -> HashMap<String, CurrencyId> {
         ("omen-of-dextral-necromancy", "OmenOfDextralNecromancy"),
         ("omen-of-the-liege", "OmenOfTheLiege"),
         ("omen-of-the-sovereign", "OmenOfTheSovereign"),
-        ("omen-of-the-blackblooded", "OmenOfBlackblooded"),
-        ("omen-of-echoes-of-the-abyss", "OmenOfEchoesOfTheAbyss"),
+        ("omen-of-the-blackblooded", "OmenOfTheBlackblooded"),
+        ("omen-of-echoes-of-the-abyss", "OmenOfAbyssalEchoes"),
         ("omen-of-sanctification", "OmenOfSanctification"),
         // ---- Essences (Phase F) ---------------------------------------
         // poe2scout publishes essences under `Category=essences` with
@@ -371,6 +380,7 @@ pub fn default_id_mapping() -> HashMap<String, CurrencyId> {
     m
 }
 
+#[cfg(any(feature = "net", test))]
 fn now_iso8601() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -379,6 +389,7 @@ fn now_iso8601() -> String {
     iso8601_from_unix(secs)
 }
 
+#[cfg(any(feature = "net", test))]
 #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
 fn iso8601_from_unix(secs: u64) -> String {
     let days = secs / 86_400;
@@ -521,5 +532,95 @@ mod tests {
         for slug in ["divine", "chaos", "exalted", "vaal", "hinekoras-lock"] {
             assert!(m.contains_key(slug), "missing slug: {slug}");
         }
+    }
+
+    /// Every omen id the engine implements, keyed by its canonical id string
+    /// (the `Omen::new(...)` constructor arguments in `poc2_engine::omen`).
+    fn engine_omen_canon() -> std::collections::HashSet<String> {
+        use poc2_engine::Omen;
+        [
+            Omen::sinistral_exaltation(),
+            Omen::dextral_exaltation(),
+            Omen::greater_exaltation(),
+            Omen::sinistral_annulment(),
+            Omen::dextral_annulment(),
+            Omen::sinistral_erasure(),
+            Omen::dextral_erasure(),
+            Omen::sinistral_crystallisation(),
+            Omen::dextral_crystallisation(),
+            Omen::sinistral_necromancy(),
+            Omen::dextral_necromancy(),
+            Omen::whittling(),
+            Omen::light(),
+            Omen::abyssal_echoes(),
+            Omen::corruption(),
+            Omen::sanctification(),
+            Omen::blessed(),
+            Omen::catalysing_exaltation(),
+            Omen::blackblooded(),
+            Omen::liege(),
+            Omen::sovereign(),
+            Omen::homogenising_exaltation(),
+            Omen::homogenising_coronation(),
+        ]
+        .into_iter()
+        .map(|o| o.id.as_str().to_string())
+        .collect()
+    }
+
+    /// Essence ids are bundle-driven (`{Greater|Perfect}?EssenceOf...`); the
+    /// static resolver can't validate them, so the canon test accepts the
+    /// naming scheme instead.
+    fn is_essence_id(s: &str) -> bool {
+        let tail = s
+            .strip_prefix("Greater")
+            .or_else(|| s.strip_prefix("Perfect"))
+            .unwrap_or(s);
+        tail.starts_with("EssenceOf")
+    }
+
+    #[test]
+    fn default_id_mapping_targets_known_engine_ids() {
+        use poc2_engine::currency::{CurrencyResolver, DefaultCurrencyResolver};
+
+        // Quality currencies + Mirror live only in the valuator's fallback
+        // table / bundle catalogues, not in the static resolver.
+        const CATALOGUE_IDS: &[&str] = &[
+            "MirrorOfKalandra",
+            "ArtificersOrb",
+            "PerfectJewellersOrb",
+            "ArcanistsEtcher",
+            "ArmourersScrap",
+            "GlassblowersBauble",
+            "BlacksmithsWhetstone",
+            "GemcuttersPrism",
+        ];
+
+        let omen_canon = engine_omen_canon();
+        let resolver = DefaultCurrencyResolver::new();
+        for (slug, id) in default_id_mapping() {
+            let s = id.as_str();
+            let known = omen_canon.contains(s)
+                || resolver.resolve(&id).is_some()
+                || CATALOGUE_IDS.contains(&s)
+                || is_essence_id(s);
+            assert!(known, "slug {slug:?} maps to unknown engine id {s:?}");
+        }
+    }
+
+    /// Regression for the audit-found mismatches: poe2scout's blackblooded /
+    /// echoes-of-the-abyss slugs must land on the engine's canonical omen ids.
+    #[test]
+    fn audited_omen_slugs_map_to_engine_canon() {
+        use poc2_engine::Omen;
+        let m = default_id_mapping();
+        assert_eq!(
+            m["omen-of-the-blackblooded"].as_str(),
+            Omen::blackblooded().id.as_str()
+        );
+        assert_eq!(
+            m["omen-of-echoes-of-the-abyss"].as_str(),
+            Omen::abyssal_echoes().id.as_str()
+        );
     }
 }

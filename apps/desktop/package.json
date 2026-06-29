@@ -1,36 +1,26 @@
 {
-  "name": "poc2-desktop",
-  "version": "0.1.0",
+  "name": "@poc2/desktop",
+  "version": "1.1.0",
   "private": true,
-  "type": "module",
-  "description": "Path of Crafting 2 — desktop app frontend (Svelte 5 + Vite, served by Tauri 2)",
+  "description": "Path of Crafting 2 — desktop shell (Electron) around the apps/web static export. ADR-0010.",
+  "main": "dist/main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "lint": "eslint src --ext .ts,.svelte",
-    "format": "prettier --write src/"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "dev": "bun run build && bun scripts/run-electron.mjs --dev",
+    "start": "bun run build && bun scripts/run-electron.mjs",
+    "test": "bun test",
+    "dist:linux": "bun run build && electron-builder --linux",
+    "dist:win": "bun run build && electron-builder --win"
   },
+  "trustedDependencies": ["electron"],
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^4.0.0",
-    "@tauri-apps/cli": "^2.1.0",
-    "@tsconfig/svelte": "^5.0.4",
-    "@types/node": "^22.9.0",
-    "svelte": "^5.1.16",
-    "svelte-check": "^4.0.9",
-    "tslib": "^2.8.1",
-    "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "@types/node": "^22.10.0",
+    "electron": "^41.0.0",
+    "electron-builder": "^26.0.0",
+    "typescript": "^5.7.0"
   },
-  "dependencies": {
-    "@tauri-apps/api": "^2.1.1",
-    "@tauri-apps/plugin-clipboard-manager": "^2.0.1",
-    "@tauri-apps/plugin-fs": "^2.0.3",
-    "@tauri-apps/plugin-http": "^2.0.4",
-    "@tauri-apps/plugin-shell": "^2.0.1"
+  "optionalDependencies": {
+    "uiohook-napi": "^1.5.4"
   }
 }

@@ -79,6 +79,12 @@ pub struct PredicateContext<'a> {
     /// [`ItemPredicate::Custom`]. `None` means custom predicates
     /// always evaluate to false.
     pub plugin_dispatch: Option<&'a dyn PluginPredicateDispatch>,
+    /// Item class resolved once per item by the caller (via
+    /// `BaseRegistry::resolve_item_class`). Drives
+    /// [`ItemPredicate::ItemClass`] / `ItemClassAny` and
+    /// [`ItemPredicate::BundleWeightAbove`]. `None` falls back to the
+    /// legacy placeholder semantics where `Item.base` *is* the class id.
+    pub item_class: Option<ItemClassId>,
 }
 
 impl<'a> PredicateContext<'a> {
@@ -94,6 +100,7 @@ impl<'a> PredicateContext<'a> {
             stash: None,
             expected_sale_price_div: None,
             plugin_dispatch: None,
+            item_class: None,
         }
     }
 
@@ -126,6 +133,26 @@ impl<'a> PredicateContext<'a> {
         self.plugin_dispatch = Some(dispatch);
         self
     }
+
+    #[must_use]
+    pub fn with_item_class(mut self, class: ItemClassId) -> Self {
+        self.item_class = Some(class);
+        self
+    }
+
+    /// Class of `item` for class-gated predicates: the pre-resolved
+    /// [`Self::item_class`] when the caller threaded one, otherwise the
+    /// shared engine resolver against the empty `BaseRegistry` — which
+    /// trusts legacy class-id-placeholder bases and warns on
+    /// unresolvable metadata-path bases instead of silently
+    /// misclassifying them.
+    #[must_use]
+    pub fn item_class_for(&self, item: &Item) -> ItemClassId {
+        match &self.item_class {
+            Some(class) => class.clone(),
+            None => poc2_engine::base_registry::EMPTY.resolve_item_class(item),
+        }
+    }
 }
 
 /// Evaluate an [`ItemPredicate`] against an item with the supplied
@@ -147,8 +174,11 @@ pub fn eval(predicate: &ItemPredicate, item: &Item, ctx: &PredicateContext<'_>) 
         ItemPredicate::Corrupted(b) => item.corrupted == *b,
         ItemPredicate::Sanctified(b) => item.sanctified == *b,
         ItemPredicate::Mirrored(b) => item.mirrored == *b,
-        ItemPredicate::ItemClass(c) => &class_of_item(item) == c,
-        ItemPredicate::ItemClassAny(cs) => cs.iter().any(|c| c == &class_of_item(item)),
+        ItemPredicate::ItemClass(c) => &ctx.item_class_for(item) == c,
+        ItemPredicate::ItemClassAny(cs) => {
+            let class = ctx.item_class_for(item);
+            cs.iter().any(|c| c == &class)
+        }
 
         // AttributePool predicates need a BaseRegistry — TODO(M5).
         ItemPredicate::AttributePool(_) | ItemPredicate::AttributePoolAny(_) => false,
@@ -233,7 +263,7 @@ pub fn eval(predicate: &ItemPredicate, item: &Item, ctx: &PredicateContext<'_>) 
             min_tier: _,
         } => concept_set_contains_any(item, ctx.registry, concepts, affix.as_ref()),
         ItemPredicate::BundleWeightAbove { mod_id, threshold } => {
-            bundle_weight_above(item, ctx.registry, mod_id, *threshold)
+            bundle_weight_above(item, ctx, mod_id, *threshold)
         }
     }
 }
@@ -368,18 +398,20 @@ fn concept_set_contains_any(
 
 /// True iff `registry.weight_for(mod_id, item.base, item.ilvl, class)`
 /// exceeds `threshold`. Returns false when the registry doesn't know
-/// the mod.
+/// the mod. The class comes from [`PredicateContext::item_class_for`].
 fn bundle_weight_above(
     item: &Item,
-    registry: &ModRegistry,
+    ctx: &PredicateContext<'_>,
     mod_id: &ModId,
     threshold: f64,
 ) -> bool {
-    if registry.get(mod_id).is_none() {
+    if ctx.registry.get(mod_id).is_none() {
         return false;
     }
-    let class = ItemClassId::from(item.base.as_str());
-    let weight = registry.weight_for(mod_id, &item.base, item.ilvl, &class);
+    let class = ctx.item_class_for(item);
+    let weight = ctx
+        .registry
+        .weight_for(mod_id, &item.base, item.ilvl, &class);
     weight > threshold
 }
 
@@ -427,12 +459,6 @@ fn has_concept(
         Some(AffixType::Enchantment) => check_slot(&item.enchantments),
         None => check_slot(&item.prefixes) || check_slot(&item.suffixes),
     }
-}
-
-fn class_of_item(item: &Item) -> ItemClassId {
-    // Until BaseRegistry lands, we use the convention that test fixtures
-    // and synthetic items put the class id into the base field.
-    ItemClassId::from(item.base.as_str())
 }
 
 /// Trivial extension trait for [`AttributePool`] used by some predicate
@@ -508,6 +534,7 @@ mod tests {
                 max: 80.0
             }],
             required_level: 75,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),
@@ -575,6 +602,53 @@ mod tests {
         let ctx = PredicateContext::new(&reg);
         assert!(eval(&ItemPredicate::Rarity(Rarity::Rare), &item, &ctx));
         assert!(!eval(&ItemPredicate::Rarity(Rarity::Magic), &item, &ctx));
+    }
+
+    #[test]
+    fn eval_item_class_matches_legacy_base_and_resolved_metadata_base_identically() {
+        let (legacy, reg) = fixture_es_armour_with_es_prefix();
+        // The same item as a real captured bundle item: `base` is a
+        // metadata path, and the caller pre-resolved the class.
+        let mut bundled = legacy.clone();
+        bundled.base = "Metadata/Items/Armours/BodyArmours/FourBodyInt3".into();
+
+        let legacy_ctx = PredicateContext::new(&reg);
+        let bundled_ctx =
+            PredicateContext::new(&reg).with_item_class(ItemClassId::from("BodyArmour"));
+
+        let class = ItemPredicate::ItemClass(ItemClassId::from("BodyArmour"));
+        let class_any = ItemPredicate::ItemClassAny(vec![
+            ItemClassId::from("Ring"),
+            ItemClassId::from("BodyArmour"),
+        ]);
+        let class_miss = ItemPredicate::ItemClass(ItemClassId::from("Helmet"));
+        for (pred, expected) in [(&class, true), (&class_any, true), (&class_miss, false)] {
+            assert_eq!(eval(pred, &legacy, &legacy_ctx), expected);
+            assert_eq!(eval(pred, &bundled, &bundled_ctx), expected);
+        }
+
+        // Without a pre-resolved class the metadata path falls back to
+        // the placeholder interpretation and matches nothing.
+        assert!(!eval(&class, &bundled, &legacy_ctx));
+    }
+
+    #[test]
+    fn eval_bundle_weight_above_uses_resolved_item_class() {
+        let (legacy, reg) = fixture_es_armour_with_es_prefix();
+        let mut bundled = legacy.clone();
+        bundled.base = "Metadata/Items/Armours/BodyArmours/FourBodyInt3".into();
+        let bundled_ctx =
+            PredicateContext::new(&reg).with_item_class(ItemClassId::from("BodyArmour"));
+        // Same eligibility-fallback weight as the legacy-base form in
+        // `eval_bundle_weight_above_uses_registry_weight`.
+        assert!(eval(
+            &ItemPredicate::BundleWeightAbove {
+                mod_id: ModId::from("EsPrefix1"),
+                threshold: 0.5,
+            },
+            &bundled,
+            &bundled_ctx
+        ));
     }
 
     #[test]

@@ -49,6 +49,7 @@ fn fr_suffix_mod(id: &str) -> ModDefinition {
             max: 45.0,
         }],
         required_level: 65,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
         patch_range: PatchRange::ALL,
         flags: ModFlags::empty(),
@@ -124,8 +125,10 @@ fn b4_loop_recurring_chaos_candidate_emitted_for_rare_with_mods() {
         &resolver,
         &stash,
         PatchVersion::PATCH_0_4_0,
+        poc2_engine::patch::League::current(),
         Some(&goal),
         &registry,
+        None,
     );
 
     let recurring = cands
@@ -176,6 +179,7 @@ fn b4_loop_recurring_recommendation_carries_loop_estimate() {
         valuator: &valuator,
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
+        league: poc2_engine::patch::League::current(),
         plugin_dispatch: None,
         base_registry: None,
         trained_models: None,

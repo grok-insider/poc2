@@ -14,6 +14,7 @@ These directories are **not tracked by git** (see `.gitignore`). They are recrea
 | `POE2_HTC/` | https://github.com/Dboire9/POE2_HTC | AGPL-3.0 | Reference only — best example of beam-search optimal-path crafting. **Cannot copy code (license incompatibility with our MIT)**. |
 | `XileHUD-poe_overlay/` | https://github.com/XileHUD/poe_overlay | GPL-3.0 | Reference for clipboard parsing, Client.txt monitoring, local data layout. **Cannot copy code (license incompatibility)**. |
 | `Exiled-Exchange-2/` | https://github.com/Kvan7/Exiled-Exchange-2 | MIT-ish | Reference for trade API integration patterns. |
+| `awakened-poe-trade/` | https://github.com/SnosMe/awakened-poe-trade | MIT | Reference for overlay item capture (Ctrl+C→clipboard), price-check UI/flow, trade-API stat matching. |
 | `ggpk-explorer/` | https://github.com/juddisjudd/ggpk-explorer | GPL-3.0 | Emergency self-extraction tool if RePoE-fork breaks. **Cannot copy code (license incompatibility)**. |
 | `poe-dat-viewer/` | https://github.com/SnosMe/poe-dat-viewer | (open) | Reference for `.datc64` parsing in TypeScript. |
 | `LocalIdentity-poe2-data/` | https://github.com/LocalIdentity/poe2-data | (data: GGG) | Raw `.dat` dumps as cross-check against RePoE-fork. **~1.1 GB**. |

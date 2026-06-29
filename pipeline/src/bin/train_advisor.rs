@@ -327,11 +327,14 @@ impl EngineContext {
     fn from_bundle(bundle: Bundle) -> Self {
         let essences = bundle.essence_catalogue();
         let catalysts = bundle.catalyst_catalogue();
+        let mut alloys = bundle.alloy_catalogue();
+        alloys.extend(bundle.emotion_catalogue());
         let base_registry = BaseRegistry::from_bases(bundle.base_items);
         let registry = ModRegistry::from_mods(bundle.mods, bundle.weights);
         let resolver = DefaultCurrencyResolver::new()
             .with_essences(essences)
-            .with_catalysts(catalysts);
+            .with_catalysts(catalysts)
+            .with_alloys(alloys);
         Self {
             registry,
             base_registry,
@@ -726,6 +729,7 @@ mod tests {
             spawn_weights: smallvec![],
             stats: smallvec![],
             required_level: 1,
+            tier: None,
             allowed_item_classes: smallvec![],
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),
@@ -961,6 +965,7 @@ mod tests {
                 // training defaults to Perfect-orb actions, so the
                 // synthetic mod must clear that bar.
                 required_level: 75,
+                tier: None,
                 allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
                 patch_range: PatchRange::ALL,
                 flags: ModFlags::empty(),

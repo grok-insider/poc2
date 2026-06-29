@@ -1,0 +1,234 @@
+/* TargetEditor — goal target/budget editor. Layout-only; visual primitives
+   come from app/globals.css. */
+
+.headRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Suggest-a-target preset row. */
+.suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.suggestChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.suggestChip {
+  cursor: pointer;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.suggestChip:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+}
+/* Archetype chips carry the single accent — they're the recommended action. */
+.archChip {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  color: var(--fg);
+}
+.archChip:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+}
+
+.abandon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+/* One-click concept chips sourced from the base's eligible pool. */
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.palette .chip {
+  cursor: pointer;
+}
+.palette .chip:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.group:last-child {
+  margin-bottom: 0;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.dot[data-affix="prefix"] {
+  background: var(--r-magic);
+}
+.dot[data-affix="suffix"] {
+  background: var(--accent);
+}
+
+.emptyRow {
+  padding: 12px 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  font-size: 12px;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.rowTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.conceptInput {
+  flex: 1;
+  min-width: 0;
+}
+.removeBtn {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--fg-faint);
+}
+.removeBtn:hover {
+  color: var(--danger);
+}
+
+.rowControls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stepperLabel {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  font-weight: 600;
+}
+.stepperBody {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  overflow: hidden;
+}
+.stepBtn {
+  width: 26px;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  color: var(--fg-muted);
+  background: var(--surface-2);
+  transition: background 120ms var(--easing), color 120ms var(--easing);
+}
+.stepBtn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+.stepInput {
+  width: 46px;
+  text-align: center;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 5px 2px;
+  -moz-appearance: textfield;
+}
+.stepInput:focus {
+  border: none;
+}
+.stepInput::-webkit-outer-spin-button,
+.stepInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.hybrid {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding-bottom: 6px;
+  cursor: pointer;
+}
+.hybrid input {
+  width: auto;
+}
+
+.budgetCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+}
+.budgetRow {
+  display: flex;
+  gap: 12px;
+}
+.budgetField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.budgetInput {
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.budgetInput::-webkit-outer-spin-button,
+.budgetInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.budgetHint {
+  font-size: 11px;
+  margin: 0;
+}

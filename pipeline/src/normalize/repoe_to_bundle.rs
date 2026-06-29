@@ -101,7 +101,7 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
                 width: raw.inventory_width,
                 height: raw.inventory_height,
             },
-            release_state: parse_release_state(&raw.release_state),
+            release_state: derive_release_state(id, &raw.release_state),
             patch_range: PatchRange::ALL,
         });
         bases_kept += 1;
@@ -154,7 +154,24 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
     let tag_to_classes = build_tag_to_classes_index(&bundle.base_items);
     for (id, raw) in &snapshot.mods {
         let is_referenced_implicit = referenced_implicits.contains(id.as_str());
-        if raw.domain != "item" && !is_referenced_implicit {
+        // 0.5: the Jewel mod pool lives under domain "misc" in PoE2's
+        // export (tags `strjewel` / `dex_radius_jewel` / …). Keep those so
+        // jewel crafting (catalysts, Liquid/Ancient Emotions) has a
+        // registry pool; their `allowed_item_classes` resolve to Jewel via
+        // the tag→class map, so gear pools are unaffected.
+        let is_jewel_pool = raw.domain == "misc"
+            && (raw
+                .spawn_weights
+                .iter()
+                .any(|sw| sw.weight > 0 && sw.tag.contains("jewel"))
+                // Emotion-granted out-of-pool jewel mods (0.5): crafted
+                // (`CraftedJewel*`) and radius (`JewelRadius*`) lines carry
+                // weight 0 everywhere — they only enter items via Liquid /
+                // Potent / Ancient Emotions, but the engine still needs
+                // their definitions to roll values.
+                || id.starts_with("CraftedJewel")
+                || id.starts_with("JewelRadius"));
+        if raw.domain != "item" && !is_jewel_pool && !is_referenced_implicit {
             mods_skipped += 1;
             continue;
         }
@@ -164,6 +181,13 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
             a
         } else if is_referenced_implicit {
             AffixType::Implicit
+        } else if let Some((a, _)) = super::alloy_fixups::alloy_affix_lookup(id) {
+            // RePoE-fork has shipped the 0.5 `Alloy*` mods with an empty
+            // generation_type; without this fallback they'd be dropped here
+            // and the alloy catalogue's targets would dangle. The curated
+            // poe2db table supplies the affix; `apply_alloy_fixups` later
+            // back-fills required_level.
+            a
         } else {
             mods_skipped += 1;
             continue;
@@ -216,12 +240,19 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
             mod_group: ModGroup(ModGroupId::from(group.as_str())),
             affix_type: affix,
             kind,
-            domain: ModDomain::Item,
+            domain: if is_jewel_pool {
+                ModDomain::Jewel
+            } else {
+                ModDomain::Item
+            },
             tags,
             concept_set: SmallVec::new(), // populated by mod analyzer (M2.7)
             spawn_weights,
             stats,
             required_level: raw.required_level,
+            // Tier ordinal is derived post-hoc by `assign_tier_ordinals`
+            // after all mods are loaded (it needs the full group ladder).
+            tier: None,
             allowed_item_classes: allowed_classes,
             patch_range: PatchRange::ALL,
             flags,
@@ -357,6 +388,25 @@ fn is_gear_class(class: &str) -> bool {
                 | "MiscMapItem"
                 | "Incubator"
         )
+}
+
+/// Release state for a base, with the 0.5 unique-runeforging override.
+///
+/// poe2db /us/Runeforging "Unique Runeforging /308": "Unique Verisium
+/// Runeforging" upgrades unique items into "Runemastered <name>" variants,
+/// and GGG models each as a separate base whose metadata id contains
+/// "VerisiumUnique" (e.g.
+/// `Metadata/Items/Amulets/FourAmuletUnique1VerisiumUnique3`, name
+/// "Runemastered Veridical Chain"). RePoE-fork exports them
+/// `release_state="released"`, which leaks ~274 unique bases into the
+/// craftable base lists — these are runeforged *unique* variants, not
+/// craftable bases, so they are forced to `Unique` regardless of the raw
+/// state.
+fn derive_release_state(base_id: &str, raw_state: &str) -> ReleaseState {
+    if base_id.contains("VerisiumUnique") {
+        return ReleaseState::Unique;
+    }
+    parse_release_state(raw_state)
 }
 
 fn parse_release_state(s: &str) -> ReleaseState {
@@ -732,6 +782,34 @@ mod tests {
             Some(AffixType::Implicit)
         );
         assert_eq!(parse_generation_type_to_affix("monster"), None);
+    }
+
+    #[test]
+    fn verisium_unique_bases_forced_to_unique() {
+        // Runeforged unique variants override whatever RePoE exports.
+        assert_eq!(
+            derive_release_state(
+                "Metadata/Items/Amulets/FourAmuletUnique1VerisiumUnique3",
+                "released"
+            ),
+            ReleaseState::Unique
+        );
+        assert_eq!(
+            derive_release_state(
+                "Metadata/Items/Weapons/OneHandWeapons/OneHandMaces/FourOneHandMace13VerisiumUnique1",
+                "unreleased"
+            ),
+            ReleaseState::Unique
+        );
+        // Ordinary bases keep the raw release_state mapping.
+        assert_eq!(
+            derive_release_state("Metadata/Items/Amulets/Amulet1", "released"),
+            ReleaseState::Released
+        );
+        assert_eq!(
+            derive_release_state("Metadata/Items/Amulets/Amulet2", "unique_only"),
+            ReleaseState::Unique
+        );
     }
 
     #[test]

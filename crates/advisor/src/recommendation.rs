@@ -170,13 +170,23 @@ pub struct Recommendation {
     /// Divine-equivalent cost band of taking the action ONCE
     /// (from [`poc2_market::Valuator`]).
     pub expected_cost: DivEquiv,
-    /// Estimated success probability of *this single step* in `[0, 1]`.
-    /// 1.0 for non-probabilistic actions (Hinekora's Lock, Stop, Abandon).
+    /// Estimated probability of *reaching the goal* via this plan, in `[0, 1]`
+    /// — execution-reliability × [`Self::goal_progress`]. NOT the raw
+    /// step-execution probability (a safe no-op far from the goal would read
+    /// ~90% on that; this reads low until the item actually carries the target
+    /// mods). 1.0 for a satisfied goal via a non-probabilistic terminal action.
     pub expected_prob: f64,
-    /// Standard error of the success-probability estimate (Phase C.1
-    /// Monte Carlo). `0.0` when planner ran with `mc_samples = 1` or
-    /// for non-probabilistic actions. UI renders this as the
-    /// `± stderr` band ("P(reach) ≈ 65% ± 8%").
+    /// Structural goal-progress of the user's CURRENT item, in `[0, 1]`: the
+    /// fraction of the goal's target specs (prefixes + suffixes) it already
+    /// satisfies. `1.0` once the goal is met. Deterministic (not the noisy
+    /// single-rollout terminal state) so the "n/m specs" bar is stable; the UI
+    /// also uses it to colour the headline.
+    #[serde(default)]
+    pub goal_progress: f64,
+    /// Standard error of the P(reach goal) estimate (Phase C.1 Monte Carlo),
+    /// scaled by [`Self::goal_progress`] so the band stays proportionate.
+    /// `0.0` when planner ran with `mc_samples = 1` or for non-probabilistic
+    /// actions. UI renders this as the `± stderr` band.
     #[serde(default)]
     pub prob_stderr: f64,
     /// Final utility score the planner used to rank this. Higher = better.
@@ -222,6 +232,7 @@ mod tests {
             },
             expected_cost: DivEquiv::point(0.125),
             expected_prob: 0.5,
+            goal_progress: 0.5,
             prob_stderr: 0.07,
             score: 4.0,
             rationale: "Chaos spam toward target.".into(),
@@ -262,6 +273,7 @@ mod tests {
             },
             expected_cost: DivEquiv::point(0.5),
             expected_prob: 0.6,
+            goal_progress: 0.6,
             prob_stderr: 0.1,
             score: 3.5,
             rationale: "Annul + Chaos until T1 ES on prefix.".into(),

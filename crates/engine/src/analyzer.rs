@@ -369,6 +369,7 @@ mod tests {
                 })
                 .collect(),
             required_level: 1,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from("x")],
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),

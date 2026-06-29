@@ -1,0 +1,99 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* --- Market --- */
+.leagueRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.leagueInput {
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+.note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.spin {
+  animation: settings-spin 0.9s linear infinite;
+}
+@keyframes settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Notes --- */
+.notes {
+  width: 100%;
+  resize: vertical;
+  min-height: 120px;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+
+/* --- Data --- */
+.dataGrid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.engineNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.engineNote svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+/* --- Reset --- */
+.resetRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-2));
+  border-color: var(--danger);
+}

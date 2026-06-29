@@ -38,6 +38,7 @@
 pub mod analyzer;
 pub mod base;
 pub mod base_registry;
+mod concepts;
 pub mod currency;
 pub mod engine;
 pub mod error;
@@ -68,15 +69,16 @@ pub use mods::{
     Concept, ModDefinition, ModDomain, ModFlags, ModGroup, ModKind, ModStat, SpawnWeight,
 };
 pub use omen::{Omen, OmenEffect, OmenSet};
-pub use patch::{PatchRange, PatchVersion};
+pub use patch::{League, PatchRange, PatchVersion};
 pub use registry::{ModIndex, ModRegistry};
 pub use tag::{Tag, TagCategory};
 pub use weights::{Confidence, WeightObservation, WeightScope};
 
 pub use currency::{
-    compute_recombine_success_chance, recombine, recombine_with_chance, ApplyContext, ApplyOutcome,
-    Bone, CannotApply, Catalyst, Currency, CurrencyResolver, DefaultCurrencyResolver, Essence,
-    EssenceQuality, FracturingOrb, HinekorasLock, RaritySet, RecombinatorOutcome,
+    compute_recombine_success_chance, recombine, recombine_with_chance, Alloy, ApplyContext,
+    ApplyOutcome, Bone, CannotApply, Catalyst, Currency, CurrencyResolver, DefaultCurrencyResolver,
+    Essence, EssenceQuality, EssenceTarget, FracturingOrb, HinekorasLock, RaritySet,
+    RecombinatorOutcome,
 };
 pub use engine::{
     apply_currency, apply_currency_with_bases, commit_with_preview, commit_with_preview_with_bases,

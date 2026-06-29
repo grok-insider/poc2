@@ -1,44 +1,52 @@
 //! Catalysts — tagged-quality currency for rings, amulets, and jewels.
 //!
-//! ## Behavior (PoE2 0.4)
+//! ## Behavior (PoE2 0.5)
 //!
-//! - Apply to a ring, amulet, or jewel.
-//! - Each catalyst is tagged: `caster`, `attack`, `life`, `breach`, etc.
+//! - Exactly 24 catalysts exist (poe2db catalysts.html): 12 base kinds
+//!   that apply to "a ring or amulet", and 12 `Refined` variants of the
+//!   same kinds that apply to "a jewel". Belts take no catalyst in 0.5.
+//!   The PoE1 names "Intrinsic Catalyst" / "Unstable Catalyst" do not
+//!   exist in PoE2.
+//! - Each catalyst is tagged: `life`, `mana`, `defences`, `physical`,
+//!   `fire`, `cold`, `lightning`, `chaos`, `attack`, `caster`, `speed`,
+//!   or `attribute` (Adaptive). All add the same +5%/apply.
 //! - On apply:
 //!   - If `quality_kind` is `Tagged(same_tag)`: add `increment` to quality.
 //!   - If `quality_kind` is `Tagged(other_tag)` or `Untagged` with non-zero
 //!     quality: reset quality to 0 first, then set tag and add increment.
 //!   - If `quality_kind` is `Untagged` and quality is 0: set tag and add.
-//! - Quality capped at 20 (vanilla) or 30 (Exceptional bases — TBD M2.6).
-//! - Tagged quality boosts the rolled values of mods carrying that tag
-//!   by `+quality%` of their value (per [docs/33-strategy-library.md] sec 18).
+//! - Quality capped at 20.
+//!   TODO(0.5): Breach Rings cap at 40/45 per poe2db quality.html; needs
+//!   a per-base quality cap on `BaseType` — out of scope here.
+//! - Tagged quality boosts the rolled *values* of mods carrying that tag
+//!   by `+quality%` (per [docs/33-strategy-library.md] sec 18). It does
+//!   NOT bias which mods roll; quality converts into mod-roll chance only
+//!   via Omen of Catalysing Exaltation on the next Exalt.
 //!
-//! Eligible item classes: `Ring`, `Amulet`, `Belt`, `Jewel`. Belts only
-//! accept the breach catalyst in 0.4 per the heuristics rulebook.
 //! Sanctified / mirrored / corrupted items reject catalysts.
 
 use crate::currency::{ApplyContext, ApplyOutcome, CannotApply, Currency};
 use crate::error::{EngineError, EngineResult};
-use crate::ids::{CurrencyId, ItemClassId, TagId};
+use crate::ids::{CurrencyId, TagId};
 use crate::item::{Item, QualityKind};
 
-/// Item classes catalysts are eligible to apply to (M14.5).
-///
-/// Catalysts are tagged-quality currency restricted to jewellery and
-/// jewels in PoE2 0.4. Sceptres, weapons, armours, and accessories outside
-/// this list reject catalysts.
-const CATALYST_ELIGIBLE_CLASSES: &[&str] = &["Ring", "Amulet", "Belt", "Jewel"];
+/// Item classes base catalysts apply to (poe2db 0.5: "a ring or amulet").
+const CATALYST_BASE_CLASSES: &[&str] = &["Ring", "Amulet"];
 
-/// PascalCase class ids known to be ineligible for catalysts. Used by the
-/// best-effort `Catalyst::can_apply_to` heuristic when `Item.base` carries
-/// a class-id placeholder (v3 transitional state). Real-bundle items with
-/// metadata-path bases pass this heuristic and get caught by the
-/// registry-backed gate inside `apply()`.
+/// Item classes Refined catalysts apply to (poe2db 0.5: "a jewel").
+const CATALYST_REFINED_CLASSES: &[&str] = &["Jewel"];
+
+/// PascalCase class ids known to be ineligible for any catalyst. Used by
+/// the best-effort `Catalyst::can_apply_to` heuristic when `Item.base`
+/// carries a class-id placeholder (v3 transitional state). Real-bundle
+/// items with metadata-path bases pass this heuristic and get caught by
+/// the registry-backed gate inside `apply()`.
 const CATALYST_KNOWN_NONELIGIBLE_CLASSES: &[&str] = &[
     "BodyArmour",
     "Helmet",
     "Boots",
     "Gloves",
+    "Belt",
     "OneHandSword",
     "TwoHandSword",
     "OneHandAxe",
@@ -61,65 +69,169 @@ const CATALYST_KNOWN_NONELIGIBLE_CLASSES: &[&str] = &[
     "Tablet",
 ];
 
-/// Resolve an item's class id for catalyst gating.
-///
-/// Prefers [`crate::base_registry::BaseRegistry`] when the item's `base`
-/// is a real bundle id; falls back to `ItemClassId::from(item.base.as_str())`
-/// for the v3 transitional period when fixtures stuff class ids into
-/// `Item.base`. Same polymorphic shape as the basic-orb sampler's
-/// `class_for_item`, kept inline to avoid leaking the helper across
-/// currency modules.
-fn resolve_class_for_catalyst(
-    item: &Item,
-    base_registry: &crate::base_registry::BaseRegistry,
-) -> ItemClassId {
-    if let Some(c) = base_registry.class_of(&item.base) {
-        return c.clone();
-    }
-    ItemClassId::from(item.base.as_str())
-}
-
-/// Quality cap (vanilla bases). Exceptional bases will raise this to 30
-/// in M2.6; we'll plumb that through `BaseType::quality_cap` then.
+/// Quality cap. TODO(0.5): Breach Rings raise this to 40/45 per poe2db
+/// quality.html; needs a per-base cap on `BaseType` — out of scope here.
 pub const CATALYST_QUALITY_CAP: u8 = 20;
 
-/// Default per-apply quality increment for a normal catalyst.
+/// Per-apply quality increment. All 24 catalysts in 0.5 add +5%
+/// (poe2db catalysts.html); Adaptive is not special.
 pub const CATALYST_INCREMENT_DEFAULT: u8 = 5;
 
-/// Increment for Adaptive Catalyst (Breach reward — applies any tag).
-pub const CATALYST_INCREMENT_ADAPTIVE: u8 = 10;
+/// Which class family a catalyst gates on. poe2db 0.5: the 12 base
+/// catalysts apply to "a ring or amulet"; the 12 `Refined` variants
+/// apply to "a jewel". No catalyst covers both families.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalystTarget {
+    /// Base catalysts — rings and amulets only.
+    RingAmulet,
+    /// Refined catalysts — jewels only.
+    Jewel,
+}
 
-/// One catalyst kind — fixed tag + increment.
+impl CatalystTarget {
+    /// Item classes this family may apply to.
+    #[must_use]
+    pub const fn eligible_classes(self) -> &'static [&'static str] {
+        match self {
+            Self::RingAmulet => CATALYST_BASE_CLASSES,
+            Self::Jewel => CATALYST_REFINED_CLASSES,
+        }
+    }
+
+    const fn gate_message(self) -> &'static str {
+        match self {
+            Self::RingAmulet => "catalysts apply only to a Ring or Amulet",
+            Self::Jewel => "Refined catalysts apply only to a Jewel",
+        }
+    }
+}
+
+/// One catalyst kind — fixed tag + increment + class-family gate.
 #[derive(Debug, Clone)]
 pub struct Catalyst {
     id: CurrencyId,
     tag: TagId,
     increment: u8,
     display_name: &'static str,
+    target: CatalystTarget,
 }
 
+/// The 12 catalyst kinds of PoE2 0.5 (poe2db catalysts.html), as
+/// `(base id, base name, refined id, refined name, tag)`. Base entries
+/// gate on rings/amulets; `Refined` entries gate on jewels.
+const CATALYST_KINDS_0_5: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "FleshCatalyst",
+        "Flesh Catalyst",
+        "RefinedFleshCatalyst",
+        "Refined Flesh Catalyst",
+        "life",
+    ),
+    (
+        "NeuralCatalyst",
+        "Neural Catalyst",
+        "RefinedNeuralCatalyst",
+        "Refined Neural Catalyst",
+        "mana",
+    ),
+    (
+        "CarapaceCatalyst",
+        "Carapace Catalyst",
+        "RefinedCarapaceCatalyst",
+        "Refined Carapace Catalyst",
+        "defences",
+    ),
+    (
+        "UulNetolsCatalyst",
+        "Uul-Netol's Catalyst",
+        "RefinedUulNetolsCatalyst",
+        "Refined Uul-Netol's Catalyst",
+        "physical",
+    ),
+    (
+        "XophsCatalyst",
+        "Xoph's Catalyst",
+        "RefinedXophsCatalyst",
+        "Refined Xoph's Catalyst",
+        "fire",
+    ),
+    (
+        "TulsCatalyst",
+        "Tul's Catalyst",
+        "RefinedTulsCatalyst",
+        "Refined Tul's Catalyst",
+        "cold",
+    ),
+    (
+        "EshsCatalyst",
+        "Esh's Catalyst",
+        "RefinedEshsCatalyst",
+        "Refined Esh's Catalyst",
+        "lightning",
+    ),
+    (
+        "ChayulasCatalyst",
+        "Chayula's Catalyst",
+        "RefinedChayulasCatalyst",
+        "Refined Chayula's Catalyst",
+        "chaos",
+    ),
+    (
+        "ReaverCatalyst",
+        "Reaver Catalyst",
+        "RefinedReaverCatalyst",
+        "Refined Reaver Catalyst",
+        "attack",
+    ),
+    (
+        "SibilantCatalyst",
+        "Sibilant Catalyst",
+        "RefinedSibilantCatalyst",
+        "Refined Sibilant Catalyst",
+        "caster",
+    ),
+    (
+        "SkitteringCatalyst",
+        "Skittering Catalyst",
+        "RefinedSkitteringCatalyst",
+        "Refined Skittering Catalyst",
+        "speed",
+    ),
+    (
+        "AdaptiveCatalyst",
+        "Adaptive Catalyst",
+        "RefinedAdaptiveCatalyst",
+        "Refined Adaptive Catalyst",
+        "attribute",
+    ),
+];
+
 impl Catalyst {
-    /// Build a catalyst targeting `tag` with the default 5%/apply.
+    /// Build a catalyst targeting `tag` with the standard 5%/apply.
+    ///
+    /// The class-family gate derives from the canonical name prefix: ids
+    /// starting with `Refined` gate on jewels, everything else on
+    /// rings/amulets. The bundle catalogue carries no structured family
+    /// field, so the prefix is the only signal available there.
     #[must_use]
     pub fn new(
         id: impl Into<CurrencyId>,
         display_name: &'static str,
         tag: impl Into<TagId>,
     ) -> Self {
+        let id = id.into();
+        let target = if id.as_str().starts_with("Refined") {
+            CatalystTarget::Jewel
+        } else {
+            CatalystTarget::RingAmulet
+        };
         Self {
-            id: id.into(),
+            id,
             tag: tag.into(),
             increment: CATALYST_INCREMENT_DEFAULT,
             display_name,
+            target,
         }
-    }
-
-    /// Build a catalyst with a custom increment (for Adaptive / Greater
-    /// catalyst variants).
-    #[must_use]
-    pub fn with_increment(mut self, increment: u8) -> Self {
-        self.increment = increment;
-        self
     }
 
     pub const fn tag(&self) -> &TagId {
@@ -130,18 +242,42 @@ impl Catalyst {
         self.increment
     }
 
-    // ---- Common presets ---------------------------------------------------
+    pub const fn target(&self) -> CatalystTarget {
+        self.target
+    }
+
+    /// Item classes this catalyst may apply to (family-dependent).
+    #[must_use]
+    pub const fn eligible_classes(&self) -> &'static [&'static str] {
+        self.target.eligible_classes()
+    }
+
+    // ---- Presets (PoE2 0.5 catalogue) -------------------------------------
     //
     // The full catalyst catalogue is data-driven from the bundle. These
-    // presets are convenience constructors for tests and the seed strategy
-    // library.
+    // presets mirror poe2db catalysts.html so the resolver, tests, and
+    // the seed strategy library work without a bundle.
+
+    /// The full 0.5 catalogue: 12 base + 12 Refined catalysts.
+    #[must_use]
+    pub fn default_catalogue() -> Vec<Self> {
+        CATALYST_KINDS_0_5
+            .iter()
+            .flat_map(|&(base_id, base_name, refined_id, refined_name, tag)| {
+                [
+                    Self::new(base_id, base_name, tag),
+                    Self::new(refined_id, refined_name, tag),
+                ]
+            })
+            .collect()
+    }
 
     pub fn flesh() -> Self {
         Self::new("FleshCatalyst", "Flesh Catalyst", "life")
     }
 
-    pub fn intrinsic() -> Self {
-        Self::new("IntrinsicCatalyst", "Intrinsic Catalyst", "attribute")
+    pub fn neural() -> Self {
+        Self::new("NeuralCatalyst", "Neural Catalyst", "mana")
     }
 
     pub fn reaver() -> Self {
@@ -152,16 +288,19 @@ impl Catalyst {
         Self::new("CarapaceCatalyst", "Carapace Catalyst", "defences")
     }
 
-    pub fn unstable() -> Self {
-        Self::new("UnstableCatalyst", "Unstable Catalyst", "caster")
+    pub fn sibilant() -> Self {
+        Self::new("SibilantCatalyst", "Sibilant Catalyst", "caster")
     }
 
-    /// Adaptive catalyst (Breach reward) — applies the user's last-used
-    /// tag. We model it as a generic "any tag" catalyst with a higher
-    /// increment; callers must pass the desired tag in.
-    pub fn adaptive(tag: impl Into<TagId>) -> Self {
-        Self::new("AdaptiveCatalyst", "Adaptive Catalyst", tag)
-            .with_increment(CATALYST_INCREMENT_ADAPTIVE)
+    /// Adaptive Catalyst — the fixed attribute-tag kind. Not a wildcard:
+    /// poe2db 0.5 lists it as a normal +5% catalyst like the other 11.
+    pub fn adaptive() -> Self {
+        Self::new("AdaptiveCatalyst", "Adaptive Catalyst", "attribute")
+    }
+
+    /// Refined Flesh Catalyst — jewel-gated life catalyst.
+    pub fn refined_flesh() -> Self {
+        Self::new("RefinedFleshCatalyst", "Refined Flesh Catalyst", "life")
     }
 }
 
@@ -175,12 +314,13 @@ impl Currency for Catalyst {
     }
 
     /// Pre-flight class gate. Rejects items whose `base` resolves to a
-    /// class outside [`CATALYST_ELIGIBLE_CLASSES`]. Best-effort against
-    /// fixture items (where `Item.base` carries the class id directly);
-    /// real-bundle items resolve via the registered [`crate::BaseRegistry`]
-    /// only at `apply()` time, so `can_apply_to` may pass on real-bundle
-    /// items the registry would later reject. The advisor double-checks
-    /// at apply time so the hard error path stays correct.
+    /// class outside this catalyst's family ([`Catalyst::eligible_classes`]).
+    /// Best-effort against fixture items (where `Item.base` carries the
+    /// class id directly); real-bundle items resolve via the registered
+    /// [`crate::BaseRegistry`] only at `apply()` time, so `can_apply_to`
+    /// may pass on real-bundle items the registry would later reject. The
+    /// advisor double-checks at apply time so the hard error path stays
+    /// correct.
     fn can_apply_to(&self, item: &Item) -> Result<(), CannotApply> {
         let valid = self.valid_rarities();
         if !valid.contains(item.rarity) {
@@ -196,14 +336,16 @@ impl Currency for Catalyst {
             return Err(CannotApply::Corrupted);
         }
         // Best-effort class check using the item.base placeholder. If
-        // `item.base` matches a known PascalCase class id that is *not* in
-        // the eligible set, reject. Otherwise accept and let `apply()`
-        // do the registry-backed check.
+        // `item.base` matches a known PascalCase class id that is outside
+        // this catalyst's family (including the other family's classes),
+        // reject. Otherwise accept and let `apply()` do the registry-backed
+        // check.
         let candidate_class = item.base.as_str();
-        if CATALYST_KNOWN_NONELIGIBLE_CLASSES.contains(&candidate_class) {
-            return Err(CannotApply::Other(
-                "catalysts apply only to Ring / Amulet / Belt / Jewel",
-            ));
+        let known_class = CATALYST_KNOWN_NONELIGIBLE_CLASSES.contains(&candidate_class)
+            || CATALYST_BASE_CLASSES.contains(&candidate_class)
+            || CATALYST_REFINED_CLASSES.contains(&candidate_class);
+        if known_class && !self.eligible_classes().contains(&candidate_class) {
+            return Err(CannotApply::Other(self.target.gate_message()));
         }
         Ok(())
     }
@@ -220,14 +362,15 @@ impl Currency for Catalyst {
         if item.corrupted {
             return Err(EngineError::ItemCorrupted);
         }
-        // Registry-backed class gate (M14.5).
-        let class = resolve_class_for_catalyst(item, ctx.base_registry);
-        if !CATALYST_ELIGIBLE_CLASSES.contains(&class.as_str()) {
+        // Registry-backed class gate (M14.5; 0.5 family split).
+        let class = ctx.base_registry.resolve_item_class(item);
+        let eligible = self.eligible_classes();
+        if !eligible.contains(&class.as_str()) {
             return Err(EngineError::InvalidApplication(format!(
                 "{}: cannot apply to class {} — eligible classes are {}",
                 self.display_name,
                 class,
-                CATALYST_ELIGIBLE_CLASSES.join(", ")
+                eligible.join(", ")
             )));
         }
 
@@ -273,9 +416,9 @@ mod tests {
     use rand_xoshiro::Xoshiro256PlusPlus;
     use smallvec::smallvec;
 
-    fn ring() -> Item {
+    fn item_of_class(class: &str) -> Item {
         Item {
-            base: ItemClassId::from("Ring").as_str().into(),
+            base: ItemClassId::from(class).as_str().into(),
             ilvl: 82,
             rarity: Rarity::Rare,
             corrupted: false,
@@ -291,6 +434,10 @@ mod tests {
             sockets: smallvec![],
             hinekora_lock: None,
         }
+    }
+
+    fn ring() -> Item {
+        item_of_class("Ring")
     }
 
     fn ctx<'a>(
@@ -370,16 +517,20 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_catalyst_applies_double_increment() {
+    fn adaptive_catalyst_is_attribute_tag_with_default_increment() {
         let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
         let mut omens = OmenSet::new();
         let mut item = ring();
-        let adaptive = Catalyst::adaptive("life");
+        let adaptive = Catalyst::adaptive();
         adaptive
             .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
             .unwrap();
-        assert_eq!(item.quality, CATALYST_INCREMENT_ADAPTIVE);
+        assert_eq!(item.quality, CATALYST_INCREMENT_DEFAULT);
+        assert_eq!(
+            item.quality_kind,
+            QualityKind::Tagged(TagId::from("attribute"))
+        );
     }
 
     #[test]
@@ -420,5 +571,54 @@ mod tests {
             .unwrap();
         assert_eq!(item.quality, CATALYST_INCREMENT_DEFAULT);
         assert_eq!(item.quality_kind, QualityKind::Tagged(TagId::from("life")));
+    }
+
+    #[test]
+    fn base_catalyst_rejects_belt_and_jewel() {
+        let cat = Catalyst::flesh();
+        for class in ["Belt", "Jewel"] {
+            let item = item_of_class(class);
+            assert!(
+                matches!(cat.can_apply_to(&item), Err(CannotApply::Other(_))),
+                "base catalyst must reject {class} in 0.5"
+            );
+        }
+    }
+
+    #[test]
+    fn refined_catalyst_gates_on_jewel_only() {
+        let cat = Catalyst::refined_flesh();
+        assert_eq!(cat.target(), CatalystTarget::Jewel);
+        assert!(cat.can_apply_to(&item_of_class("Jewel")).is_ok());
+        for class in ["Ring", "Amulet", "Belt"] {
+            let item = item_of_class(class);
+            assert!(
+                matches!(cat.can_apply_to(&item), Err(CannotApply::Other(_))),
+                "refined catalyst must reject {class}"
+            );
+        }
+    }
+
+    #[test]
+    fn default_catalogue_is_the_24_of_0_5() {
+        let all = Catalyst::default_catalogue();
+        assert_eq!(all.len(), 24);
+        let base = all
+            .iter()
+            .filter(|c| c.target() == CatalystTarget::RingAmulet)
+            .count();
+        let refined = all
+            .iter()
+            .filter(|c| c.target() == CatalystTarget::Jewel)
+            .count();
+        assert_eq!((base, refined), (12, 12));
+        // All increments are the standard +5 — no Adaptive special case.
+        assert!(all
+            .iter()
+            .all(|c| c.increment() == CATALYST_INCREMENT_DEFAULT));
+        // PoE1 names must not appear.
+        assert!(all.iter().all(
+            |c| !c.id().as_str().contains("Intrinsic") && !c.id().as_str().contains("Unstable")
+        ));
     }
 }

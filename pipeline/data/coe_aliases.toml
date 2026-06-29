@@ -274,3 +274,98 @@ engine_mod_id = "MaximumEnduranceCharges"
 [[alias]]
 coe_name = "Increased Flask Charges Gained"
 engine_mod_id = "FlaskChargesGained"
+
+# === P5 curated additions (crafting-fidelity effort) =======================
+# Sourced from `coe-aliases-suggest` (score=1.00 template matches) against the
+# live 0.5 bundle, then VERIFIED individually: each engine mod below is
+# kind=Explicit, carries NO essence/corrupted/desecrated-only flag, and its
+# text_template matches the CoE name (general explicit, not an implicit /
+# corrupted / alloy / influence / unique variant). Wrong-domain auto-suggestions
+# at score=1.00 (e.g. "+# to Spirit" → AlloySpiritOnBoots1, charge mods →
+# Corruption*, attributes → AmuletImplicit*) were deliberately NOT merged.
+# ===========================================================================
+
+[[alias]]
+coe_name = "Adds # to # Physical Damage"
+engine_mod_id = "LocalAddedPhysicalDamage1"
+note = "P5: local weapon flat physical (template 'Adds (1-2) to (4-5) Physical Damage')"
+
+[[alias]]
+coe_name = "+# to all Attributes"
+engine_mod_id = "AllAttributes1"
+note = "P5: amulet/ring all-attributes explicit"
+
+[[alias]]
+coe_name = "#% reduced Shock duration on you"
+engine_mod_id = "ReducedShockDuration1"
+note = "P5: boots ailment-duration explicit (NOT 'reduced effect of Shock')"
+
+[[alias]]
+coe_name = "#% reduced Ignite Duration on you"
+engine_mod_id = "ReducedBurnDuration1"
+note = "P5: body-armour ignite-duration explicit"
+
+[[alias]]
+coe_name = "#% reduced Freeze Duration on you"
+engine_mod_id = "ReducedFreezeDuration1"
+note = "P5: boots freeze-duration explicit"
+
+[[alias]]
+coe_name = "#% reduced Chill Duration on you"
+engine_mod_id = "ReducedChillDuration1"
+note = "P5: boots chill-duration explicit"
+
+[[alias]]
+coe_name = "#% increased Stun Duration"
+engine_mod_id = "StunDuration1"
+note = "P5: weapon stun-duration explicit"
+
+[[alias]]
+coe_name = "#% increased Critical Hit Chance"
+engine_mod_id = "CriticalStrikeChance1"
+note = "P5: helmet/amulet crit-chance explicit"
+
+[[alias]]
+coe_name = "#% chance to Pierce an Enemy"
+engine_mod_id = "ArrowPierceChance1"
+note = "P5: quiver pierce-chance explicit"
+
+[[alias]]
+coe_name = "# to # Physical Thorns damage"
+engine_mod_id = "AttackerTakesDamage1"
+note = "P5: physical thorns/reflect explicit (NOT the lightning-thorns CoE name)"
+
+[[alias]]
+coe_name = "Allies in your Presence have #% increased Critical Hit Chance"
+engine_mod_id = "NearbyAlliesCriticalStrikeChance1"
+note = "P5: sceptre presence crit-chance explicit"
+
+[[alias]]
+coe_name = "Allies in your Presence Regenerate # Life per second"
+engine_mod_id = "NearbyAlliesLifeRegeneration1"
+note = "P5: sceptre presence life-regen explicit"
+
+[[alias]]
+coe_name = "Allies in your Presence deal # to # added Attack Physical Damage"
+engine_mod_id = "NearbyAlliesAddedPhysicalDamage1"
+note = "P5: sceptre presence added-physical explicit"
+
+[[alias]]
+coe_name = "Allies in your Presence deal # to # added Attack Lightning Damage"
+engine_mod_id = "NearbyAlliesAddedLightningDamage1"
+note = "P5: sceptre presence added-lightning explicit"
+
+[[alias]]
+coe_name = "Allies in your Presence deal # to # added Attack Fire Damage"
+engine_mod_id = "NearbyAlliesAddedFireDamage1"
+note = "P5: sceptre presence added-fire explicit"
+
+[[alias]]
+coe_name = "Allies in your Presence deal # to # added Attack Cold Damage"
+engine_mod_id = "NearbyAlliesAddedColdDamage1"
+note = "P5: sceptre presence added-cold explicit"
+
+[[alias]]
+coe_name = "Allies in your Presence deal # to # added Attack Chaos Damage"
+engine_mod_id = "ConvertedNearbyAlliesAddedChaosDamage1"
+note = "P5: sceptre presence added-chaos explicit"

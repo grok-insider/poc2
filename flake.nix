@@ -1,5 +1,5 @@
 {
-  description = "Path of Crafting 2 (poc2) — PoE2 crafting advisor for NixOS + Hyprland";
+  description = "Path of Crafting 2 (poc2) — PoE2 crafting advisor (Rust engine + WebAssembly web app)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -18,93 +18,59 @@
 
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
-          targets = [ "x86_64-unknown-linux-gnu" ];
+          # wasm32 target for the Next.js web app, which runs the engine in the
+          # browser via WebAssembly (crates/poc2-wasm).
+          targets = [ "x86_64-unknown-linux-gnu" "wasm32-unknown-unknown" ];
         };
-
-        # Tauri 2 system dependencies
-        tauriDeps = with pkgs; [
-          # Webview
-          webkitgtk_4_1
-          libsoup_3
-          # Core
-          openssl
-          pkg-config
-          gtk3
-          # Tray support
-          libayatana-appindicator
-          # SVG icons
-          librsvg
-          # File dialogs / GIO
-          glib
-          glib-networking
-          # Cairo / Pango / GDK
-          cairo
-          pango
-          gdk-pixbuf
-          atk
-          harfbuzz
-        ];
-
-        # Wayland / Hyprland overlay support
-        waylandDeps = with pkgs; [
-          wayland
-          wayland-protocols
-          wayland-scanner
-          gtk4-layer-shell
-          gtk-layer-shell
-          libxkbcommon
-        ];
-
-        # In-game integration
-        integrationDeps = with pkgs; [
-          wl-clipboard         # clipboard reading on Wayland
-          inotify-tools        # Client.txt monitoring
-        ];
 
         nativeBuildInputs = with pkgs; [
           rustToolchain
+          # Web app toolchain (Next.js 16 + React 19) — Bun is the package
+          # manager + script runner; nodejs kept for tooling compatibility.
+          bun
           nodejs_22
-          pnpm
-          cargo-tauri
+          # Desktop shell (apps/desktop, ADR-0010): NixOS dev-runs use this
+          # electron; npm's downloaded binary is non-FHS and never runs here.
+          electron
+          # WebAssembly toolchain (crates/poc2-wasm → apps/web)
+          wasm-pack
+          wasm-bindgen-cli
+          binaryen             # wasm-opt
+          # C toolchain for native crates that need it
           gcc
           gnumake
           cmake
           pkg-config
-          # Linters / formatters
+          # Linters / formatters / helpers
           taplo                # TOML formatter
-          # Useful helpers
           jq
           ripgrep
           fd
           bacon                # Rust auto-rebuild
         ];
 
+        # OpenSSL is kept available for crates that opt into networking
+        # (poc2-market's `net` feature is off by default and not used by the
+        # web build, but leaving openssl here keeps `--features net` buildable).
+        buildInputs = with pkgs; [ openssl ];
+
       in
       {
         devShells.default = pkgs.mkShell {
-          inherit nativeBuildInputs;
+          inherit nativeBuildInputs buildInputs;
 
-          buildInputs = tauriDeps ++ waylandDeps ++ integrationDeps;
-
-          # Tauri / WebKit needs WEBKIT_DISABLE_COMPOSITING_MODE=1 on some Linux setups
-          # to avoid blank-window issues; toggle if you hit them.
           shellHook = ''
-            export PKG_CONFIG_PATH="${pkgs.lib.makeSearchPath "lib/pkgconfig" (tauriDeps ++ waylandDeps)}:$PKG_CONFIG_PATH"
-            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (tauriDeps ++ waylandDeps)}:$LD_LIBRARY_PATH"
-            export GIO_MODULE_DIR="${pkgs.glib-networking}/lib/gio/modules/"
-            # Avoid Tauri webview rendering bugs under Hyprland with HW accel:
-            # export WEBKIT_DISABLE_COMPOSITING_MODE=1
-            # export WEBKIT_DISABLE_DMABUF_RENDERER=1
+            export PKG_CONFIG_PATH="${pkgs.lib.makeSearchPath "lib/pkgconfig" buildInputs}:$PKG_CONFIG_PATH"
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH"
 
             echo "poc2 dev shell ready"
             echo "  rustc:  $(rustc --version)"
             echo "  cargo:  $(cargo --version)"
+            echo "  bun:    $(bun --version)"
             echo "  node:   $(node --version)"
-            echo "  pnpm:   $(pnpm --version)"
           '';
         };
 
-        # Placeholder package — wired up after M2 when crates are real
         packages.default = pkgs.hello;
       });
 }

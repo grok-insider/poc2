@@ -196,6 +196,7 @@ mod tests {
                 max: 80.0
             }],
             required_level: 75,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
             patch_range: PatchRange::ALL,
             flags,

@@ -68,4 +68,14 @@ pub use weights::{Confidence, WeightObservation};
 ///   bundle" event to the desktop UI; user state under
 ///   `~/.config/poc2/state.toml` and `~/.config/poc2/recipes/` is
 ///   wiped on the first successful v2 launch (cache/ is preserved).
-pub const BUNDLE_SCHEMA_VERSION: u32 = 2;
+/// - **v3** — crafting-mechanics fidelity
+///   (`docs/83-crafting-fidelity-plan.md`) + 0.5 "Return of the Ancients"
+///   migration. `ModDefinition` gained an explicit `tier` ordinal (derived
+///   by the pipeline's `assign_tier_ordinals` post-pass and consumed by the
+///   engine's inclusive higher-tier weighting), and `HiddenDesecratedSlot`
+///   gained a `min_mod_level` field. Both are `#[serde(default)]` so a v2
+///   bundle *parses*, but the loader hard-rejects v2 because the
+///   trained-policy advisor relies on tier ordinals + per-ilvl weights
+///   being present. Rebuild via
+///   `cargo run -p poc2-pipeline -- build --patch 0.5.0`.
+pub const BUNDLE_SCHEMA_VERSION: u32 = 3;

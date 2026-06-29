@@ -1,18 +1,47 @@
 # Path of Crafting 2 (`poc2`)
 
-A native desktop crafting **advisor** for Path of Exile 2 — beam-search
-optimal-path planning with full re-plan on every state change,
-branching recovery flows, live market awareness, and a Wasm plugin
-SDK for community extensions.
+A crafting **advisor** for Path of Exile 2 — beam-search optimal-path
+planning with full re-plan on every state change, branching recovery
+flows, live market awareness, and a Wasm plugin SDK for community
+extensions.
 
-> Status: **v1.0 release-candidate**. All 8 milestones (M1-M8) +
-> Phases A-G of the v1 execution plan have shipped. See
-> [`docs/72-v1-execution-plan.md`](docs/72-v1-execution-plan.md).
+The advisor is a **Rust engine that runs entirely in your browser**: a
+Next.js 16 + React 19 web app (`apps/web`) hosts the engine compiled to
+**WebAssembly** (`crates/poc2-wasm`) inside a Web Worker. No server, no
+install — every recommendation is deterministic client-side compute over a
+static data bundle. (The previous Tauri + Svelte desktop app has been
+replaced by this web app.)
+
+A **desktop app** (`apps/desktop`, Electron — [ADR-0010](docs/adr/0010-desktop-shell-electron-cross-platform.md))
+wraps the same web app like Discord wraps a website, and adds what a
+browser can't do: **item capture** (hotkey → the game's own Ctrl+C →
+instant import) and **price checking** against the official PoE2 trade
+API (rate-limited, proxied through the main process). Targets: Linux,
+NixOS, and Windows 11.
+
+> Status: **v1.0 shipped + post-v1 iterations on `main`.** v1.0 covered all
+> 8 milestones (M1-M8) + Phases A-G ([`docs/72-v1-execution-plan.md`](docs/72-v1-execution-plan.md)).
+> Since then the **v2** crafter-helper pass ([`docs/80`](docs/80-crafter-helper-v2-plan.md))
+> and **v3** engine-training pass ([`docs/81`](docs/81-engine-training-and-rule-encoding-plan.md))
+> shipped, and a **crafting-mechanics fidelity + PoE2 0.5 "Return of the
+> Ancients"** pass is in progress ([`docs/83`](docs/83-crafting-fidelity-plan.md),
+> [`docs/14`](docs/14-crafting-mechanics-cross-version.md)). The engine now
+> models item-level-dependent pools, inclusive higher-tier weighting,
+> patch-versioned Minimum-Modifier-Level floors, and cross-version (0.3/0.4/0.5)
+> gating. See [`CHANGELOG.md`](CHANGELOG.md).
 
 ## What it does
 
-- **Import an in-game item** via `Ctrl+C` (clipboard parser → engine
-  state). Or build it manually in the UI.
+- **Import an in-game item** by copying it in-game and pasting into the
+  Item panel (`navigator.clipboard` → Rust parser → engine state), or
+  build it manually in the UI. In the desktop app, press the **capture
+  hotkey** (`Ctrl+Shift+D`) while hovering an item in PoE2 and it imports
+  itself — same mechanism as Awakened PoE Trade.
+- **Price-check it**: the Price Check panel matches the item's mod lines
+  to official trade-API stat ids (1,932-entry pipeline-generated table),
+  builds a real trade2 query (toggleable stat filters, min bounds at 90%
+  of the roll), and — in the desktop app — shows live listings with
+  cheapest/median; browsers open the identical query on the trade site.
 - **Declare your target mods + budget** via the Target panel
   (concept-aware, hybrid-mod aware).
 - The advisor **proposes the optimal next currency / omen** to use,
@@ -27,28 +56,57 @@ SDK for community extensions.
 - **Live market prices** from poe2scout drive cost ranking; the
   off-meta finder surfaces niche crafting goals based on
   poe.ninja PoE2 build popularity.
+- **Genesis Tree panel (0.5)** — the full in-game Breach crafting tree
+  (all 248 nodes, real layout, PoE2-style tooltips) with curated,
+  source-cited "best nodes per goal" presets: Divine/Exalt/Catalyst
+  farming, minion belts, caster rings, attribute amulets, Breachstones.
+  Verisium Alloys and Distilled Emotions are fully data-driven 0.5
+  currencies the engine can simulate and the advisor can propose.
 - **Wasm plugin SDK** lets the community ship custom predicates,
   strategies, rules, and recommendation emitters; the advisor
   threads plugin dispatch into the planner's beam search.
 
 ## Platform
 
-**v1 supports NixOS + Hyprland only.** See
-[`docs/adr/0002-platform-nixos-only.md`](docs/adr/0002-platform-nixos-only.md)
-+ [`docs/adr/0009-defer-wayland-layer-shell-to-v1-1.md`](docs/adr/0009-defer-wayland-layer-shell-to-v1-1.md).
+The web app runs in **any modern browser** (WebAssembly + Web Workers).
+The desktop app targets **Linux, NixOS, and Windows 11**
+([ADR-0010](docs/adr/0010-desktop-shell-electron-cross-platform.md)):
+CI builds and tests all three paths — Nix lanes for Linux/NixOS, a
+rustup + Bun lane (no Nix) plus an NSIS package on `windows-latest`, and
+AppImage/deb packaging on Linux. Development uses a Nix flake on NixOS
+(`nix develop` provides electron for desktop dev-runs); on Windows,
+rustup honors `rust-toolchain.toml` and the same Bun commands work. The
+old desktop-only constraints
+([`docs/adr/0002-platform-nixos-only.md`](docs/adr/0002-platform-nixos-only.md))
+applied to the retired Tauri app.
 
 ## Quick start
 
-```bash
-# Run from the flake directly:
-nix run github:anomalyco/poc2
+All commands run from the **repo root** (the root is both a Cargo workspace and
+a Bun workspace):
 
-# Or for development:
+```bash
 nix develop
+
+# Rust engine + tests
 cargo build --workspace
 cargo test --workspace
-cd apps/desktop && pnpm install && pnpm tauri:dev
+
+# Web app — Bun, all from the repo root
+bun install                           # installs the apps/web workspace
+bun run wasm                          # crates/poc2-wasm → apps/web/lib/wasm + public/wasm
+bun run dev                           # http://localhost:3000 — opens in a real browser
+
+# Production: a fully static, server-less export
+bun run build                         # → apps/web/out/  (serve from any static host)
+
+# Other web scripts (also from root): bun run typecheck · bun run lint
 ```
+
+The web app needs two static assets in `apps/web/public/`: the WASM module
+(`wasm/poc2_wasm_bg.wasm`, produced by `scripts/build-wasm.sh`) and a data
+bundle (`poc2.bundle.json.gz`, copied from `~/.config/poc2/bundles/` — see
+First-run setup).
 
 To clone the reference repos (~1.5 GB):
 
@@ -84,6 +142,11 @@ To clone the reference repos (~1.5 GB):
 ## Architecture
 
 ```
+WEB UI  (Next.js 16 + React 19, static export — the "Forge" console)
+   │  UI thread ⇄ Web Worker (postMessage)
+   ▼
+WASM ENGINE  (crates/poc2-wasm, wasm-bindgen) — in-memory EngineState
+   │
 ADVISOR  (beam-search + Monte Carlo + streaming)
    │
    ├── STRATEGY LIBRARY  (23 codified TOML recipes)

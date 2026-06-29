@@ -62,6 +62,7 @@ fn mk_mod(id: &str, group: &str, affix: AffixType, class: &str) -> ModDefinition
         }],
         stats: smallvec![],
         required_level: 1,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from(class)],
         patch_range: PatchRange::ALL,
         flags: ModFlags::empty(),

@@ -1,18 +1,20 @@
-//! M14.5 — Catalyst class gating.
+//! M14.5 — Catalyst class gating (PoE2 0.5 family split).
 //!
 //! Validates that catalysts:
 //! - `can_apply_to` rejects items whose class string is a known
-//!   non-eligible class (BodyArmour, Boots, Gloves, Helmet, Sceptres,
-//!   weapons, Quiver, Focus, Talisman, Waystone, Charm, Tablet).
-//! - `can_apply_to` accepts the four eligible classes (Ring, Amulet,
-//!   Belt, Jewel).
+//!   non-eligible class (BodyArmour, Boots, Gloves, Helmet, Belt,
+//!   Sceptres, weapons, Quiver, Focus, Talisman, Waystone, Charm,
+//!   Tablet) — and, per 0.5, the *other* family's classes (base
+//!   catalysts reject Jewel; Refined catalysts reject Ring/Amulet).
+//! - `can_apply_to` accepts the eligible classes per family: base
+//!   catalysts → Ring, Amulet; Refined catalysts → Jewel.
 //! - `apply()` errors with `InvalidApplication` when the registry-backed
 //!   class lookup resolves to an ineligible class on a real-bundle item
 //!   (i.e., even when `can_apply_to`'s string heuristic missed because
 //!   the item's `base` is a metadata path, the apply gate catches it).
 //!
 //! Reference: `docs/81-engine-training-and-rule-encoding-plan.md` §4.5
-//! Tier 1.5.
+//! Tier 1.5 + poe2db catalysts.html (0.5: "a ring or amulet" / "a jewel").
 
 use poc2_engine::base::{BaseType, InventorySize, ReleaseState};
 use poc2_engine::ids::TagId;
@@ -51,24 +53,35 @@ fn item_with_base(base_id: &str) -> Item {
 
 #[test]
 fn can_apply_to_accepts_eligible_classes() {
+    // Base catalysts: rings and amulets only (poe2db 0.5).
     let cat = Catalyst::flesh();
-    for class in ["Ring", "Amulet", "Belt", "Jewel"] {
+    for class in ["Ring", "Amulet"] {
         let item = item_with_base(class);
         assert!(
             cat.can_apply_to(&item).is_ok(),
-            "expected catalyst to accept {class}"
+            "expected base catalyst to accept {class}"
         );
     }
+    // Refined catalysts: jewels only.
+    let refined = Catalyst::refined_flesh();
+    let item = item_with_base("Jewel");
+    assert!(
+        refined.can_apply_to(&item).is_ok(),
+        "expected Refined catalyst to accept Jewel"
+    );
 }
 
 #[test]
 fn can_apply_to_rejects_non_eligible_classes() {
     let cat = Catalyst::flesh();
+    // Belt and Jewel are no longer eligible for base catalysts in 0.5.
     for class in [
         "BodyArmour",
         "Helmet",
         "Boots",
         "Gloves",
+        "Belt",
+        "Jewel",
         "OneHandSword",
         "TwoHandSword",
         "Bow",
@@ -87,11 +100,29 @@ fn can_apply_to_rejects_non_eligible_classes() {
             Err(CannotApply::Other(msg)) => {
                 assert!(
                     msg.contains("Ring"),
-                    "expected helpful error mentioning Ring/Amulet/Belt/Jewel; got {msg}"
+                    "expected helpful error mentioning Ring/Amulet; got {msg}"
                 );
             }
             Err(other) => panic!("expected CannotApply::Other, got {other:?} for {class}"),
-            Ok(()) => panic!("catalyst should reject {class}"),
+            Ok(()) => panic!("base catalyst should reject {class}"),
+        }
+    }
+}
+
+#[test]
+fn refined_can_apply_to_rejects_non_jewel_classes() {
+    let refined = Catalyst::refined_flesh();
+    for class in ["Ring", "Amulet", "Belt", "BodyArmour", "Wand"] {
+        let item = item_with_base(class);
+        match refined.can_apply_to(&item) {
+            Err(CannotApply::Other(msg)) => {
+                assert!(
+                    msg.contains("Jewel"),
+                    "expected helpful error mentioning Jewel; got {msg}"
+                );
+            }
+            Err(other) => panic!("expected CannotApply::Other, got {other:?} for {class}"),
+            Ok(()) => panic!("Refined catalyst should reject {class}"),
         }
     }
 }
@@ -140,6 +171,57 @@ fn apply_errors_when_registry_resolves_to_non_eligible_class() {
         }
         other => panic!("expected InvalidApplication; got {other:?}"),
     }
+}
+
+#[test]
+fn apply_errors_when_base_catalyst_hits_registry_resolved_jewel() {
+    // Cross-family case: a base catalyst on an item whose metadata-path
+    // base resolves to Jewel must fail at apply() even though the
+    // string heuristic in can_apply_to is permissive.
+    let real_base = "Metadata/Items/Jewels/JewelInt1";
+    let base_registry = BaseRegistry::from_bases(vec![BaseType {
+        id: BaseTypeId::from(real_base),
+        name: "Sapphire Jewel".into(),
+        item_class: ItemClassId::from("Jewel"),
+        attribute_pool: AttributePool::Int,
+        drop_level: 1,
+        tags: smallvec![TagId::from("jewel")],
+        implicits: smallvec![],
+        inventory: InventorySize {
+            width: 1,
+            height: 1,
+        },
+        release_state: ReleaseState::Released,
+        patch_range: PatchRange::ALL,
+    }]);
+    let registry = ModRegistry::from_mods(vec![], vec![]);
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
+    let mut omens = OmenSet::new();
+
+    // Base catalyst → rejected on the Jewel-resolved base.
+    let cat = Catalyst::flesh();
+    let mut item = item_with_base(real_base);
+    let mut ctx =
+        poc2_engine::ApplyContext::new(&registry, &base_registry, &mut rng, PATCH, &mut omens);
+    match cat.apply(&mut item, &mut ctx) {
+        Err(EngineError::InvalidApplication(msg)) => {
+            assert!(
+                msg.contains("Jewel"),
+                "expected error mentioning the resolved class; got {msg}"
+            );
+        }
+        other => panic!("expected InvalidApplication; got {other:?}"),
+    }
+
+    // Refined catalyst → accepted on the same base.
+    let refined = Catalyst::refined_flesh();
+    let mut item = item_with_base(real_base);
+    let mut ctx =
+        poc2_engine::ApplyContext::new(&registry, &base_registry, &mut rng, PATCH, &mut omens);
+    refined
+        .apply(&mut item, &mut ctx)
+        .expect("Jewel should accept a Refined catalyst");
+    assert_eq!(item.quality_kind, QualityKind::Tagged(TagId::from("life")));
 }
 
 #[test]

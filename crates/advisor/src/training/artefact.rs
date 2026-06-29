@@ -93,7 +93,22 @@ pub fn load_artefact_file(path: &Path, cache: &mut TrainedModelCache) -> Artefac
         }
     };
     let mut inserted = 0;
+    let mut version_skipped = 0;
     for artefact in artefacts {
+        // Version guard: a trained model is only valid for the bundle +
+        // engine schema it was trained against. A stale model (e.g. a
+        // 0.4-era schema-v2 artefact next to a v3/0.5 bundle) keys on a
+        // goal_hash / featurization that may collide or mis-estimate, so it
+        // must be refused — the advisor falls back to heuristic planning,
+        // which is always correct. Retraining against the new bundle
+        // regenerates a matching artefact.
+        let m = &artefact.model_path_length;
+        if m.bundle_schema_version != poc2_data::BUNDLE_SCHEMA_VERSION
+            || m.engine_schema_version != poc2_engine::ENGINE_SCHEMA_VERSION
+        {
+            version_skipped += 1;
+            continue;
+        }
         // The cache currently keys on (goal_hash, item_class). The
         // path-length and cost models share the same key, so we insert
         // path-length as the canonical model. The cost model is kept
@@ -102,6 +117,15 @@ pub fn load_artefact_file(path: &Path, cache: &mut TrainedModelCache) -> Artefac
         // (deferred — v3 hybrid scoring uses path-length only).
         cache.insert(artefact.model_path_length);
         inserted += 1;
+    }
+    if version_skipped > 0 {
+        tracing::warn!(
+            path = %path.display(),
+            version_skipped,
+            expected_bundle = poc2_data::BUNDLE_SCHEMA_VERSION,
+            expected_engine = poc2_engine::ENGINE_SCHEMA_VERSION,
+            "skipped trained-model artefacts trained against a different schema; retrain the corpus"
+        );
     }
     ArtefactLoadOutcome::Loaded(inserted)
 }
@@ -156,8 +180,8 @@ mod tests {
         TrainedModel {
             goal_hash,
             item_class: ItemClassId::from(class),
-            bundle_schema_version: 2,
-            engine_schema_version: 1,
+            bundle_schema_version: poc2_data::BUNDLE_SCHEMA_VERSION,
+            engine_schema_version: poc2_engine::ENGINE_SCHEMA_VERSION,
             q_table: vec![QEntry {
                 state: 0,
                 action: AdvisorAction::ApplyCurrency {
@@ -212,6 +236,44 @@ mod tests {
         assert_eq!(cache.len(), 2);
         assert!(cache.lookup(42, &ItemClassId::from("BodyArmour")).is_some());
         assert!(cache.lookup(99, &ItemClassId::from("Helmet")).is_some());
+    }
+
+    #[test]
+    fn load_artefact_file_skips_schema_mismatched_models() {
+        // A model trained against a stale schema must be refused so the
+        // advisor falls back to heuristic planning instead of consuming
+        // mis-keyed Q-values (the 0.4-model-vs-0.5-bundle case).
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("stale.json");
+        let mut stale = mk_artefact(7, "BodyArmour");
+        stale.model_path_length.bundle_schema_version =
+            poc2_data::BUNDLE_SCHEMA_VERSION.wrapping_sub(1);
+        std::fs::write(&path, serde_json::to_string(&vec![stale]).unwrap()).unwrap();
+
+        let mut cache = TrainedModelCache::new();
+        let outcome = load_artefact_file(&path, &mut cache);
+        // The file parses (Loaded), but the mismatched model is not inserted.
+        assert_eq!(outcome, ArtefactLoadOutcome::Loaded(0));
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn load_artefact_file_skips_engine_schema_mismatch() {
+        // The guard rejects a model whose ENGINE schema differs even when the
+        // bundle schema matches (the bundle-schema rejection is covered by
+        // load_artefact_file_skips_schema_mismatched_models; this covers the
+        // other half of the `||` guard).
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("engine_stale.json");
+        let mut stale = mk_artefact(8, "BodyArmour");
+        stale.model_path_length.engine_schema_version =
+            poc2_engine::ENGINE_SCHEMA_VERSION.wrapping_add(1);
+        std::fs::write(&path, serde_json::to_string(&vec![stale]).unwrap()).unwrap();
+
+        let mut cache = TrainedModelCache::new();
+        let outcome = load_artefact_file(&path, &mut cache);
+        assert_eq!(outcome, ArtefactLoadOutcome::Loaded(0));
+        assert!(cache.is_empty());
     }
 
     #[test]

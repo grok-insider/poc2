@@ -30,7 +30,7 @@ use smallvec::SmallVec;
 
 use crate::currency::{ApplyContext, ApplyOutcome, CannotApply, Currency};
 use crate::error::{EngineError, EngineResult};
-use crate::ids::{CurrencyId, ItemClassId, ModId};
+use crate::ids::{CurrencyId, ModId};
 use crate::item::{
     AbyssLord, AffixType, BoneSize, BoneSubtype, HiddenDesecratedSlot, Item, ModRoll, Rarity,
 };
@@ -43,32 +43,6 @@ use crate::mods::{ModDefinition, ModKind};
 /// (Blackblooded/Liege/Sovereign) on sceptres are pure waste and are
 /// rejected at `Bone::apply` time.
 const SCEPTRE_CLASSES_NO_EXCLUSIVE_DESECRATED: &[&str] = &["Sceptre"];
-
-/// Resolve an item's class id for bone gating, mirroring
-/// `Catalyst::resolve_class_for_catalyst`. Same polymorphic semantics as
-/// the basic-orb sampler: prefers the registry, falls back to
-/// `ItemClassId::from(item.base.as_str())` for v3-transitional fixtures.
-fn resolve_class_for_bone(
-    item: &Item,
-    base_registry: &crate::base_registry::BaseRegistry,
-) -> ItemClassId {
-    if let Some(c) = base_registry.class_of(&item.base) {
-        return c.clone();
-    }
-    ItemClassId::from(item.base.as_str())
-}
-
-/// Heuristic: does the string look like a PascalCase item-class id
-/// (e.g., "BodyArmour") rather than a metadata path (e.g.,
-/// "Metadata/Items/...") or some other identifier? Used by the
-/// best-effort `Bone::can_apply_to` and `Catalyst::can_apply_to` to
-/// decide when the placeholder shape is recognisable enough to gate on.
-fn is_pascal_case_class_id(s: &str) -> bool {
-    !s.is_empty()
-        && s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-        && !s.contains('/')
-        && s.chars().all(|c| c.is_ascii_alphanumeric())
-}
 
 // =========================================================================
 // Bone — applies a hidden desecrated mod to an item
@@ -102,17 +76,163 @@ impl Bone {
     pub const PRESERVED_CRANIUM: fn() -> Self =
         || Bone::new(BoneSize::Preserved, BoneSubtype::Cranium);
 
-    /// Minimum required ilvl of mods sampled at reveal, gated by bone size.
-    ///
-    /// All sizes share a floor of 1 in the M2.5 placeholder data — actual
-    /// tier-gating per bone size lands when poe2db desecration tables are
-    /// integrated. Until then, the advisor relies on bone size only for
-    /// strategy selection (Ancient = best-tier preference).
-    pub const fn min_required_level(&self) -> u32 {
-        match self.size {
-            BoneSize::Gnawed | BoneSize::Preserved | BoneSize::Ancient => 1,
+    /// Minimum modifier level guaranteed on the revealed desecrated mod,
+    /// from the bone size (P3): Ancient = 40, Gnawed/Preserved = 0.
+    pub const fn min_mod_level(&self) -> u32 {
+        self.size.min_mod_level()
+    }
+
+    /// Shared `apply` pre-flight: modifiable Rare, no pending hidden slot,
+    /// the 0.5 one-desecrated-mod cap, and the bone-size ilvl ceiling.
+    fn pre_apply_checks(&self, item: &Item, patch: crate::patch::PatchVersion) -> EngineResult<()> {
+        // Size × subtype combinations that exist as real currency items
+        // (poe2db): Cranium is Preserved-only; Altered is Collarbone-only.
+        if !self.size.valid_with(self.subtype) {
+            return Err(EngineError::InvalidApplication(format!(
+                "Bone: {:?} {:?} does not exist as a currency item",
+                self.size, self.subtype
+            )));
+        }
+        if !item.is_modifiable() {
+            return Err(EngineError::InvalidApplication(
+                "Bone requires a modifiable item".into(),
+            ));
+        }
+        if item.rarity != Rarity::Rare {
+            return Err(EngineError::InvalidApplication(
+                "Bone requires a Rare item".into(),
+            ));
+        }
+        if item.hidden_desecrated.is_some() {
+            return Err(EngineError::InvalidApplication(
+                "Bone: item already carries an unrevealed desecrated mod".into(),
+            ));
+        }
+        // 0.5: "items are limited to 1 Desecrated modifier" — a revealed
+        // desecrated mod blocks further desecration. (Pre-0.5, desecrated
+        // mods counted as crafted mods; the engine kept the historical
+        // behaviour of gating only the hidden slot.)
+        if patch >= crate::patch::PatchVersion::PATCH_0_5_0 && item.desecrated_mod_count() >= 1 {
+            return Err(EngineError::InvalidApplication(
+                "Bone: item already has a desecrated modifier (limit 1 in 0.5)".into(),
+            ));
+        }
+        // Bone size ilvl ceiling (P3): Gnawed cannot exceed ilvl 64.
+        if let Some(max) = self.size.max_ilvl() {
+            if item.ilvl > max {
+                return Err(EngineError::InvalidApplication(format!(
+                    "Bone {:?}: cannot desecrate item level {} (max {max} for this bone size)",
+                    self.size, item.ilvl
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Maximum item level this bone may be applied to (Gnawed = 64).
+    pub const fn max_ilvl(&self) -> Option<u32> {
+        self.size.max_ilvl()
+    }
+}
+
+impl Bone {
+    /// Which affix sides the class's desecrated pool can actually fill
+    /// (0.5 armour pools are suffix-only; a prefix-side desecration there
+    /// could never reveal anything). Otherworldly mods count only for
+    /// Altered bones. Errors when a populated registry has NO desecrated
+    /// pool for the class — those classes (swords / axes / claws / daggers /
+    /// flails / sceptres) genuinely cannot be desecrated in 0.5; their
+    /// ilvl-65 pool is the unmodeled "Thrud's Might" mechanic. Empty
+    /// unit-test registries keep the permissive both-sides fallback.
+    fn desecratable_sides(
+        &self,
+        class: &crate::ids::ItemClassId,
+        ctx: &ApplyContext<'_>,
+    ) -> EngineResult<(bool, bool)> {
+        let mut pool_prefix = false;
+        let mut pool_suffix = false;
+        let mut pool_known = false;
+        for affix in [AffixType::Prefix, AffixType::Suffix] {
+            for &idx in ctx.registry.for_class_affix(class, affix) {
+                let Some(m) = ctx.registry.at(idx) else {
+                    continue;
+                };
+                if m.kind != ModKind::Desecrated {
+                    continue;
+                }
+                if m.flags.contains(crate::mods::ModFlags::OTHERWORLDLY)
+                    && self.size != BoneSize::Altered
+                {
+                    continue;
+                }
+                pool_known = true;
+                match affix {
+                    AffixType::Prefix => pool_prefix = true,
+                    AffixType::Suffix => pool_suffix = true,
+                    _ => {}
+                }
+            }
+        }
+        if !pool_known && !ctx.registry.is_empty() {
+            return Err(EngineError::InvalidApplication(format!(
+                "Bone: no desecrated modifiers exist for class {class} in 0.5"
+            )));
+        }
+        if pool_known {
+            Ok((pool_prefix, pool_suffix))
+        } else {
+            Ok((true, true))
         }
     }
+}
+
+/// poe2db Desecrated_Modifiers: "If modifiers are full then a random
+/// modifier is also removed." Generalized to per-side pools: when no
+/// pool-bearing side has an open slot (e.g. a suffix-only armour pool with
+/// 3 suffixes rolled), remove a random non-fractured mod from a pool side
+/// so the desecration can land.
+fn free_pool_side_slot(
+    item: &mut Item,
+    pool_prefix: bool,
+    pool_suffix: bool,
+    ctx: &mut ApplyContext<'_>,
+) -> EngineResult<()> {
+    let pool_side_open =
+        (pool_prefix && item.prefixes.len() < 3) || (pool_suffix && item.suffixes.len() < 3);
+    if pool_side_open {
+        return Ok(());
+    }
+    let mut removables: smallvec::SmallVec<[(AffixType, usize); 8]> = smallvec::SmallVec::new();
+    if pool_prefix {
+        for (i, m) in item.prefixes.iter().enumerate() {
+            if !m.is_fractured {
+                removables.push((AffixType::Prefix, i));
+            }
+        }
+    }
+    if pool_suffix {
+        for (i, m) in item.suffixes.iter().enumerate() {
+            if !m.is_fractured {
+                removables.push((AffixType::Suffix, i));
+            }
+        }
+    }
+    if removables.is_empty() {
+        return Err(EngineError::InvalidApplication(
+            "Bone: no desecratable slot can be freed (pool sides full or fractured)".into(),
+        ));
+    }
+    let pick = ctx.rng.gen_range(0..removables.len());
+    match removables[pick] {
+        (AffixType::Prefix, i) => {
+            item.prefixes.remove(i);
+        }
+        (AffixType::Suffix, i) => {
+            item.suffixes.remove(i);
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
 }
 
 impl Currency for Bone {
@@ -153,17 +273,21 @@ impl Currency for Bone {
                 "item already carries an unrevealed desecrated mod",
             ));
         }
-        // Best-effort class check using the item.base placeholder. A class
-        // id that is *not* in this subtype's valid list earns a hard
-        // rejection. Otherwise accept.
-        let candidate_class = item.base.as_str();
-        let valid_classes = self.subtype.valid_classes();
-        if !valid_classes.contains(&candidate_class) {
-            // If the candidate string is a recognised PascalCase class id
-            // but absent from the valid list, reject with structure. If it
-            // is not a recognised class id (e.g., a metadata path), allow
-            // through — `apply()` does the registry-backed check.
-            if is_pascal_case_class_id(candidate_class) {
+        // Bone size ilvl ceiling (P3): Gnawed bones cannot desecrate items
+        // above ilvl 64.
+        if let Some(max) = self.size.max_ilvl() {
+            if item.ilvl > max {
+                return Err(CannotApply::Other(
+                    "Gnawed bone cannot desecrate items above item level 64",
+                ));
+            }
+        }
+        // Best-effort class check routed through the shared resolver
+        // (registry-less here, so only a legacy PascalCase placeholder
+        // base resolves). An unresolvable base (e.g., a metadata path)
+        // passes through — `apply()` does the registry-backed check.
+        if let Some(class) = crate::base_registry::EMPTY.resolve_item_class_opt(item) {
+            if !self.subtype.valid_classes().contains(&class.as_str()) {
                 return Err(CannotApply::Other(
                     "bone subtype is not valid on this item class",
                 ));
@@ -173,24 +297,10 @@ impl Currency for Bone {
     }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
-        if !item.is_modifiable() {
-            return Err(EngineError::InvalidApplication(
-                "Bone requires a modifiable item".into(),
-            ));
-        }
-        if item.rarity != Rarity::Rare {
-            return Err(EngineError::InvalidApplication(
-                "Bone requires a Rare item".into(),
-            ));
-        }
-        if item.hidden_desecrated.is_some() {
-            return Err(EngineError::InvalidApplication(
-                "Bone: item already carries an unrevealed desecrated mod".into(),
-            ));
-        }
+        self.pre_apply_checks(item, ctx.patch)?;
 
         // Registry-backed class gate (M14.6).
-        let class = resolve_class_for_bone(item, ctx.base_registry);
+        let class = ctx.base_registry.resolve_item_class(item);
         let valid_classes = self.subtype.valid_classes();
         if !valid_classes.contains(&class.as_str()) {
             return Err(EngineError::InvalidApplication(format!(
@@ -227,8 +337,10 @@ impl Currency for Bone {
             }
         }
 
-        let prefix_open = item.prefixes.len() < 3;
-        let suffix_open = item.suffixes.len() < 3;
+        let (pool_prefix, pool_suffix) = self.desecratable_sides(&class, ctx)?;
+        free_pool_side_slot(item, pool_prefix, pool_suffix, ctx)?;
+        let prefix_open = item.prefixes.len() < 3 && pool_prefix;
+        let suffix_open = item.suffixes.len() < 3 && pool_suffix;
         let affix = match forced_affix {
             Some(AffixType::Prefix) if prefix_open => AffixType::Prefix,
             Some(AffixType::Prefix) => {
@@ -265,11 +377,26 @@ impl Currency for Bone {
             },
         };
 
+        // Effective Minimum Modifier Level for the reveal (P3):
+        //   - Ancient bones guarantee >= 40.
+        //   - A lord-targeting omen **bricks** that floor: the wiki notes
+        //     "using this omen will brick the minimum modifier level effect
+        //     of an Ancient Jawbone / Ancient Collarbone", allowing low-level
+        //     mods to be generated on reveal. So when a lord omen is consumed,
+        //     the floor drops to 0.
+        let min_mod_level = if lord.is_some() {
+            0
+        } else {
+            self.size.min_mod_level()
+        };
+
         item.hidden_desecrated = Some(HiddenDesecratedSlot {
             affix_type: affix,
             bone_size: self.size,
             bone_subtype: self.subtype,
             abyss_lord: lord,
+            min_mod_level,
+            otherworldly: self.size == BoneSize::Altered,
         });
         Ok(())
     }
@@ -300,15 +427,28 @@ pub fn sample_reveal_options(
         return SmallVec::new();
     };
 
-    // Lord-targeting omens (Blackblooded/Liege/Sovereign) add an
-    // `abyss_lord` constraint we'll filter against once desecrated mods
-    // carry lord tags in the bundle. M2.5 placeholder accepts all.
+    // Candidate filter (P3):
+    //  - desecrated, matching the hidden slot's affix.
+    //  - rollable at the item's ilvl (`required_level <= ilvl`).
+    //  - at or above the slot's effective Minimum Modifier Level floor
+    //    (Ancient = 40, bricked to 0 by a lord omen at apply time).
+    //  - keep-≥1-tier exception: if a lord omen was active and no tier in a
+    //    mod-group clears the floor, the floor was bricked to 0 anyway, so
+    //    this naturally allows low-level mods. We don't reapply the
+    //    per-group exception here because the floor is the slot's already-
+    //    resolved `min_mod_level`, not a currency-variant floor.
     let candidates: Vec<&ModDefinition> = pool
         .iter()
         .filter(|m| {
             m.kind == ModKind::Desecrated
                 && m.affix_type == hidden.affix_type
                 && m.required_level <= item.ilvl
+                && m.required_level >= hidden.min_mod_level
+                // Otherworldly mods surface only from an Altered Collarbone
+                // slot ("a chance for otherworldly modifiers" — the pool
+                // then mixes regular desecrated + Otherworldly options).
+                && (hidden.otherworldly
+                    || !m.flags.contains(crate::mods::ModFlags::OTHERWORLDLY))
         })
         .collect();
 
@@ -461,6 +601,7 @@ mod tests {
                 max: 10.0,
             }],
             required_level: 1,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
             patch_range: PatchRange::ALL,
             flags: ModFlags::DESECRATED_ONLY,
@@ -501,6 +642,25 @@ mod tests {
     }
 
     #[test]
+    fn bone_can_apply_to_gates_legacy_class_ids_but_fails_open_on_metadata_paths() {
+        let bone = Bone::new(BoneSize::Preserved, BoneSubtype::Rib);
+        // Legacy placeholder base in the Rib valid list → accepted.
+        assert!(bone.can_apply_to(&fixture_rare_armour()).is_ok());
+        // Recognisable class id outside the valid list → hard rejection.
+        let mut ring = fixture_rare_armour();
+        ring.base = ItemClassId::from("Ring").as_str().into();
+        assert!(matches!(
+            bone.can_apply_to(&ring),
+            Err(CannotApply::Other(_))
+        ));
+        // Unresolvable metadata-path base → fail open; the registry-backed
+        // gate inside `apply()` decides.
+        let mut bundled = fixture_rare_armour();
+        bundled.base = "Metadata/Items/Armours/BodyArmours/FourBodyInt3".into();
+        assert!(bone.can_apply_to(&bundled).is_ok());
+    }
+
+    #[test]
     fn bone_rejects_non_rare() {
         let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(3);
@@ -512,8 +672,11 @@ mod tests {
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
     }
 
+    /// poe2db Desecrated_Modifiers: "If modifiers are full then a random
+    /// modifier is also removed." A 3+3 rare accepts the bone after the
+    /// engine frees one slot.
     #[test]
-    fn bone_rejects_when_both_slots_full() {
+    fn bone_on_full_item_removes_a_mod_then_desecrates() {
         let reg = ModRegistry::from_mods(vec![], vec![]);
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(4);
         let mut omens = crate::omen::OmenSet::new();
@@ -541,7 +704,122 @@ mod tests {
         ];
         let r = Bone::new(BoneSize::Preserved, BoneSubtype::Rib)
             .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
-        assert!(matches!(r, Err(EngineError::AffixSlotFull { .. })));
+        assert!(r.is_ok(), "full item must accept the bone: {r:?}");
+        assert_eq!(
+            item.prefixes.len() + item.suffixes.len(),
+            5,
+            "exactly one mod removed to free the slot"
+        );
+        assert!(item.hidden_desecrated.is_some());
+
+        // All-fractured full item: nothing removable → reject.
+        let mut locked = fixture_rare_armour();
+        locked.prefixes = smallvec![
+            ModRoll {
+                mod_id: ModId::from("P1"),
+                affix_type: AffixType::Prefix,
+                kind: ModKind::Explicit,
+                values: smallvec![],
+                is_fractured: true,
+            };
+            3
+        ];
+        locked.suffixes = smallvec![
+            ModRoll {
+                mod_id: ModId::from("S1"),
+                affix_type: AffixType::Suffix,
+                kind: ModKind::Explicit,
+                values: smallvec![],
+                is_fractured: true,
+            };
+            3
+        ];
+        let r = Bone::new(BoneSize::Preserved, BoneSubtype::Rib)
+            .apply(&mut locked, &mut ctx(&reg, &mut rng, &mut omens));
+        assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
+    }
+
+    /// Size × subtype gating: Cranium exists only as Preserved; Altered
+    /// only as Collarbone (poe2db Desecrated_Modifiers item list).
+    #[test]
+    fn nonexistent_size_subtype_combos_reject() {
+        let reg = ModRegistry::from_mods(vec![], vec![]);
+        let mut omens = crate::omen::OmenSet::new();
+        for (size, subtype) in [
+            (BoneSize::Gnawed, BoneSubtype::Cranium),
+            (BoneSize::Ancient, BoneSubtype::Cranium),
+            (BoneSize::Altered, BoneSubtype::Rib),
+            (BoneSize::Altered, BoneSubtype::Jawbone),
+            (BoneSize::Altered, BoneSubtype::Cranium),
+        ] {
+            let mut rng = Xoshiro256PlusPlus::seed_from_u64(7);
+            let mut item = fixture_rare_armour();
+            item.ilvl = 60; // below the Gnawed ceiling so only validity gates
+            let r = Bone::new(size, subtype).apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
+            assert!(
+                matches!(r, Err(EngineError::InvalidApplication(ref m)) if m.contains("does not exist")),
+                "{size:?} {subtype:?} must reject; got {r:?}"
+            );
+        }
+    }
+
+    /// Altered Collarbone marks the hidden slot otherworldly; reveal then
+    /// offers OTHERWORLDLY-flagged mods, which regular bones never surface.
+    #[test]
+    fn altered_collarbone_unlocks_otherworldly_reveals() {
+        use crate::mods::ModFlags;
+        let reg = ModRegistry::from_mods(vec![], vec![]);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(9);
+        let mut omens = crate::omen::OmenSet::new();
+
+        let mk = |id: &str, flags: ModFlags| {
+            let mut m = desecrated_mod(id, AffixType::Prefix, id);
+            m.flags = flags;
+            m
+        };
+        let pool = vec![
+            mk("RegularDesecrated", ModFlags::DESECRATED_ONLY),
+            mk(
+                "OtherworldlyMod",
+                ModFlags::DESECRATED_ONLY | ModFlags::OTHERWORLDLY,
+            ),
+        ];
+
+        // Regular Preserved Collarbone on a rare ring: otherworldly excluded.
+        let mut preserved_ring = fixture_rare_armour();
+        preserved_ring.base = "Ring".into();
+        Bone::new(BoneSize::Preserved, BoneSubtype::Collarbone)
+            .apply(&mut preserved_ring, &mut ctx(&reg, &mut rng, &mut omens))
+            .unwrap();
+        let hidden = preserved_ring.hidden_desecrated.as_ref().unwrap();
+        assert!(!hidden.otherworldly);
+        let mut pool_affix = pool.clone();
+        for m in &mut pool_affix {
+            m.affix_type = hidden.affix_type;
+        }
+        let opts = sample_reveal_options(&preserved_ring, &pool_affix, 3, &mut rng);
+        assert!(
+            !opts.iter().any(|o| o.as_str() == "OtherworldlyMod"),
+            "regular bone reveals must exclude OTHERWORLDLY mods: {opts:?}"
+        );
+
+        // Altered Collarbone: otherworldly included.
+        let mut altered_ring = fixture_rare_armour();
+        altered_ring.base = "Ring".into();
+        Bone::new(BoneSize::Altered, BoneSubtype::Collarbone)
+            .apply(&mut altered_ring, &mut ctx(&reg, &mut rng, &mut omens))
+            .unwrap();
+        let hidden2 = altered_ring.hidden_desecrated.as_ref().unwrap();
+        assert!(hidden2.otherworldly);
+        let mut pool_affix2 = pool.clone();
+        for m in &mut pool_affix2 {
+            m.affix_type = hidden2.affix_type;
+        }
+        let opts = sample_reveal_options(&altered_ring, &pool_affix2, 3, &mut rng);
+        assert!(
+            opts.iter().any(|o| o.as_str() == "OtherworldlyMod"),
+            "altered bone reveals must include OTHERWORLDLY mods: {opts:?}"
+        );
     }
 
     #[test]
@@ -554,6 +832,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
         let pool = vec![
             // 5 suffix candidates -> sample picks 3
@@ -582,6 +862,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
         let pool = vec![desecrated_mod("DS_SUF1", AffixType::Suffix, "GA")];
         let chosen = ModId::from("DS_SUF1");
@@ -605,6 +887,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
         let pool = vec![desecrated_mod("DS_PFX1", AffixType::Prefix, "GA")];
         let r = reveal_at_well_of_souls(&mut item, &pool, &ModId::from("DS_PFX1"), &mut rng);
@@ -623,6 +907,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
         let pool: Vec<ModDefinition> = vec![];
         let r = reveal_at_well_of_souls(&mut item, &pool, &ModId::from("GHOST"), &mut rng);
@@ -647,6 +933,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Jawbone,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
         set_abyss_lord(&mut item, AbyssLord::Kurgal).unwrap();
         assert_eq!(

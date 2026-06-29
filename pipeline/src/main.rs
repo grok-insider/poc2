@@ -55,6 +55,39 @@ enum Command {
         /// Bundle path. `.gz` auto-detected.
         bundle: PathBuf,
     },
+    /// Check whether upstream game data moved since the last recorded state
+    /// (the trigger for the automated data-refresh loop — ADR-0012). Reads the
+    /// PoE2 patch pointer + RePoE-fork content hashes, compares to the state
+    /// file, and (optionally) updates it. Exit code `0` = no change, `10` =
+    /// change detected, so CI can branch on `$?`.
+    Watch {
+        /// Path to the committed upstream-state file.
+        #[arg(long, default_value = "pipeline/data/upstream_state.json")]
+        state: PathBuf,
+        /// Write the freshly-observed state back to `--state` when a change is
+        /// detected (the workflow commits this alongside the rebuilt bundle).
+        #[arg(long)]
+        write: bool,
+        /// Emit the machine-readable report as JSON to this path (for the CI
+        /// step that opens the PR). Defaults to none (human log only).
+        #[arg(long)]
+        report: Option<PathBuf>,
+    },
+    /// Diff two bundles semantically (added/removed/changed mods, bases, tags,
+    /// and section entries) and render a markdown changelog — the body of the
+    /// auto-refresh PR.
+    DiffBundle {
+        /// The baseline (old) bundle. `.gz` auto-detected.
+        old: PathBuf,
+        /// The candidate (new) bundle. `.gz` auto-detected.
+        new: PathBuf,
+        /// Write the markdown changelog here. Defaults to stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Also write the raw diff as JSON here (CI artifact).
+        #[arg(long)]
+        json: Option<PathBuf>,
+    },
     /// Re-fetch the Craft of Exile snapshot and report which mods could
     /// not be joined to engine ModIds (input for new entries in
     /// `pipeline/data/coe_aliases.toml`).
@@ -137,6 +170,23 @@ async fn main() -> Result<()> {
                 println!("  • {} = {}", s.name, s.revision);
             }
         }
+        Command::Watch {
+            state,
+            write,
+            report,
+        } => {
+            let code = run_watch(&state, write, report.as_deref()).await?;
+            // Non-zero-but-defined exit so CI can branch: 10 = change detected.
+            std::process::exit(code);
+        }
+        Command::DiffBundle {
+            old,
+            new,
+            out,
+            json,
+        } => {
+            run_diff_bundle(&old, &new, out.as_deref(), json.as_deref())?;
+        }
         Command::DiagnoseCoe {
             bundle,
             limit,
@@ -174,6 +224,69 @@ async fn load_coe_snapshot_for_subcommand(
         let client = poc2_pipeline::http::make_client();
         Ok(coe::fetch(&client).await?)
     }
+}
+
+/// Run the upstream change check. Returns the process exit code:
+/// `0` = no change, `10` = change detected.
+async fn run_watch(
+    state_path: &std::path::Path,
+    write: bool,
+    report_path: Option<&std::path::Path>,
+) -> Result<i32> {
+    let client = poc2_pipeline::http::make_client();
+    let previous = poc2_pipeline::UpstreamState::load(state_path)?;
+    let report = poc2_pipeline::watch_check(&client, &previous).await?;
+
+    println!("{}", report.summary());
+
+    if let Some(path) = report_path {
+        let json = serde_json::to_string_pretty(&report)?;
+        std::fs::write(path, json)?;
+        tracing::info!(report = %path.display(), "wrote watch report JSON");
+    }
+
+    if report.changed && write {
+        report.current_state.save(state_path)?;
+        tracing::info!(state = %state_path.display(), "updated upstream state");
+    } else if report.changed {
+        tracing::info!("change detected; re-run with --write to persist the new state");
+    }
+
+    Ok(if report.changed { 10 } else { 0 })
+}
+
+/// Diff two bundles and render the markdown changelog.
+fn run_diff_bundle(
+    old_path: &std::path::Path,
+    new_path: &std::path::Path,
+    out: Option<&std::path::Path>,
+    json: Option<&std::path::Path>,
+) -> Result<()> {
+    let old = poc2_data::io::read_bundle(old_path)?;
+    let new = poc2_data::io::read_bundle(new_path)?;
+    let diff = poc2_pipeline::diff_bundles(&old, &new);
+
+    tracing::info!(
+        total = diff.total_changes(),
+        mods = diff.mods.total(),
+        bases = diff.bases.total(),
+        tags = diff.tags.total(),
+        "bundle diff computed"
+    );
+
+    if let Some(path) = json {
+        std::fs::write(path, serde_json::to_string_pretty(&diff)?)?;
+        tracing::info!(json = %path.display(), "wrote raw diff JSON");
+    }
+
+    let md = poc2_pipeline::render_markdown(&diff);
+    if let Some(path) = out {
+        std::fs::write(path, &md)?;
+        println!("wrote markdown changelog to {}", path.display());
+    } else {
+        print!("{md}");
+    }
+    Ok(())
 }
 
 async fn run_diagnose_coe(

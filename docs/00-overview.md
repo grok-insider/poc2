@@ -123,10 +123,10 @@ cargo build --workspace               # build all Rust crates
 cargo test --workspace                # run tests
 cargo clippy --workspace -- -D warnings
 
-# 3. Frontend
-cd apps/desktop
-pnpm install
-pnpm tauri:dev                        # start the app in dev mode
+# 3. Web app (Bun workspace at the repo root — engine runs as WebAssembly)
+bun install                           # installs the apps/web workspace
+bun run wasm                          # build crates/poc2-wasm → apps/web/{lib,public}/wasm
+bun run dev                           # start the web app (real browser, http://localhost:3000)
 
 # 4. Clone reference repos (one-time, ~1.5 GB)
 ./scripts/clone-example-repos.sh

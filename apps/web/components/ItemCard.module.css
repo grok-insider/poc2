@@ -1,0 +1,88 @@
+.card {
+  padding: 0;
+  overflow: hidden;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid currentColor;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, currentColor 9%, transparent),
+    transparent 55%
+  );
+}
+.headGlyph {
+  font-size: 18px;
+}
+.name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.sub {
+  font-size: 12px;
+  margin-top: 1px;
+}
+.slots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 15px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--line);
+}
+.diamonds {
+  display: inline-flex;
+  gap: 3px;
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+.filled {
+  color: var(--primary);
+}
+.hollow {
+  color: var(--fg-faint);
+}
+.empty {
+  padding: 20px 15px;
+  color: var(--fg-faint);
+  font-size: 12px;
+  text-align: center;
+}
+.mods {
+  padding: 6px 0 10px;
+}
+.group {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  padding: 8px 15px 3px;
+}
+.modRow {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 4px 15px;
+}
+.modRow:hover {
+  background: var(--surface-2);
+}
+.modVal {
+  color: var(--accent);
+  min-width: 46px;
+  font-size: 12px;
+}
+.modName {
+  color: var(--fg);
+  font-size: 12px;
+}
+.flags {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: 11px;
+}

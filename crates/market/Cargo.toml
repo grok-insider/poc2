@@ -14,11 +14,20 @@ poc2-engine.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-reqwest.workspace = true
-tokio.workspace = true
 tracing.workspace = true
 ahash.workspace = true
-urlencoding = "2.1"
+# Network/disk price-feed deps are optional so the advisor (and the WASM build)
+# can depend on this crate for the `Valuator` type alone, without pulling in
+# reqwest/tokio (which don't build for wasm32-unknown-unknown).
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+urlencoding = { version = "2.1", optional = true }
+
+[features]
+default = ["net"]
+# `net` enables the live price/meta pollers + on-disk snapshot cache
+# (`prices`, `meta`, `cache` modules). Without it, only `valuator` is built.
+net = ["dep:reqwest", "dep:tokio", "dep:urlencoding"]
 
 [dev-dependencies]
 insta.workspace = true

@@ -85,6 +85,7 @@ fn mk_mod(
             })
             .collect(),
         required_level,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from(ARMOUR_TAG)],
         patch_range: PatchRange::ALL,
         flags: ModFlags::empty(),
@@ -415,6 +416,8 @@ fn step_7_fracture_targets_visible_with_2_in_3_chance() {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
 
         apply_currency(
@@ -452,6 +455,8 @@ fn step_8_reveal_at_well_of_souls_yields_the_chosen_mod() {
         bone_size: BoneSize::Preserved,
         bone_subtype: BoneSubtype::Rib,
         abyss_lord: None,
+        min_mod_level: 0,
+        otherworldly: false,
     });
 
     let pool: Vec<ModDefinition> = reg

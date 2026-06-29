@@ -49,13 +49,21 @@
 
 ## Process model
 
-The desktop app is a single Tauri 2 process with three logical compartments:
+The app is a static Next.js export (no server) running entirely in the browser,
+with three logical compartments:
 
-1. **Frontend** (WebKit + Svelte 5) — renders UI, dispatches commands via IPC.
-2. **Tauri IPC bridge** (`apps/desktop/src-tauri`) — exposes Rust functions to JS, owns plugins.
-3. **Workspace crates** (`crates/*`) — the engine, advisor, data, market, etc. Imported by the IPC bridge.
+1. **UI thread** (React 19 — the "Forge" console in `apps/web`) — renders the UI
+   and dispatches typed RPC calls over `postMessage`.
+2. **Web Worker hosting the WASM engine** (`crates/poc2-wasm`, wasm-bindgen) — an
+   in-memory `EngineState` that answers `recommend` / `parse` / `eligibleMods` /
+   `recordOutcome` / `runNTrials` / … off the UI thread, so planning never blocks.
+3. **Workspace crates** (`crates/*`) — the engine, advisor, data, market, etc.,
+   compiled into `poc2-wasm`.
 
-The advisor's beam search runs in a Tokio worker on the Rust side. The frontend subscribes to a stream of `Recommendation` events; new events arrive as the search deepens.
+The advisor's beam search runs inside the Web Worker (WASM); the UI thread stays
+responsive and renders each `Recommendation` set as the re-plan completes.
+(Previously this was a single Tauri 2 process with a Svelte frontend + Rust IPC
+bridge — see ADR-0001, frontend superseded.)
 
 ## Patch versioning
 
@@ -142,6 +150,6 @@ This is required for the canonical "Triple T1 ES Body Armour" test fixture, wher
 ## NixOS / Hyprland specifics
 
 - **Wayland-only** — no X11 fallback. `wl-clipboard` for clipboard, `wlr-layer-shell` for overlay.
-- **flake.nix** — declarative dev shell. Includes Rust toolchain, Node, pnpm, Tauri system deps (webkit2gtk-4.1, libsoup-3, gtk3, gdk, etc.), Wayland deps.
+- **flake.nix** — declarative dev shell. Includes the Rust toolchain (+ `wasm32-unknown-unknown`), the WebAssembly toolchain (wasm-pack, wasm-bindgen-cli, binaryen), and **Bun** + Node for the web app. (The Tauri/webkit/Wayland system deps were removed when the desktop app was replaced by the WASM web app.)
 - **Hyprland overlay** — implemented as a layer-shell surface, not a regular window. Hyprland window rules (`windowrulev2 = float, ...`) configure positioning.
 - **PoE2 runs under Proton/Wine** — clipboard works (`wl-clipboard`), `Client.txt` lives in the Wine prefix, monitored via `inotify`.

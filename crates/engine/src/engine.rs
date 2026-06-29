@@ -13,6 +13,10 @@
 //!    are removed from the set. On a previewed-but-not-committed
 //!    operation, the original omen set is preserved (we operate on a
 //!    cloned omen set inside the preview).
+//! 3. **Atomicity**: remove-then-add currencies (Perfect/Corrupted
+//!    Essences, Alloys, Chaos Orbs) can fail AFTER removing a mod. The
+//!    wrappers snapshot the item up front and restore it on `Err`, so a
+//!    failed apply never leaves a partially-modified item.
 
 use rand_xoshiro::rand_core::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -28,8 +32,8 @@ use crate::registry::ModRegistry;
 /// Apply `currency` to `item`, honoring Hinekora's Lock and consuming any
 /// matching omens from `omens`.
 ///
-/// On failure, both the lock and the omen set are preserved (the
-/// operation didn't modify anything, so the player keeps their setup).
+/// On failure, the item (including its lock) and the omen set are restored
+/// to their pre-apply state, so the player keeps their setup.
 pub fn apply_currency(
     currency: &dyn Currency,
     item: &mut Item,
@@ -62,28 +66,37 @@ pub fn apply_currency_with_bases(
     patch: PatchVersion,
     omens: &mut OmenSet,
 ) -> EngineResult<ApplyOutcome> {
-    if let Some(seed) = item.hinekora_lock {
+    // Pre-flight: the same gate the UI's checkCanApply consults. Without
+    // this, currencies whose restrictions live only in `can_apply_to`
+    // (e.g. Hinekora's Lock rarity set) bypass them on the apply path.
+    if let Err(reason) = currency.can_apply_to(item) {
+        return Err(crate::error::EngineError::InvalidApplication(format!(
+            "{}: {reason}",
+            currency.id().as_str()
+        )));
+    }
+    // Snapshot the item and omens so a failure rolls back any partial
+    // mutation (remove-then-add applies can Err after the removal) and any
+    // omen consumption. Item is intentionally cheap to clone.
+    let item_snapshot = item.clone();
+    let omen_snapshot = omens.clone();
+    let result = if let Some(seed) = item.hinekora_lock {
         let mut locked_rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        // Snapshot omens so a failure rolls back any consumption.
-        let omen_snapshot = omens.clone();
         let mut ctx = ApplyContext::new(registry, base_registry, &mut locked_rng, patch, omens);
         let result = currency.apply(item, &mut ctx);
         if result.is_ok() {
             item.hinekora_lock = None;
-        } else {
-            // Roll back consumed omens.
-            *omens = omen_snapshot;
         }
         result
     } else {
-        let omen_snapshot = omens.clone();
         let mut ctx = ApplyContext::new(registry, base_registry, rng, patch, omens);
-        let result = currency.apply(item, &mut ctx);
-        if result.is_err() {
-            *omens = omen_snapshot;
-        }
-        result
+        currency.apply(item, &mut ctx)
+    };
+    if result.is_err() {
+        *item = item_snapshot;
+        *omens = omen_snapshot;
     }
+    result
 }
 
 /// Preview the result of applying `currency` without mutating anything.
@@ -203,9 +216,11 @@ mod tests {
     use smallvec::smallvec;
 
     use super::*;
-    use crate::currency::basic::OrbOfTransmutation;
+    use crate::currency::basic::{ChaosOrb, OrbOfTransmutation};
+    use crate::currency::{Alloy, Essence, EssenceQuality};
+    use crate::error::EngineError;
     use crate::ids::{ItemClassId, ModGroupId, ModId, TagId};
-    use crate::item::{AffixType, QualityKind, Rarity};
+    use crate::item::{AffixType, ModRoll, QualityKind, Rarity};
     use crate::mods::{ModDefinition, ModDomain, ModFlags, ModGroup, ModKind, SpawnWeight};
     use crate::patch::PatchRange;
 
@@ -225,6 +240,7 @@ mod tests {
             }],
             stats: smallvec![],
             required_level: 1,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from(class)],
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),
@@ -262,6 +278,16 @@ mod tests {
             ],
             vec![],
         )
+    }
+
+    fn mk_roll(id: &str, affix: AffixType, fractured: bool) -> ModRoll {
+        ModRoll {
+            mod_id: ModId::from(id),
+            affix_type: affix,
+            kind: ModKind::Explicit,
+            values: smallvec![],
+            is_fractured: fractured,
+        }
     }
 
     #[test]
@@ -308,6 +334,96 @@ mod tests {
         assert_eq!(item.hinekora_lock, Some(0xfeed_face_u64));
         // Omens preserved — transmute didn't consume any.
         assert_eq!(omens.len(), 1);
+    }
+
+    #[test]
+    fn apply_restores_item_when_essence_fails_after_removal() {
+        // Perfect essence removes a mod BEFORE the group-exclusivity check
+        // can fail; the wrapper must roll the item back. The fractured Life
+        // mod can't be removed, so the removal takes ES1 and the surviving
+        // Life group then collides with the essence's target.
+        let reg = registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(6);
+        let mut item = fixture();
+        item.rarity = Rarity::Rare;
+        item.prefixes
+            .push(mk_roll("Life1", AffixType::Prefix, true));
+        item.prefixes.push(mk_roll("ES1", AffixType::Prefix, false));
+        item.hinekora_lock = Some(0x10c4);
+        let mut omens = OmenSet::new();
+        let before = item.clone();
+
+        let ess = Essence::new(
+            "PerfectEssenceOfLife",
+            "Perfect Essence of Life",
+            EssenceQuality::Perfect,
+            "Life1",
+        );
+        let r = apply_currency(
+            &ess,
+            &mut item,
+            &reg,
+            &mut rng,
+            PatchVersion::PATCH_0_4_0,
+            &mut omens,
+        );
+        assert!(matches!(r, Err(EngineError::ModGroupExclusive(_))));
+        assert_eq!(item, before);
+    }
+
+    #[test]
+    fn apply_restores_item_when_alloy_fails_after_removal() {
+        // Same remove-then-fail shape as the essence path, on the Alloy's
+        // own apply implementation (0.5+).
+        let reg = registry();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(7);
+        let mut item = fixture();
+        item.rarity = Rarity::Rare;
+        item.prefixes
+            .push(mk_roll("Life1", AffixType::Prefix, true));
+        item.prefixes.push(mk_roll("ES1", AffixType::Prefix, false));
+        let mut omens = OmenSet::new();
+        let before = item.clone();
+
+        let alloy = Alloy::new("AlloyOfLife", "Verisium Alloy of Life", "Life1");
+        let r = apply_currency(
+            &alloy,
+            &mut item,
+            &reg,
+            &mut rng,
+            PatchVersion::PATCH_0_5_0,
+            &mut omens,
+        );
+        assert!(matches!(r, Err(EngineError::ModGroupExclusive(_))));
+        assert_eq!(item, before);
+    }
+
+    #[test]
+    fn apply_restores_item_when_chaos_fails_after_removal() {
+        // The registry only carries Gloves mods, so after the Chaos removal
+        // the add step finds nothing eligible for Boots and fails.
+        let reg = ModRegistry::from_mods(
+            vec![mk_mod("GloveLife1", "Life", AffixType::Prefix, "Gloves")],
+            vec![],
+        );
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(8);
+        let mut item = fixture();
+        item.rarity = Rarity::Rare;
+        item.prefixes
+            .push(mk_roll("Life1", AffixType::Prefix, false));
+        let mut omens = OmenSet::new();
+        let before = item.clone();
+
+        let r = apply_currency(
+            &ChaosOrb::new(),
+            &mut item,
+            &reg,
+            &mut rng,
+            PatchVersion::PATCH_0_4_0,
+            &mut omens,
+        );
+        assert!(matches!(r, Err(EngineError::NoEligibleMods { .. })));
+        assert_eq!(item, before);
     }
 
     #[test]

@@ -1,0 +1,92 @@
+# 14. Genesis Tree (0.5 "Return of the Ancients")
+#
+# UI-only advisor knowledge: the Genesis Tree (Breach "Brequel" tree) births
+# Rings / Amulets / Belts / Currency / Breachstones from Wombgifts + Hiveblood.
+# The engine never simulates births; these guidance rules point the crafter at
+# the Genesis panel when the item class can benefit. Sources: GGG Genesis Tree
+# deep-dive, poe2db The_Genesis_Tree, Fextralife Genesis Tree Crafting Guide.
+# All numbers community estimates (early 0.5).
+
+[[rule]]
+id = "R500-genesis-caster-minion-jewellery"
+category = "base_selection"
+explanation = "The 0.5 Caster and Minion modifier pools on rings and belts are Genesis-Tree-exclusive — they cannot be rolled with ordinary currency."
+source = "poe2db The_Genesis_Tree; GGG 0.5 patch notes (Breach section)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class_any = ["Ring", "Belt"] },
+]
+
+[[rule.then]]
+note = "Crafting a Ring/Belt: the 0.5 Caster mods (extra spell damage as element, spell crit, cast speed) and Minion mods (minion damage/levels) only exist on items BIRTHED by the Genesis Tree with the matching gateway node (First Working / Stench of Carrion). If your build wants those, start from a Genesis-birthed base — see the Genesis Tree panel presets."
+priority = 45
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R501-genesis-exclusive-bases"
+category = "base_selection"
+explanation = "14 jewellery bases (6 rings, 4 amulets, 4 belts) are exclusive to Genesis Tree births."
+source = "RePoE-fork base_items (FourRingB1-6, FourAmuletB*, FourBeltB1-4); GGG 0.5 patch notes"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class_any = ["Ring", "Amulet", "Belt"] },
+    { rarity = "normal" },
+]
+
+[[rule.then]]
+note = "Base selection: the Genesis-exclusive bases (Biostatic/Vitalic/Mnemonic/Kinetic/Oneiric/Grasping rings; Lament/Portent/Absent/Corona amulets; Stalking/Invoking/Sinew/Forking belts) carry implicits no droppable base has. Check the Genesis Tree panel's base-bias nodes before committing currency to an ordinary base."
+priority = 40
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R502-genesis-amulet-suffix-quality"
+category = "base_selection"
+explanation = "Genesis amulet births can guarantee attribute/resistance suffixes at minimum tier with maximum values (Premonition Fulfilled)."
+source = "GGG Genesis Tree deep-dive (amulet demo); Fextralife Genesis Tree Crafting Guide"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class = "Amulet" },
+    { rarity = "normal" },
+]
+
+[[rule.then]]
+note = "Attribute/resistance amulet target? A Genesis birth with Traits Foretold + Inherited Talents (or Scarred Flesh + Imbue the Body), the level-60 nodes, and Premonition Fulfilled guarantees max-value suffixes that ordinary Alch/Chaos spam cannot — often a cheaper start than buying. See the 'Attribute / resistance amulets' preset in the Genesis Tree panel."
+priority = 42
+tag = "meta"
+[rule.then.action]
+kind = "guidance"
+
+# ---------------------------------------------------------------------
+
+[[rule]]
+id = "R503-genesis-catalyst-supply-0-5"
+category = "pricing"
+explanation = "0.5: catalysts no longer drop from monsters — the Genesis Tree Currency womb is the sole supply."
+source = "GGG 0.5 patch notes; BawLoch catalyst-farming sample (~1.5 div/map)"
+confidence = "community"
+
+[rule.when]
+all = [
+    { item_class_any = ["Ring", "Amulet", "Jewel"] },
+]
+
+[[rule.then]]
+note = "Catalyst supply (0.5): catalysts only come from Genesis Tree Currency-womb births (Catalyst Chance / Complete Refinement nodes). If your craft plan ends with catalyst quality, price catalysts early — supply is tree-gated and the Catalysing Exaltation omen keeps demand high."
+priority = 30
+tag = "meta"
+[rule.then.action]
+kind = "guidance"

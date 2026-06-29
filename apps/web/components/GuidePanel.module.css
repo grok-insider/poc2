@@ -1,0 +1,141 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.hero {
+  padding: 16px 18px;
+  box-shadow: var(--glow-rec);
+  position: relative;
+}
+.heroTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.heroProb {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.probLabel {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.success {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+.specs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.specsBar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.specsFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--primary);
+  opacity: 0.55;
+  border-radius: 4px;
+  transition: width 200ms var(--easing);
+}
+.specsCaption {
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.action {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 8px 0 12px;
+  color: var(--fg);
+}
+.band {
+  position: relative;
+  height: 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.bandFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, var(--primary-press), var(--primary));
+  border-radius: 6px;
+}
+.bandRange {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--success-band);
+  border-left: 1px solid var(--success);
+  border-right: 1px solid var(--success);
+}
+.metaline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.rationale {
+  margin: 12px 0 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.heroActions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+}
+.alts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.alt {
+  display: grid;
+  grid-template-columns: 18px 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  text-align: left;
+  width: 100%;
+  transition: background 140ms var(--easing), border-color 140ms var(--easing);
+}
+.alt:hover {
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+.altLabel {
+  font-size: 13px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.state {
+  padding: 24px 18px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}

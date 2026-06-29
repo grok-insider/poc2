@@ -56,6 +56,37 @@ pub async fn fetch_json<T: DeserializeOwned>(client: &Client, url: &str) -> Pipe
     })
 }
 
+/// Fetch a URL and return its body as a trimmed UTF-8 string.
+///
+/// Used for tiny plain-text endpoints such as the community patch-version
+/// pointer (`poe-tool-dev/latest-patch-version`), where the body is a bare
+/// version string rather than JSON.
+pub async fn fetch_text(client: &Client, url: &str) -> PipelineResult<String> {
+    let url_str = url.to_string();
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| PipelineError::Http {
+            url: url_str.clone(),
+            source: e,
+        })?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(PipelineError::HttpStatus {
+            url: url_str,
+            status: status.as_u16(),
+            body: body.chars().take(500).collect(),
+        });
+    }
+    let text = resp.text().await.map_err(|e| PipelineError::Http {
+        url: url_str,
+        source: e,
+    })?;
+    Ok(text.trim().to_string())
+}
+
 /// SHA-256 hex digest of a byte slice, for source-revision tracking.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::Digest;
