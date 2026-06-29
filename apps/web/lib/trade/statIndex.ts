@@ -54,9 +54,23 @@ const TAG_RE = /\s*\((?:fractured|rune|enchant|desecrated|crafted|implicit)\)$/i
 
 const NUM_RE = /\d+(?:\.\d+)?/g;
 
-/** Strip trailing `(fractured)`-style tags (they can stack). */
+// PoE's "advanced" tooltip format prints the rolled value followed by the mod's
+// possible range, e.g. `+61(60-69) to maximum Life`, `24(20-30)% increased …`,
+// `Has 3(1-3) Charm Slots`. The parenthetical range describes the mod, not the
+// actual roll, so it must be removed BEFORE numbers are templated — otherwise
+// `+61(60-69) to maximum Life` normalizes to `#(#-#) to maximum life`, which
+// matches no template (the bug that left every gear line "no trade id").
+// Matches a `(min-max)` or single `(n)` immediately following a digit.
+const ROLLED_RANGE_RE = /(\d)\((?:\d+(?:\.\d+)?)(?:-\d+(?:\.\d+)?)?\)/g;
+
+/** Drop advanced-format roll ranges, keeping the displayed (actual) value. */
+export function stripRolledRanges(line: string): string {
+  return line.replace(ROLLED_RANGE_RE, "$1");
+}
+
+/** Strip trailing `(fractured)`-style tags (they can stack) + roll ranges. */
 export function stripLineTags(line: string): string {
-  let text = line.trim();
+  let text = stripRolledRanges(line.trim());
   for (;;) {
     const next = text.replace(TAG_RE, "");
     if (next === text) break;
@@ -67,7 +81,7 @@ export function stripLineTags(line: string): string {
 
 /** Normalize a stat line (or matcher template) to an index key: numeric
  * magnitudes → `#`, `+#` folds to `#` (minus stays literal), whitespace
- * collapsed, trailing tags stripped, case-folded. */
+ * collapsed, trailing tags + roll ranges stripped, case-folded. */
 export function normalizeLine(line: string): string {
   return stripLineTags(line)
     .replace(NUM_RE, "#")

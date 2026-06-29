@@ -28,6 +28,25 @@ describe("normalizeLine", () => {
     expect(normalizeLine("Adds 12 to 24 Fire Damage")).toBe("adds # to # fire damage");
   });
 
+  test("advanced-format roll ranges are stripped (keep the actual roll)", () => {
+    // The in-game advanced tooltip prints roll(min-max); the range must not
+    // pollute the template, or nothing matches (the gear price-check bug).
+    expect(normalizeLine("+61(60-69) to maximum Life")).toBe("# to maximum life");
+    expect(normalizeLine("24(20-30)% increased Charm Charges gained")).toBe(
+      "#% increased charm charges gained",
+    );
+    expect(normalizeLine("Has 3(1-3) Charm Slots")).toBe("has # charm slots");
+    expect(normalizeLine("80(64-97) to 132(98-145) Physical Thorns damage")).toBe(
+      "# to # physical thorns damage",
+    );
+  });
+
+  test("roll ranges + a trailing (implicit) tag both strip", () => {
+    expect(normalizeLine("24(20-30)% increased Charm Charges gained (implicit)")).toBe(
+      "#% increased charm charges gained",
+    );
+  });
+
   test("whitespace collapses", () => {
     expect(normalizeLine("  +10   to\tStrength ")).toBe("# to strength");
   });
@@ -69,6 +88,12 @@ describe("lineValues", () => {
     expect(lineValues("Adds 12 to 24.5 Fire Damage")).toEqual([12, 24.5]);
     expect(lineValues("+85 to maximum Life (fractured)")).toEqual([85]);
     expect(lineValues("no numbers here")).toEqual([]);
+  });
+
+  test("advanced roll ranges: the actual roll wins, not the range bounds", () => {
+    expect(lineValues("+61(60-69) to maximum Life")).toEqual([61]);
+    expect(lineValues("80(64-97) to 132(98-145) Physical Thorns damage")).toEqual([80, 132]);
+    expect(lineValues("Has 3(1-3) Charm Slots")).toEqual([3]);
   });
 });
 
