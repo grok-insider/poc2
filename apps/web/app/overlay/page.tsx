@@ -37,6 +37,14 @@ import styles from "./overlay.module.css";
 
 type Status = "idle" | "scanning" | "ready" | "empty" | "no-region" | "clipboard";
 
+/// Left-gutter crop applied before OCR. The default preprocess assumes a wide
+/// (~30%) icon column, but real in-game currency/reward panels — and a
+/// user-calibrated region that already trims most of the icon — have a much
+/// narrower gutter; an over-crop eats the start of item names (verified on a
+/// Windows 11 VM: "Orb of Annulment" → "Annulment"). A conservative 0.12 keeps
+/// the icon out without clipping names.
+const ICON_CROP = 0.12;
+
 function fmtTotal(r: PricedRow): string | null {
   if (r.total === null) return null;
   const n = r.total;
@@ -128,7 +136,9 @@ export default function OverlayPage() {
         setPlaceLeft(rect.x + rect.width / 2 > window.screen.width / 2);
       }
 
-      const ocrRows = await recognizeRows(cap.dataUrl);
+      const ocrRows = await recognizeRows(cap.dataUrl, {
+        preprocess: { iconCrop: ICON_CROP },
+      });
       const { engine } = await import("@/lib/engine/client");
       const { reads, priced } = await resolveAndPrice(ocrRows, (raw) =>
         engine.resolveName({ raw }),
