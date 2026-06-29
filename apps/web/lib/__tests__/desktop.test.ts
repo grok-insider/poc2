@@ -51,6 +51,17 @@ describe("getDesktopBridge", () => {
       calibrateRegion: async () => true,
       onRegionCalibrated: () => () => seen.push("off-region"),
       onOverlayState: () => () => seen.push("off-overlay"),
+      pricesSnapshot: async () => ({ league: "L", names: [], byName: {}, fetchedAt: null }),
+      pricesStatus: async () => ({
+        league: "L",
+        count: 0,
+        fetchedAt: null,
+        lastError: null,
+        refreshing: false,
+        backend: "sqlite",
+      }),
+      pricesRefresh: async () => true,
+      pricesSetLeague: async () => true,
     };
     g.window = { poc2Desktop: bridge };
 

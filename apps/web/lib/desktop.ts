@@ -56,6 +56,33 @@ export interface OverlayState {
   degraded: boolean;
 }
 
+/** A single resolved unit price from the cache. */
+export interface PriceInfo {
+  perUnit: number;
+  unit: string;
+}
+
+/**
+ * Flattened poe2scout price snapshot. `names` feeds the OCR matcher as ad-hoc
+ * fuzzy `candidates`; `byName` maps `normalizeName(name)` → price.
+ */
+export interface PriceSnapshot {
+  league: string;
+  names: string[];
+  byName: Record<string, PriceInfo>;
+  fetchedAt: string | null;
+}
+
+/** poe2scout price-cache status surface. */
+export interface PriceStatus {
+  league: string;
+  count: number;
+  fetchedAt: string | null;
+  lastError: string | null;
+  refreshing: boolean;
+  backend: string;
+}
+
 export interface Poc2DesktopBridge {
   /** Subscribe to item text captured by the shell. Returns an unsubscribe. */
   onItemText(cb: (text: string) => void): () => void;
@@ -92,6 +119,17 @@ export interface Poc2DesktopBridge {
   onRegionCalibrated(cb: (rect: CaptureRect) => void): () => void;
   /** Subscribe to overlay state pushes (show/hide + degraded). */
   onOverlayState(cb: (state: OverlayState) => void): () => void;
+
+  // --- poe2scout price cache (hourly poe2scout → node:sqlite) ---
+
+  /** Flattened price snapshot for the active league. */
+  pricesSnapshot(): Promise<PriceSnapshot>;
+  /** Price-cache status (count, fetchedAt, backend, lastError). */
+  pricesStatus(): Promise<PriceStatus>;
+  /** Force an immediate poe2scout refresh; true if rows were stored. */
+  pricesRefresh(): Promise<boolean>;
+  /** Point the cache at a league (refreshes now; keeps the hourly cadence). */
+  pricesSetLeague(league: string): Promise<boolean>;
 }
 
 declare global {

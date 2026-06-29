@@ -33,6 +33,7 @@ import {
   priceRow,
   type PricedRow,
 } from "@/lib/ocr/priceSource";
+import { loadPriceSource, priceCandidates } from "@/lib/prices/source";
 import styles from "./overlay.module.css";
 
 type Status = "idle" | "scanning" | "ready" | "empty" | "no-region" | "clipboard";
@@ -140,8 +141,12 @@ export default function OverlayPage() {
         preprocess: { iconCrop: ICON_CROP },
       });
       const { engine } = await import("@/lib/engine/client");
+      // Resolve against the FULL poe2scout catalogue (runes/idols/omens/alloys…)
+      // when the price cache is loaded — the engine valuator only knows ~26
+      // built-in currency names, which can't match reward-panel items.
+      const candidates = priceCandidates();
       const { reads, priced } = await resolveAndPrice(ocrRows, (raw) =>
-        engine.resolveName({ raw }),
+        engine.resolveName(candidates.length > 0 ? { raw, candidates } : { raw }),
       );
       const { state: nextLock, rows: locked } = applyScan(lockRef.current, reads);
       lockRef.current = nextLock;
@@ -173,6 +178,10 @@ export default function OverlayPage() {
     const bridge = getDesktopBridge();
     setHasBridge(bridge !== null);
     if (!bridge) return;
+
+    // Hydrate window.poc2PriceSource + the fuzzy candidate names from the
+    // desktop poe2scout cache so the very first scan can price + resolve.
+    void loadPriceSource();
 
     const offRegion = bridge.onRegionCalibrated((rect) => {
       regionRef.current = rect;
