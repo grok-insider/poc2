@@ -74,4 +74,21 @@ describe("price store", () => {
     expect(snap.names).toEqual([]);
     expect(snap.fetchedAt).toBeNull();
   });
+
+  test("poe.ninja fallback fills poe2scout gaps without overriding real prices", () => {
+    // poe2scout: Divine priced, Some Rune unpriced. Append ninja rows after,
+    // mirroring scheduler.refreshNow's [...scout, ...ninja] ordering.
+    replaceLeaguePrices("L", [
+      row({ apiId: "divine-orb", name: "Divine Orb", normalizedName: "divine orb", priceDivine: 1 }),
+      row({ apiId: "rune", name: "Some Rune", normalizedName: "some rune", priceDivine: null }),
+      // ninja fallback rows
+      row({ category: "ninja", apiId: "ninja:divine orb", name: "Divine Orb", normalizedName: "divine orb", priceDivine: 999 }),
+      row({ category: "ninja", apiId: "ninja:some rune", name: "Some Rune", normalizedName: "some rune", priceDivine: 0.25 }),
+    ]);
+    const snap = priceSnapshot("L");
+    // poe2scout's Divine wins over ninja's (first write wins).
+    expect(snap.byName["divine orb"]).toEqual({ perUnit: 1, unit: "div" });
+    // ninja fills the rune poe2scout left null.
+    expect(snap.byName["some rune"]).toEqual({ perUnit: 0.25, unit: "div" });
+  });
 });

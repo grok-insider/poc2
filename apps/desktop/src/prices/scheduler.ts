@@ -3,6 +3,7 @@
 
 import { openPriceStore, priceBackend, replaceLeaguePrices, priceSnapshot, priceCount } from "./store";
 import { fetchAllPrices, resolveLeague } from "./poe2scout";
+import { fetchNinjaFallback } from "./poeninja";
 import type { PriceSnapshot, PriceStatus } from "./types";
 
 const REFRESH_MS = 60 * 60 * 1000; // 1 hour
@@ -43,7 +44,16 @@ export async function refreshNow(): Promise<boolean> {
     currentLeague = resolved.Value;
     const rows = await fetchAllPrices(resolved);
     if (rows.length > 0) {
-      replaceLeaguePrices(resolved.Value, rows);
+      // Best-effort poe.ninja fallback for names poe2scout didn't price.
+      // Appended AFTER poe2scout rows so "first write wins" keeps poe2scout
+      // authoritative; ninja only fills blanks. Soft-fails to [] on any error.
+      let ninja: typeof rows = [];
+      try {
+        ninja = await fetchNinjaFallback(resolved.Value, resolved.ChaosDivinePrice);
+      } catch {
+        ninja = [];
+      }
+      replaceLeaguePrices(resolved.Value, [...rows, ...ninja]);
       fetchedAt = new Date().toISOString();
     }
     return rows.length > 0;
