@@ -213,7 +213,14 @@ export const useCraft = create<CraftState>((set, get) => ({
   },
   setSection: (section) => set({ section }),
   setNotes: (notes) => set({ notes }),
-  setLeague: (league) => set({ league }),
+  setLeague: (league) => {
+    set({ league });
+    // Point the desktop price cache (overlay's price source) at the new league.
+    // No-op in a plain browser; fire-and-forget so the UI never blocks on it.
+    void import("./desktop")
+      .then(({ getDesktopBridge }) => getDesktopBridge()?.pricesSetLeague(league))
+      .catch(() => {});
+  },
   setEngineLeague: async (engineLeague) => {
     set({ engineLeague });
     try {

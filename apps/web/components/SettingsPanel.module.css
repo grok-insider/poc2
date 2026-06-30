@@ -39,6 +39,17 @@
   margin: 0;
 }
 
+/* Desktop-only poe2scout cache status (the OCR overlay's price source). */
+.cacheBox {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--line);
+}
+
 .spin {
   animation: settings-spin 0.9s linear infinite;
 }

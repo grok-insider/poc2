@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, RotateCcw, Trash2, Database, Cpu } from "lucide-react";
 import { useCraft } from "@/lib/store";
-import { getDesktopBridge } from "@/lib/desktop";
+import { getDesktopBridge, type PriceStatus as CacheStatus } from "@/lib/desktop";
 import { engine } from "@/lib/engine/client";
 import type { PoeScoutCurrencyEntry, PoeScoutSnapshot } from "@/lib/types";
 import styles from "./SettingsPanel.module.css";
@@ -89,6 +89,50 @@ export function SettingsPanel() {
 
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceStatus, setPriceStatus] = useState<PriceStatus>(null);
+
+  // Desktop poe2scout price cache (sqlite, the OCR overlay's price source).
+  // Only present in the Electron shell; a plain browser leaves this null.
+  const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
+
+  const loadCacheStatus = useCallback(async () => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.pricesStatus) return;
+    try {
+      setCacheStatus(await bridge.pricesStatus());
+    } catch {
+      /* leave previous status */
+    }
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const bridge = getDesktopBridge();
+    if (!bridge?.pricesStatus) return;
+    bridge
+      .pricesStatus()
+      .then((s) => {
+        if (alive) setCacheStatus(s);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [league]);
+
+  async function refreshCache() {
+    const bridge = getDesktopBridge();
+    if (!bridge?.pricesRefresh) return;
+    setCacheBusy(true);
+    try {
+      await bridge.pricesRefresh();
+    } catch {
+      /* status reload surfaces lastError */
+    } finally {
+      await loadCacheStatus();
+      setCacheBusy(false);
+    }
+  }
 
   async function refreshPrices() {
     setPriceLoading(true);
@@ -178,6 +222,48 @@ export function SettingsPanel() {
               <p className={`${styles.note} faint`}>
                 Live prices are informational only — planning never depends on them.
               </p>
+            )}
+
+            {cacheStatus && (
+              <div className={styles.cacheBox}>
+                <div className={styles.sectionHead}>
+                  <span className="eyebrow">Overlay price cache</span>
+                  <button
+                    className="btn"
+                    onClick={() => void refreshCache()}
+                    disabled={cacheBusy || cacheStatus.refreshing}
+                    title="Force a poe2scout refresh of the OCR overlay's price cache"
+                  >
+                    <RefreshCw
+                      size={13}
+                      className={cacheBusy || cacheStatus.refreshing ? styles.spin : undefined}
+                    />
+                    {cacheBusy || cacheStatus.refreshing ? "Refreshing…" : "Refresh cache"}
+                  </button>
+                </div>
+                <div className={styles.dataGrid}>
+                  <span className="faint">League</span>
+                  <span className="num">{cacheStatus.league || "—"}</span>
+                  <span className="faint">Priced items</span>
+                  <span className="num">{cacheStatus.count.toLocaleString()}</span>
+                  <span className="faint">Updated</span>
+                  <span className="num">
+                    {cacheStatus.fetchedAt
+                      ? new Date(cacheStatus.fetchedAt).toLocaleTimeString()
+                      : "—"}
+                  </span>
+                  <span className="faint">Backend</span>
+                  <span className="num">{cacheStatus.backend}</span>
+                </div>
+                {cacheStatus.lastError && (
+                  <p className={`${styles.note} danger`}>{cacheStatus.lastError}</p>
+                )}
+                <p className={`${styles.note} faint`}>
+                  The screenshot-OCR overlay (<span className="num">CTRL+SHIFT+S</span>) prices
+                  currency, runes, idols and omens from this cache. It refreshes hourly and
+                  follows the league above.
+                </p>
+              </div>
             )}
           </section>
 
