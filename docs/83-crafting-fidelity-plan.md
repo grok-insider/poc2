@@ -1,6 +1,9 @@
 # Crafting-Mechanics Fidelity (0.3 / 0.4 / 0.5) — Detailed Implementation Plan (v4)
 
-**Status:** In progress.
+**Status:** Shipped — P0–P6 (incl. P5's 0.5 systems) landed and verified;
+see the Progress log (§5a). P7's docs sync completed with the 2026-07
+documentation refresh. Remaining fidelity items live in
+`docs/70-roadmap.md` (Current / Next).
 **Author:** OpenCode session, drafted as a handoff document so a different
 AI agent (or developer) can resume without context loss.
 **Scope:** Engine crafting-mechanics fidelity across patches 0.3, 0.4, and

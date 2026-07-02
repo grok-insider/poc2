@@ -203,11 +203,10 @@ export interface StreamingProgressEvent {
 /// Topic the streaming planner emits to.
 export const ADVISOR_PROGRESS_EVENT = 'advisor://progress';
 
-/// M16.4 — trained-model cache status surfaced via the
-/// `trained_model_status` Tauri command. The desktop UI reads this on
-/// startup (and after `reload_bundle`) to render a topbar badge that
-/// tells the user whether the planner is consulting trained Q-tables
-/// or running pure heuristic ranking.
+/// M16.4 — trained-model cache status (historical: was surfaced by the
+/// retired Tauri `trained_model_status` command; kept for the roadmap
+/// item that loads trained Q-tables into the WASM engine and renders a
+/// topbar badge when the trained policy drives the pick).
 export interface TrainedModelStatus {
   /** Number of `(goal × class)` models loaded into the planner cache. */
   models_loaded: number;
@@ -510,7 +509,7 @@ export interface PersistedState {
   notes?: string | null;
 }
 
-/// Returned by the `list_leagues` Tauri command (Phase B.3).
+/// poe2scout league metadata (Phase B.3; fetched directly in Settings now).
 export interface LeagueInfo {
   value: string;
   divine_price_in_exalts: number;
@@ -627,7 +626,7 @@ export interface RecordOutcomeResponse {
 }
 
 /** Phase D.6 — backs the Divine Orb outcome dialog. Returned by the
- *  `rerollable_mods` Tauri command. One entry per slot eligible for
+ *  engine's `rerollableMods` method. One entry per slot eligible for
  *  Divine reroll on the current item, with the `[min, max]` bounds the
  *  player can record per stat. Sanctification widens the bounds; Omen
  *  of the Blessed restricts the result to implicits only. */

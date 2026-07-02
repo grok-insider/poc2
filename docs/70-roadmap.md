@@ -1,175 +1,146 @@
 # Roadmap
 
-> Phased build plan. M1-M8 = v1.0. M9+ = post-v1.
+> Shipped milestones + current/next work. M1–M8 = v1.0 (patch 0.4,
+> Tauri-era — historical). Post-v1 passes: v2 (`docs/80`), v3 (`docs/81`),
+> crafting fidelity + 0.5 (`docs/83`), desktop shell (ADR-0010), OCR price
+> overlay (ADR-0013). **The "Current / Next" section at the bottom is the
+> source of truth for unfinished work.**
 
-## M1 — Foundation ✅
+## Shipped
 
-- ✅ Nix flake with Rust + Node + Wayland deps
-- ✅ Cargo workspace with 8 crates + pipeline
-- ✅ Tauri 2 + Svelte 5 desktop app skeleton
-- ✅ GitHub Actions CI (rust + flake + frontend)
-- ✅ All 9 reference repos cloned to `example-repos/`
-- ✅ Foundation docs (overview, architecture, ADRs 0001-0008)
+### v1.0 — M1–M8 + Phases A–G (patch 0.4, 2026-04) ✅ historical
 
-## M2 — Engine core + data pipeline ✅
+The full v1 build: Nix flake + Cargo workspace + CI (M1); engine core +
+data pipeline (M2 — domain types, patch versioning, all basic currencies,
+essences, omens, Fracturing/Hinekora's/bones/catalysts/recombinator,
+sub-µs `apply()`); strategy + rule DSLs (M3); beam-search advisor with the
+canonical "Triple T1 ES" rediscovery test (M4); Monte Carlo + market
+valuator + poe2scout poller (M5); UI v1 (M6); clipboard import (M7);
+polish + `v1.0.0` tag (M8). Phases A–G filled in full strategy/rule
+coverage, target/recovery/settings/recipe panels, MC + simulation runner,
+poe.ninja meta, the Wasm plugin SDK, and the perf pass.
 
-### Pipeline
-- ✅ Bundle schema design → `crates/data/src/bundle.rs`
-- ✅ RePoE-fork JSON pull (mods, base_items, mods_by_base, tags)
-- ✅ Craft of Exile `poec_data.json` pull (essences, catalysts, weights)
-- ✅ poe2db.tw scrape (44 omens; 10 bones from engine matrix)
-- ✅ Normalizer with cross-validation + concept classification
-- ✅ Pipeline CLI: `cargo run -p poc2-pipeline -- build [--skip-coe] [--skip-poe2db]`
-- ✅ End-to-end bundle for 0.4: 2740 bases, 2123 mods, 81 essences,
-  44 omens, 12 catalysts, 10 bones, 2951 weights, 211KB gz
-- ✅ Optional sources fail soft (network errors don't abort the build)
-- [ ] GGG `/trade/data/stats` cached pull (post-OAuth approval)
-- [ ] Bundle hot-swap mechanism in app
-- [ ] Refine CoE→engine mod-id join (45% match rate currently;
-  add explicit name aliases or use stat_id when available)
+Superseded/dropped v1 items (do not resurrect without an ADR):
 
-### Engine
-- ✅ Domain types (`Item`, `ModRoll`, `ModDefinition`, `BaseType`)
-- ✅ Patch versioning applied to every entity
-- ✅ Mod analyzer (concept-based hybrid classification)
-- ✅ Basic currencies (Transmute → Vaal + Greater/Perfect variants)
-- ✅ Essences (Lesser/Normal/Greater/Perfect/Corrupted, prefix/suffix forced-removal via Crystallisation)
-- ✅ Omens (22 omen presets + `OmenSet::consume` patch-range honoring)
-- ✅ Fracturing Orb (4-mod requirement, hidden-desecrated awareness)
-- ✅ Hinekora's Lock (preview/commit byte-equality under same seed)
-- ✅ Bones + Well of Souls reveal
-- ✅ Catalysts (tagged-quality jewelry/jewel currency)
-- ✅ Recombinator (two-input combine with mod-group exclusivity + fracture preservation)
-- ✅ Currency resolver (`DefaultCurrencyResolver`)
-- ✅ Performance pass — sub-microsecond `apply()` (244-563 ns per op)
-- ✅ Unit tests for hybrid handling, fracture eligibility, mod-group exclusivity (118 tests)
-- ✅ Author `docs/11-game-mechanics.md`, `docs/30-domain-model.md`, `docs/31-engine-algorithms.md`
-- [ ] Synergy graph — **skipped** (synergy is implicit via currency apply paths)
+- The **Tauri 2 + Svelte 5 desktop app** — replaced by the web/WASM app;
+  native features returned via the Electron shell (ADR-0010).
+- The **Client.txt watcher** — no browser equivalent; capture replaced it.
+- The **Wayland layer-shell overlay** — deferred by ADR-0009 (still
+  standing); Hyprland `windowrulev2` recipes + the ADR-0013 plain-window
+  overlay are the shipped alternatives.
+- GGG `/trade2` OAuth — public trade2 endpoints need no session.
 
-## M3 — Strategy + Rule layers ✅ (seed)
+### v2 — crafter-helper pass (`docs/80`) ✅
 
-### Strategies
-- ✅ Strategy DSL design (TOML schema)
-- ✅ Strategy loader + registry + executor + predicate evaluator
-- ✅ 8 seed strategies (3xT1 ES, Apprentice Blueprint, Whittling Cleanup,
-  Fracture-then-Chaos-Spam, Annul-Augment Spam, Greater Essence
-  Regal Lock-In, Sinistral Erasure, Catalysing Exaltation)
-- [ ] Encode the remaining ~15 strategies from `docs/33-strategy-library.md` as TOML
-- [ ] Author `docs/37-recovery-flows.md` (3-deep recovery encoding)
+Advisor candidate legality (no illegal recommendations), full mod-pool
+outcome dialog, concept-occupancy heuristics, tier-fix candidates,
+omen-aware bone reveals, `LoopEstimate` recurring-step compression,
+risk-slider variance weighting, per-base art plumbing.
 
-### Rules
-- ✅ Rule DSL design + forward-chain engine
-- ✅ 45 seed rules covering rarity progression, fracture timing,
-  recovery, Vaal corruption, bones+necromancy, catalysts, erasure,
-  sanctification, base selection (ilvl gating), Hinekora's Lock
-  policies, Whittle nuance, pricing exits
-- [ ] Encode the remaining ~75 rules from `docs/34-heuristics-rulebook.md` as TOML
-- [ ] Editorial pass on community-attributed rules
+### v3 — engine training + rule encoding (`docs/81`) ✅
 
-## M4 — Advisor / Planner ✅
+Numerical CoE weights consumed at runtime (`ModRegistry`), `BaseRegistry`
+class gating, `*_ONLY` flag enforcement, bundle schema v2, the offline
+training pipeline (`train-advisor`: transition-model learning + Q-value
+iteration, path-length + cost rewards), `PlanInput.trained_models`
+consumption in the planner, and the expanded strategy/rule catalogue
+(now 43 strategies, 142 rules across 16 sections).
 
-- ✅ Beam-search planner over Strategy + Rule + Heuristic candidates
-- ✅ Risk slider integration (cautious ↔ greedy)
-- ✅ Recovery branch detection (strategy-step-attached hints)
-- ✅ Explanation: every recommendation cites firing rule/strategy + EV math
-- ✅ **Critical test**: canonical "Triple T1 ES" rediscovery test —
-  advisor's top recommendation for the user's worked-example state is
-  Perfect Transmute, traceable to either rule R001 or strategy S2
-- ✅ Performance: depth-3 plan in 3.08 µs (5 orders of magnitude under
-  ADR-0007's 2s budget)
-- [ ] Monte Carlo evaluator over the candidate set (M5+ refinement)
-- [ ] Streaming results to UI via Tokio channels (M6+ polish)
-- [ ] Author `docs/35-advisor-architecture.md`, `docs/36-decision-engine.md`
+### Crafting-mechanics fidelity + 0.5 content (`docs/83`) ✅
 
-## M5 — Probability + Market ✅
+- P1–P4: ilvl-dependent pools, inclusive higher-tier weighting,
+  keep-≥1-tier Min-Mod-Level exception, patch-versioned floors
+  (`MinModLevelVariant`), explicit tier ordinals, tag-intersection
+  weighting, bone-size/lord-omen fidelity, `League` on `ApplyContext` +
+  `PlanInput.league`, cross-version gating (Recombinator, Corruption
+  omen Standard-only).
+- P5/P6: bundle **schema v3**; `ModKind::Crafted` + 0.5 mod caps;
+  **Verisium Alloys** end-to-end (13 alloys × 132 class-targets, advisor
+  candidates); **Distilled Emotions** (26 emotions × 96 jewel-base
+  targets, engine apply); jewel mod pool; **Genesis Tree panel** (real
+  tree data + curated presets; UI-only); patch-gated Vaal/Sanctification
+  multiply semantics.
+- Post-P6 audits: the 31-class audit-matrix sweep + poe2db
+  cross-validation pass (real desecrated pools, real Vaal implicit pools,
+  catalyst 0.5 model, essence class-targeting, alloy affix fixups).
 
-- ✅ Monte Carlo lib (`run_n_trials`, `run_until_success`)
-- ✅ Geometric distribution cost calculator
-- ✅ Currency valuator (`DivEquiv(min, expected, max)` triples)
-- ✅ Conservative default prices (1div=50-180ex, 1div=3-30chaos, 1mirror=1500-6000div)
-- ✅ poe2scout poller (`poc2_market::prices`) — fetches the live
-  `Currencies/ByCategory` snapshot for the active league, converts
-  exalt-denominated CurrentPrice to DivEquiv triples via the
-  league's DivinePrice ratio, applies ±30%/±50% volatility margins
-- ✅ Live price refresh exposed via Tauri `refresh_prices` command
-  + frontend "Refresh prices" button
-- [ ] Meta-build aggregator (poe.ninja PoE2 builds) (M5.4)
-- [ ] Off-meta niche finder
-- [ ] Author `docs/32-probability-math.md`, `docs/51-market-meta.md`
+### M10 — Desktop shell + capture + price checking (ADR-0010) ✅
 
-## M6 — UI v1 ✅ (skeleton)
+- `apps/desktop` Electron shell (`app://` scheme over the static export,
+  preload bridge `window.poc2Desktop`, single-instance flag forwarding).
+- Item capture: hotkey → game Ctrl+C → clipboard → import (Windows
+  `uiohook-napi`; Linux `hyprctl sendshortcut` → `ydotool` → `wtype`;
+  APT semantics). Plus the standalone Hyprland capture daemon
+  (`crates/capture`, ADR-0011).
+- Price checking: pipeline `fetch-trade-stats` table (1,932 entries) →
+  trade2 search/fetch proxied in main (header-driven rate limiting) →
+  Price Check panel; browser fallback deep links.
+- Live price snapshots → WASM `applyPrices` / `applyNinjaPrices` →
+  planner valuator.
+- CI: windows-latest lane (rustup + Bun, no Nix) + electron-builder
+  artifacts (AppImage/deb, NSIS); release-plz release flow.
 
-- ✅ Tauri IPC: `recommend(args)` returns Vec<Recommendation>
-- ✅ Bundle loading on startup ($POC2_BUNDLE / $XDG_CONFIG_HOME / $XDG_DATA_HOME)
-- ✅ User-strategy loading from $XDG_CONFIG_HOME/poc2/strategies/
-- ✅ Item builder (rarity, ilvl, base, slot summary, flags)
-- ✅ Advisor panel (top-N + risk slider + depth slider + live re-plan)
-- ✅ Clipboard import button + manual paste textarea
-- ✅ Pings + meta strip (patch / rule_count / strategy_count / mod_count)
-- [ ] Target panel (mod-concept selector with weights) — UI design pending
-- [ ] Recovery panel (visible only when last action failed)
-- [ ] Simulation runner (run-N-trials chart)
-- [ ] Recipe library (save/load/share)
-- [ ] Settings (data-bundle update, price source, risk slider persistence)
-- [ ] Author `docs/41-ui-flows.md`
+### OCR price overlay + price cache (ADR-0013) ✅
 
-## M7 — Live integration ✅ (clipboard)
+Capability-gated screen-region capture (silent on win32/X11, portal on
+Wayland), `/calibrate` drag-select flow, `/overlay` click-through price
+plates (full mode) or in-app panel (degraded mode on Hyprland/wlroots),
+renderer-side Tesseract OCR with row-locking, and the desktop poe2scout
+price cache (hourly, node:sqlite, poe.ninja fallback) that prices the
+overlay and is surfaced in Settings.
 
-- ✅ Clipboard parser (PoE2 in-game text → ParsedItem → engine::Item)
-- ✅ Tauri `read_clipboard_item` + `parse_item_text` commands
-- [ ] `Client.txt` watcher (`inotify` on Wine prefix path)
-- [ ] Wayland layer-shell overlay (gtk4-layer-shell or smithay-client-toolkit)
-- [ ] Hyprland window rules + always-on-top behavior
-- [ ] GGG `/trade2` OAuth integration (register early)
-- [ ] Trade-search-by-current-item flow
-- [ ] Author `docs/50-trade-integration.md`
+### Automated data refresh (ADR-0012) ✅
 
-## M8 — Polish + release ✅
+`poc2-pipeline watch` (patch pointer + RePoE hash detection),
+`diff-bundle` markdown changelogs, `audit-matrix` legality sweeps, and
+the `data-watch.yml` cron workflow that opens draft PRs against `dev`.
 
-- ✅ Performance pass (current bench: 139µs at depth-3+50MC vs 5ms budget; 35× margin)
-- ✅ Public README with `nix run github:anomalyco/poc2` instructions
-- ✅ CHANGELOG.md
-- ✅ v1.0 release tag (Phase G.2)
-- [ ] Auto-update with signature verification (deferred — flake-only release per plan)
-- [ ] Cachix binary cache (post-v1.0; needs CI tier upgrade)
+## Current / Next
 
-## v1.0 Phase A-G (Phases of the v1 execution plan)
+Ordered by expected value; none are started unless noted.
 
-| Phase | Theme | Status |
-|---|---|---|
-| A.1 | PredicateContext threaded through advisor + rules | ✅ |
-| A.2 | DSL action extensions (ActivateOmen, Recombine, Reveal floors) | ✅ |
-| A.3 | CoE→engine mod-id join refinement | ✅ |
-| A.4 | 23 strategies encoded (full /docs/33 coverage) | ✅ |
-| A.5 | 113 rules across 14 section TOMLs (full /docs/34 coverage) | ✅ |
-| A.6 | Bundle hot-swap via reload_bundle | ✅ |
-| A.7 | docs/32, 36, 37, 51 authored | ✅ |
-| B.1-B.4 | Target / Recovery / Settings / Recipe panels | ✅ |
-| C.1-C.3 | Monte Carlo + streaming + simulation runner | ✅ |
-| D.1-D.3 | Client.txt watcher + Hyprland + trade URL | ✅ |
-| E.1-E.2 | poe.ninja meta + off-meta finder | ✅ |
-| F.1-F.8 | Wasm Plugin SDK | ✅ |
-| G.1-G.2 | Perf pass + release | ✅ |
+- [ ] **Wire trained models into the WASM engine.** The planner consumes
+  `PlanInput.trained_models` and `train-advisor` produces artefacts, but
+  the web engine passes `None`. Needs: artefact loading over the worker
+  boundary (fetch a `trained-models.json` static asset), cache lookup by
+  `(goal_hash, item_class)`, and a UI badge when the Q-policy drove the
+  pick. Then run the **production retrain** (`--samples 100000`) on the
+  0.5 bundle.
+- [ ] **Advisor candidates for Distilled Emotions.** Engine apply works;
+  candidate generation needs base-level item fidelity (real jewel base
+  names on the item). 5 Ancient-emotion targets stay display-only until
+  RePoE exports their mods.
+- [ ] **Re-wire the plugin host.** SDK + wasmtime host are built and
+  tested but the app plans with `plugin_dispatch: None`. Decide the
+  shape: native-only (desktop main process) vs. wasm-in-wasm is a real
+  design question — needs a small ADR before code.
+- [ ] **Price-id mappings for 0.5 currencies.** `default_id_mapping`
+  (Rust) lacks alloys/emotions/bones-by-slug for poe2scout; the desktop
+  cache already prices them by name. Extend the map + tests.
+- [ ] **Remaining data gaps** (tracked since the poe2db pass): mod pools
+  for Waystones (109), Precursor Tablets (83), Relics (139), Life/Mana
+  Flasks (57), Charms (51), Inscribed Ultimatum (31), Expedition
+  Logbooks (21); "Thrud's Might" weapon mechanic; Preserved Vertebrae
+  (waystone desecration); Breach Ring quality caps (40/45); Essence of
+  the Abyss granting only one of its two Mark mods per class; Vaal
+  Catalysing Infuser; the 5 Expedition Saga omens.
+- [ ] **Overlay polish:** persisted-region hydration on the overlay
+  route's first load (today the first scan can race the calibration
+  push); portal restore-token reuse on Wayland (`windowState.portalToken`
+  is persisted but not passed to the portal yet).
+- [ ] **Unify the two OCR paths** — the item-screenshot OCR
+  (`lib/ocr.ts`) should use the same vendored origin-relative `/ocr/`
+  runtime as the overlay (`lib/ocr/tesseract.ts`).
+- [ ] **Repo metadata alignment:** decide the canonical GitHub org
+  (Cargo metadata says `anomalyco`, release workflow gates on
+  `grok-insider`), and sync `apps/desktop/package.json` versioning with
+  release-plz (document or automate).
 
-## M9+ Post-v1 (v1.x and beyond)
+## Deferred / out of scope (unchanged decisions)
 
-- [ ] Cachix binary cache for fast Nix installs
-- [ ] Hardcore + SSF support
-- [~] Cross-platform — **reopened by ADR-0010** (2026-06): Windows 11 + Linux/NixOS in progress under M10; macOS stays out of scope
-- [ ] Self-hosting pipeline (no external data sources)
-- [ ] Empirical weight derivation from trade samples
-- [ ] MCTS upgrade for the advisor
-- [ ] Real Wayland layer-shell overlay (per ADR-0009 deferred from v1)
-- [ ] GGG `/trade2` OAuth integration (currently URL-only per Phase D.3)
-- [ ] Plugin component-model migration (currently raw Wasm per ADR-0008 v2)
-- [ ] tauri-plugin-shell::open → tauri-plugin-opener migration
-- [ ] Beam-search memoization once real plugin workloads push past budget
-
-## M10 Desktop shell + capture + price checking (ADR-0010, 2026-06)
-
-- [ ] `apps/desktop` Electron shell (app:// scheme over the static export, preload bridge `window.poc2Desktop`)
-- [ ] Item capture: hotkey → game Ctrl+C → clipboard → import (per-platform backends; APT semantics)
-- [ ] Price checking: pipeline trade-stat-id table → trade2 search/fetch proxied in main → price panel; browser fallback deep links
-- [ ] Live price snapshot → WASM `applyPrices` → planner valuator
-- [ ] CI: windows-latest lane (rustup + Bun, no Nix) + electron-builder artifacts (AppImage/deb, NSIS)
-
+- Cachix binary cache; Hardcore/SSF support; macOS support; self-hosted
+  data pipeline; empirical weight derivation from trade samples; MCTS
+  advisor upgrade; real Wayland layer-shell overlay (ADR-0009); GGG
+  `/trade2` OAuth; plugin component-model migration + marketplace
+  (ADR-0008 future work); beam-search memoization (bench margins are
+  huge); Genesis birth simulation (explicit scope decision).

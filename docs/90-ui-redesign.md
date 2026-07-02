@@ -1,5 +1,12 @@
 # Path of Crafting 2 — UI/UX Redesign ("Forge" console)
 
+> **HISTORICAL — design seed.** This document drove the original "Forge"
+> console concept (its Tauri 2 + Svelte 5 target is retired; the layout
+> shipped in the Next.js/React web app). The **current UI source of
+> truth is [`apps/web/DESIGN.md`](../apps/web/DESIGN.md)** — the PoE2
+> in-game design system (Fontin, black/bronze/gold) that superseded the
+> violet "Modern Dark" tokens below. Do not implement from this file.
+
 > A fresh, premium, game-aesthetic redesign of the desktop advisor. Grounded in
 > the `ui-ux-pro-max` design intelligence:
 > **Style** = *Modern Dark (Cinema)* (built for "high-end gaming companion apps,

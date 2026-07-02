@@ -4,10 +4,19 @@
   original "deferred to v1.1" decision.
 - Original date: 2026-04-26
 - Revision date: 2026-04 (Phase F implementation)
+- **Current wiring note (2026-07):** the SDK (`crates/plugin-sdk`) and
+  wasmtime host (`crates/plugin-host`) shipped and are tested, using a
+  **raw-Wasm `(ptr, len)` ABI** (the Component Model remains future
+  work, despite the v1 title below). However, the current browser/WASM
+  app plans with `plugin_dispatch: None` — the in-process host was tied
+  to the retired Tauri shell and has not been re-wired into the
+  web/Electron architecture. Re-integration is roadmap work
+  (`docs/70-roadmap.md`) and needs its own design note (native-only in
+  the Electron main process vs. wasm-in-wasm).
 
 ## Decision
 
-Ship a **Wasm Component Model plugin SDK** in v1.0 covering:
+Ship a **Wasm plugin SDK** in v1.0 covering:
 
 1. **Custom predicates** — plugins extend `ItemPredicate` with the
    new `Custom { plugin_id, name, args }` variant. Strategies + rules

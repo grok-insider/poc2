@@ -1,6 +1,11 @@
 # Crafter Helper v2 — Detailed Implementation Plan
 
-**Status:** Plan locked, ready to build.
+> **HISTORICAL — shipped.** The v2 pass completed; Tauri-era paths
+> referenced below (`apps/desktop/src/lib/tauri.ts`, Svelte components,
+> mock IPC) belong to the retired frontend. Kept as implementation
+> history — see `docs/70-roadmap.md` for current status.
+
+**Status:** Shipped (was: plan locked, ready to build).
 **Author:** OpenCode session, drafted on user instruction so a different AI
 agent can continue work without context loss.
 **Scope:** Phase A through Phase G. Implementation order is A → E → F → B → C → D → G,

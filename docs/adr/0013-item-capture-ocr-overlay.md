@@ -93,6 +93,12 @@ overlay is **capability-gated** per session.
   click-through window — consistent with ADR-0009.
 - The plain browser app is unaffected: it has no bridge, so the overlay/scan
   features simply don't appear (graceful degradation, per ADR-0010).
-- OCR rendering itself is **out of scope here** — a separate downstream worker
-  consumes the raw frames this ADR's capture path produces; the `/overlay` and
-  `/calibrate` routes ship as minimal, export-safe placeholders.
+- OCR rendering shipped as a follow-up on this capture path: the `/overlay`
+  route runs renderer-side tesseract.js (vendored origin-relative `/ocr/`
+  assets) with row-locking de-flicker, resolves names via the engine's fuzzy
+  `resolveName`, and prices rows from the desktop poe2scout price cache
+  (hourly, node:sqlite, poe.ninja fallback). `/calibrate` is the real
+  drag-select calibrator. Known gaps (roadmap): the overlay does not yet
+  hydrate the persisted region on first load (a first scan can race the
+  calibration push), and the persisted portal restore token is not yet
+  passed back to the Wayland portal.

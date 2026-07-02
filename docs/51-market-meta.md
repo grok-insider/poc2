@@ -1,8 +1,19 @@
-# Market Meta Aggregator (M5+ / Phase E)
+# Market & Meta Integrations
 
-> Companion to [`poc2-market`](../crates/market) and the upcoming
-> Phase E work. Designs the poe.ninja PoE2 builds aggregator and the
-> off-meta-finder that consume it.
+> Companion to [`poc2-market`](../crates/market) and
+> [`apps/desktop/src/prices/`](../apps/desktop/src/prices/).
+>
+> **Implementation status:**
+> - ✅ **poe2scout currency prices** — native poller (`net` feature),
+>   browser fetch (Settings "Refresh prices" → WASM `applyPrices`), and
+>   the **desktop price cache** (hourly, node:sqlite, poe.ninja fallback
+>   rows) that also prices the ADR-0013 OCR overlay.
+> - ✅ **poe.ninja exchange source** — parallel price feed resolved via
+>   the fuzzy name matcher (`applyNinjaPrices`).
+> - 📐 **poe.ninja builds aggregator + off-meta finder** — the design in
+>   the second half of this doc; `crates/market/src/meta.rs` carries the
+>   types, but no live builds endpoint is consumed and no UI surfaces
+>   niches yet. Treat those sections as design, not description.
 
 ## Goals
 

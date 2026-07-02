@@ -1,5 +1,13 @@
 # Implementation Plan & Handoff — Crafting-Mechanics Fidelity + PoE2 0.5
 
+> **HISTORICAL — superseded handoff.** This snapshot predates the
+> web/WASM migration and the Electron shell: the Tauri 2 + Svelte stack,
+> `apps/desktop/src-tauri`, NixOS-only scope, and `main`-branch flow it
+> describes are gone. For current context read `README.md`, `AGENTS.md`,
+> `CHANGELOG.md`, `docs/70-roadmap.md`, `docs/83-crafting-fidelity-plan.md`,
+> and ADR-0010/0013. The "do not commit" rule below applied to that
+> session only.
+>
 > **Audience:** an AI agent or developer picking this up with **zero prior
 > context**. Read this top-to-bottom before touching code. It records what
 > the project is, what has been done in the current effort, exactly how it

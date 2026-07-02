@@ -58,8 +58,10 @@ kind = "guidance"
 4. `cargo build --release --target wasm32-unknown-unknown`.
 5. Drop the resulting `.wasm` + `poc2-plugin.toml` in
    `~/.config/poc2/plugins/<your-plugin-id>/`.
-6. Restart the desktop app (or call the `reload_bundle` Tauri
-   command — the host walks the plugins dir on every reload).
+6. The host (`PluginHost::discover_plugins`) walks the plugins dir on
+   load. **Note:** the current browser/Electron app does not load
+   plugins (`plugin_dispatch: None` — see ADR-0008's wiring note);
+   today the host runs in native tests/tools only.
 
 ## Capabilities cheat sheet
 
@@ -74,5 +76,6 @@ kind = "guidance"
 | `emit_recommendations` | Export `emit_recommendations(state)` |
 
 The host refuses to load plugins declaring capabilities the user
-hasn't approved; manage approvals in the Settings → Plugins UI
-(Phase F.6 ships in v1).
+hasn't approved. (The Settings → Plugins approval UI belonged to the
+retired Tauri app; a replacement ships with the plugin re-wiring —
+see `docs/70-roadmap.md`.)

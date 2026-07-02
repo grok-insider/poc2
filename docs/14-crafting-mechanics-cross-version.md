@@ -30,7 +30,10 @@ league**. The default is the current challenge league (Runes of Aldur for
 |---|---|
 | `Standard` | Permanent league; legacy items still function. |
 | `Challenge` | Current temporary league (Runes of Aldur in 0.5). Trade-relevant. |
-| `HardcoreStandard` / `HardcoreChallenge` | HC variants; same crafting rules. |
+
+Hardcore variants share crafting rules with their softcore parents, so
+the engine's `League` enum only distinguishes `Standard` vs `Challenge`
+(see `crates/engine/src/patch.rs`).
 
 ## What changed in 0.3 "The Third Edict"
 

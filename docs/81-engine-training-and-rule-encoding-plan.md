@@ -1,6 +1,13 @@
 # Engine Training and Rule Encoding — Detailed Implementation Plan (v3)
 
-**Status:** Plan locked, ready to build.
+> **HISTORICAL — shipped.** The v3 pass completed (weights wired in,
+> `BaseRegistry`, `*_ONLY` enforcement, schema v2 → since superseded by
+> v3, the `train-advisor` pipeline, trained-policy consumption in the
+> planner). Tauri-era references below belong to the retired frontend.
+> Note: the **WASM/web engine does not yet load trained models**
+> (`trained_models: None`) — wiring it is current roadmap work.
+
+**Status:** Shipped (was: plan locked, ready to build).
 **Author:** OpenCode session, drafted as a handoff document so a different AI agent (or a different developer) can resume work without losing context.
 **Scope:** Layers 1–3 (Data substrate, Rule encoding, Engine training) shipped together as v3. Not split.
 **Reference back:** `docs/72-v1-execution-plan.md` (v1 baseline), `docs/80-crafter-helper-v2-plan.md` (v2 plan, completed). This v3 plan continues from where v2 left off.
