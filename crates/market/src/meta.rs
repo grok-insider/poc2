@@ -26,7 +26,7 @@ use crate::prices::PoeScoutSnapshot;
 pub const POE_NINJA_BUILDS_BASE_URL: &str = "https://poe.ninja/api/data/poe2";
 
 /// Default league for the v1 baseline.
-pub const POE_NINJA_DEFAULT_LEAGUE: &str = "Fate of the Vaal";
+pub const POE_NINJA_DEFAULT_LEAGUE: &str = "Runes of Aldur";
 
 /// Errors a meta fetch can raise.
 #[derive(Debug, thiserror::Error)]

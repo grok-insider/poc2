@@ -35,7 +35,7 @@ enum Command {
         #[arg(short, long, default_value = "poc2.bundle.json.gz")]
         out: PathBuf,
         /// Game patch the bundle is built against.
-        #[arg(long, default_value = "0.4.0")]
+        #[arg(long, default_value = "0.5.0")]
         patch: String,
         /// Pretty-print JSON (ignored for `.gz`).
         #[arg(long)]

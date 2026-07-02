@@ -237,6 +237,7 @@ export const useCraft = create<CraftState>((set, get) => ({
   loadFixture: () => {
     set({ item: { ...FRESH_BODY_ARMOUR }, goal: WORKED_EXAMPLE_GOAL, history: [] });
     void get().replan();
+    void get().refreshEligible();
   },
 
   importText: async (text) => {
@@ -358,6 +359,14 @@ export const useCraft = create<CraftState>((set, get) => ({
         });
       }
       set({ hydrated: true });
+
+      // Point the desktop price cache at the persisted league (fire-and-
+      // forget; no-op in a plain browser). Boot hydrates `league` directly
+      // without going through `setLeague`, so the cache would otherwise
+      // stay on poe2scout's auto-detected league until the user changes it.
+      void import("./desktop")
+        .then(({ getDesktopBridge }) => getDesktopBridge()?.pricesSetLeague(get().league))
+        .catch(() => {});
 
       // Load the base-icon manifest (best-effort; absent → letter fallbacks).
       void loadBaseIconManifest().then((m) => m && set({ iconManifest: m }));

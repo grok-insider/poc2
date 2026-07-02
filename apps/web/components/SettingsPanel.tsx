@@ -86,6 +86,7 @@ export function SettingsPanel() {
   const modCount = useCraft((s) => s.modCount);
   const loadFixture = useCraft((s) => s.loadFixture);
   const clearHistory = useCraft((s) => s.clearHistory);
+  const replan = useCraft((s) => s.replan);
 
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceStatus, setPriceStatus] = useState<PriceStatus>(null);
@@ -144,6 +145,9 @@ export function SettingsPanel() {
         kind: "ok",
         note: `applied ${view.applied} prices (${view.unmatched.length} unmatched)`,
       });
+      // Re-plan immediately so visible recommendations use the fresh
+      // valuator instead of waiting for the next state change.
+      void replan();
     } catch {
       setPriceStatus({ kind: "err" });
     } finally {

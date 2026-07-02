@@ -29,7 +29,7 @@ pub struct BuildOptions {
 impl Default for BuildOptions {
     fn default() -> Self {
         Self {
-            game_patch: PatchVersion::PATCH_0_4_0,
+            game_patch: PatchVersion::PATCH_0_5_0,
             built_by: format!("poc2-pipeline@{}", env!("CARGO_PKG_VERSION")),
             skip_validation: false,
             skip_coe: false,

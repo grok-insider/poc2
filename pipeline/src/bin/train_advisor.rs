@@ -309,6 +309,12 @@ struct EngineContext {
     registry: ModRegistry,
     base_registry: BaseRegistry,
     resolver: DefaultCurrencyResolver,
+    /// Game patch the training simulates against. Comes from the loaded
+    /// bundle's header (`--bundle`); synthetic smoke runs use the current
+    /// patch. Training against the wrong patch silently changes pool
+    /// gating (Min-Mod-Level floors, 0.5 caps), so this must follow the
+    /// data, never a hardcoded constant.
+    patch: PatchVersion,
     /// `true` when the context was built from a real bundle. Drives
     /// per-goal logging and gates the corpus audit.
     has_bundle: bool,
@@ -320,11 +326,13 @@ impl EngineContext {
             registry: ModRegistry::from_mods(vec![], vec![]),
             base_registry: BaseRegistry::default(),
             resolver: DefaultCurrencyResolver::new(),
+            patch: PatchVersion::PATCH_0_5_0,
             has_bundle: false,
         }
     }
 
     fn from_bundle(bundle: Bundle) -> Self {
+        let patch = bundle.header.game_patch;
         let essences = bundle.essence_catalogue();
         let catalysts = bundle.catalyst_catalogue();
         let mut alloys = bundle.alloy_catalogue();
@@ -339,6 +347,7 @@ impl EngineContext {
             registry,
             base_registry,
             resolver,
+            patch,
             has_bundle: true,
         }
     }
@@ -390,7 +399,7 @@ fn train_one_goal(
         registry: &ctx.registry,
         base_registry: &ctx.base_registry,
         resolver: &ctx.resolver,
-        patch: PatchVersion::PATCH_0_4_0,
+        patch: ctx.patch,
         omens: OmenSet::new(),
     };
 

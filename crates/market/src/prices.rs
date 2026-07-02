@@ -38,8 +38,8 @@ pub const POE2SCOUT_BASE_URL: &str = "https://poe2scout.com/api";
 /// Default Realm identifier — the only one we care about for v1.
 pub const POE2SCOUT_REALM: &str = "poe2";
 
-/// Default league for patch 0.4 (Fate of the Vaal).
-pub const POE2SCOUT_DEFAULT_LEAGUE: &str = "Fate of the Vaal";
+/// Default league for patch 0.5 (Runes of Aldur).
+pub const POE2SCOUT_DEFAULT_LEAGUE: &str = "Runes of Aldur";
 
 /// Categories the advisor consults at startup. We deliberately skip
 /// non-crafting categories (`fragments`, `runes`, `incursion`, etc.) so

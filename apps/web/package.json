@@ -4,7 +4,7 @@
   "private": true,
   "description": "Path of Crafting 2 — Next.js + React web UI (engine runs in WebAssembly)",
   "scripts": {
-    "wasm": "bash ../../scripts/build-wasm.sh",
+    "wasm": "bun ../../scripts/build-wasm.mjs",
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint .",
