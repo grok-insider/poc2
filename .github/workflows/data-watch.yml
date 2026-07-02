@@ -133,8 +133,22 @@ jobs:
         id: prevcache
         uses: actions/cache/restore@v4
         with:
-          path: prev-bundle.json.gz
-          key: poc2-prev-bundle
+          # Caches restore at the path they were saved under; the save step
+          # archives `new-bundle.json.gz`, which the next step renames into
+          # the `prev-bundle.json.gz` baseline slot.
+          path: new-bundle.json.gz
+          # Saves are run-scoped (`poc2-prev-bundle-<run_id>`, immutable keys
+          # can't be overwritten); the prefix restore-key picks up the most
+          # recent successful run's bundle.
+          key: poc2-prev-bundle-${{ github.run_id }}
+          restore-keys: |
+            poc2-prev-bundle-
+
+      - name: Stage previous bundle as diff baseline
+        run: |
+          if [ -f new-bundle.json.gz ]; then
+            mv new-bundle.json.gz prev-bundle.json.gz
+          fi
 
       # Re-run watch with --write so the PR carries the updated state file.
       - name: Refresh upstream state
