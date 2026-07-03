@@ -89,6 +89,21 @@ renderer-side Tesseract OCR with row-locking, and the desktop poe2scout
 price cache (hourly, node:sqlite, poe.ninja fallback) that prices the
 overlay and is surfaced in Settings.
 
+### In-game search regex generator (Regex panel) ✅
+
+Inspired by [poe2.re](https://github.com/veiset/poe2.re) (unlicensed —
+clean-room reimplementation). Pure-TS lib (`apps/web/lib/regex/`) +
+panel with three tabs: **Goal** (the craft target as a "the item is
+done" stash-search string — per-spec terms, per-mod-group tier→roll
+floors, precision-first skipping of unidentifiable mods), **Item mods**
+(free pool selection with roll floors + negated unwanted group),
+**Vendor** (class/rarity/ilvl/movement/resists/attributes/mod-family
+shopping filters). Shortest-unique fragments are computed at runtime
+against the live bundle pool (digit-free, roll-safe, `^`/`$` anchors),
+so patterns can never drift from the data; assembly enforces the game's
+250-char budget. Bun-tested (exhaustive digit-range verification +
+no-false-positive property tests).
+
 ### Automated data refresh (ADR-0012) ✅
 
 `poc2-pipeline watch` (patch pointer + RePoE hash detection),
@@ -123,7 +138,10 @@ Ordered by expected value; none are started unless noted.
   Logbooks (21); "Thrud's Might" weapon mechanic; Preserved Vertebrae
   (waystone desecration); Breach Ring quality caps (40/45); Essence of
   the Abyss granting only one of its two Mark mods per class; Vaal
-  Catalysing Infuser; the 5 Expedition Saga omens.
+  Catalysing Infuser; the 5 Expedition Saga omens. Landing the
+  Waystone/Tablet/Relic pools also unlocks **Waystone/Tablet/Relic tabs
+  in the Regex panel** (the lib is domain-agnostic — it just needs the
+  mod texts in the bundle).
 - [ ] **Overlay polish:** persisted-region hydration on the overlay
   route's first load (today the first scan can race the calibration
   push); portal restore-token reuse on Wayland (`windowState.portalToken`

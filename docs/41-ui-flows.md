@@ -34,6 +34,7 @@ Rail sections → panels (one component per workflow):
 | History | `HistoryTab` | recorded outcomes, undo, cost ledger |
 | Database | `DatabasePanel` | bases + materials browser (engine `listDatabaseEntries` / `databaseEntryDetail`) |
 | Price | `PricePanel` | trade2 stat filters from the imported item, live listings (desktop proxy) or deep link (browser) |
+| Regex | `RegexPanel` | in-game search-string generator: Goal (craft target → stash-search), Item mods (pool selection + roll floors + `!`unwanted), Vendor (shopping filters); 250-char budget meter, copy/auto-copy |
 | Genesis Tree | `GenesisPanel` | full-bleed 0.5 Breach tree with real art + curated goal presets (engine `genesisTree`) |
 | Tools | `ToolsPanel` | simulation runner (`runNTrials`) + recipe library (IndexedDB) |
 | Settings | `SettingsPanel` | market league + price refresh, engine League ruleset, desktop price-cache status, capture diagnostics, notes, data/reset |
@@ -126,6 +127,20 @@ EE2-semantics matcher in `lib/trade/statIndex.ts`), builds a trade2 query
 (`lib/trade/queryBuilder.ts`; min bound = roll × 0.9), then either runs
 it through the desktop proxy (grouped listings, cheapest/median, unknown
 bases degrade to stats-only) or opens the trade-site deep link.
+
+### Goal → stash-search regex
+
+The Regex panel's Goal tab (also reachable via the ⧉ button on the
+bench's Target card) compiles the current target into an in-game search
+string: per spec, qualifying mods' `text_template` lines are reduced to
+shortest-unique fragments against the base's full pool
+(`lib/regex/shortestUnique.ts`), tier floors become per-mod-group roll
+floors (`(8[5-9]|9\d|\d\d\d).*m life`), and the terms AND-combine under
+the game's 250-char budget (`lib/regex/searchString.ts`). Precision
+first: mods whose text can't be told apart from non-qualifying mods are
+skipped with a warning rather than emitted as false-positive patterns.
+Inspired by poe2.re (unlicensed — clean-room reimplementation; fragments
+are computed at runtime from the bundle, never vendored).
 
 ### Prices → planner
 

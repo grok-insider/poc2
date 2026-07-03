@@ -10,9 +10,10 @@
 /// structure not color alone).
 
 import { useCraft } from "@/lib/store";
+import { useRegex } from "@/lib/regex/state";
 import { humanizeId } from "@/lib/format";
 import type { TargetSpec } from "@/lib/types";
-import { Crosshair, Pencil } from "lucide-react";
+import { Crosshair, Pencil, Regex } from "lucide-react";
 import styles from "./TargetSummary.module.css";
 
 function riskWord(r: number): string {
@@ -76,14 +77,29 @@ export function TargetSummary() {
     <div className={`card ${styles.card}`}>
       <div className={styles.head}>
         <span className="poe-section">Target</span>
-        <button
-          className="btn btn-ghost"
-          onClick={() => setSection("target")}
-          title="Edit the target"
-          aria-label="Edit the target"
-        >
-          <Pencil size={13} />
-        </button>
+        <span>
+          {!empty && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                useRegex.getState().setTab("goal");
+                setSection("regex");
+              }}
+              title="Stash-search regex for this target"
+              aria-label="Stash-search regex for this target"
+            >
+              <Regex size={13} />
+            </button>
+          )}
+          <button
+            className="btn btn-ghost"
+            onClick={() => setSection("target")}
+            title="Edit the target"
+            aria-label="Edit the target"
+          >
+            <Pencil size={13} />
+          </button>
+        </span>
       </div>
 
       {empty ? (

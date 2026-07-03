@@ -9,6 +9,7 @@ import {
   History,
   Layers,
   RefreshCw,
+  Regex,
   Settings,
   Sprout,
   Undo2,
@@ -26,6 +27,7 @@ import { HistoryTab } from "@/components/HistoryTab";
 import { DatabasePanel } from "@/components/DatabasePanel";
 import { GenesisPanel } from "@/components/GenesisPanel";
 import { PricePanel } from "@/components/PricePanel";
+import { RegexPanel } from "@/components/RegexPanel";
 import { ToolsPanel } from "@/components/ToolsPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { OutcomeDialog } from "@/components/OutcomeDialog";
@@ -41,6 +43,7 @@ const RAIL: { icon: LucideIcon; label: string; section: Section }[] = [
   { icon: History, label: "History", section: "history" },
   { icon: Database, label: "Database", section: "database" },
   { icon: Coins, label: "Price", section: "price" },
+  { icon: Regex, label: "Regex", section: "regex" },
   { icon: Sprout, label: "Genesis Tree", section: "genesis" },
   { icon: FlaskConical, label: "Tools", section: "tools" },
   { icon: Settings, label: "Settings", section: "settings" },
@@ -62,6 +65,8 @@ function ActivePane({ section }: { section: Section }) {
       return <DatabasePanel />;
     case "price":
       return <PricePanel />;
+    case "regex":
+      return <RegexPanel />;
     case "genesis":
       return <GenesisPanel />;
     case "tools":

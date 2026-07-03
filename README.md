@@ -68,6 +68,14 @@ Targets: Linux, NixOS, and Windows 11 (macOS out of scope).
   `applyPrices` / `applyNinjaPrices` boundary; the desktop shell keeps
   an hourly sqlite-backed price cache that also prices the OCR overlay.
   Everything soft-fails — planning never depends on the network.
+- **In-game search regex generator** (Regex panel, inspired by
+  [poe2.re](https://poe2.re)): turn your **craft target into a stash-search
+  string** — paste it in game and a finished item lights up after every
+  roll session; pick arbitrary mods from the base's real pool (with roll
+  floors like `(8[5-9]|9\d|\d\d\d).*m life`); or build vendor shopping
+  filters (class / rarity / ilvl / movement / resists). Fragments are
+  computed at runtime against the live bundle pool — shortest unique
+  substring, no false positives, 250-char budget meter.
 - **Genesis Tree panel (0.5)** — the full in-game Breach crafting tree
   (real layout and art, PoE2-style tooltips) with curated, source-cited
   "best nodes per goal" presets: Divine/Exalt/Catalyst farming, minion
@@ -201,7 +209,8 @@ for the rule-priority pipeline.
 | Crafting fidelity (ilvl pools, inclusive tier weights, patch-versioned floors, league gating) | ✅ shipped (docs/83 P0–P6) |
 | Beam-search advisor + Monte Carlo confidence + recovery hints | ✅ shipped |
 | 0.5 content (Verisium Alloys, Distilled Emotions, jewel pool, Genesis Tree panel) | ✅ shipped |
-| Web UI (item/target/guide/eligible/history/database/price/genesis/tools/settings) | ✅ shipped |
+| Web UI (item/target/guide/eligible/history/database/price/regex/genesis/tools/settings) | ✅ shipped |
+| In-game search regex generator (goal / item-mods / vendor) | ✅ shipped — waystone/tablet tabs follow the data-gap work |
 | Electron shell + item capture + trade2 price check | ✅ shipped (ADR-0010) |
 | OCR price overlay + calibration + desktop price cache | ✅ shipped (ADR-0013) |
 | Automated data refresh (watch → rebuild → diff → draft PR) | ✅ shipped (ADR-0012) |
@@ -281,6 +290,7 @@ and [`docs/adr/0005-license-mit.md`](docs/adr/0005-license-mit.md).
 
 - [pathofcrafting.net](https://pathofcrafting.net/) — web crafting simulator (separate brand, not this project)
 - [Craft of Exile](https://craftofexile.com/?game=poe2) — community gold-standard simulator
+- [poe2.re](https://github.com/veiset/poe2.re) — the in-game search-regex tool that inspired the Regex panel (unlicensed; ours is a clean-room runtime reimplementation against the bundle pool)
 - [Awakened PoE Trade](https://github.com/SnosMe/awakened-poe-trade) (MIT) — reference for item capture
 - [Exiled Exchange 2](https://github.com/Kvan7/Exiled-Exchange-2) (MIT) — reference for trade stat matching
 - [POE2HTC](https://github.com/Dboire9/POE2_HTC) (AGPL-3) — reference for beam-search

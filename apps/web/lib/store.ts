@@ -40,6 +40,7 @@ export type Section =
   | "history"
   | "database"
   | "price"
+  | "regex"
   | "genesis"
   | "tools"
   | "settings";
