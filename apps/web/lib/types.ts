@@ -227,6 +227,22 @@ export interface PluginContentView {
   errors: string[];
 }
 
+/** ADR-0014 — per-plugin status from the worker's `__loadPlugins`. */
+export interface WorkerPluginInfo {
+  name: string;
+  strategies: number;
+  rules: number;
+  /** True when the plugin exports the phase 2 predicate surface. */
+  predicates: boolean;
+  error: string | null;
+}
+
+/** ADR-0014 — result of the worker's `__loadPlugins` message. */
+export interface PluginLoadView {
+  infos: WorkerPluginInfo[];
+  content: PluginContentView;
+}
+
 /// Phase F — Wasm plugin info surfaced by the plugin host.
 export interface PluginInfo {
   id: string;

@@ -48,25 +48,47 @@ Re-wire plugins with a **browser-side JS host**, in two phases:
   set-semantics — reloading never duplicates). Invalid TOMLs are
   warned-and-skipped per document, mirroring the native host.
 
-### Phase 2 — live dispatch (future work)
+### Phase 2 — live predicate dispatch ✅ (shipped 2026-07)
 
-Custom predicates (`ItemPredicate::Custom`) and recommendation emitters
-need calls *during* planning. Design: the worker holds the plugin
-instances and the engine gets a synchronous JS callback
-(`Engine.setPluginDispatch(fn)`, a `js_sys::Function` wrapped in a
-`PluginPredicateDispatch` impl). Same-thread synchronous JS→wasm calls
-satisfy the planner; ADR-0008's capability manifest and perf contract
-(auto-disable on timeout) apply. Until phase 2 lands,
-`ItemPredicate::Custom` keeps evaluating to `false`.
+Custom predicates (`ItemPredicate::Custom`) need calls *during*
+planning. **Plugin instances moved into the engine worker** (the client
+transfers the stored wasm bytes via a `__loadPlugins` message); the
+engine gets a synchronous JS callback — `Engine.setPluginDispatch(fn)`,
+a `js_sys::Function` wrapped in a `PluginPredicateDispatch` impl (the
+trait dropped its `Send + Sync` supertrait: dispatch is only ever a
+same-thread borrow inside one planning call). The dispatcher enforces
+ADR-0008's perf contract the only way a synchronous JS host can:
+wall-clock measurement per call with strike-based auto-disable (default
+3 strikes over a 5 ms budget; throws count as strikes). The plugin id
+is the stored file name; rules reference it via
+`custom = { plugin_id = "…" }`.
+
+Shipping phase 2 surfaced and fixed a **latent v1 SDK bug**:
+`poc2-plugin-sdk`'s `write_output`/`read_input` indexed the arena `Vec`
+with *absolute linear-memory addresses*, trapping (`unreachable`) on
+every real emission call — unnoticed because the native host tests used
+hand-written WAT fixtures. The SDK now uses raw-pointer access, and an
+opt-in web test (`pluginsRealWasm.test.ts`) exercises the real
+SDK-built example plugin so the gap can't reopen.
+
+### Phase 3 — recommendation emitters (future work)
+
+`emit_recommendations` needs a hook the planner doesn't have yet
+(`PlanInput` only carries predicate dispatch); adding a candidate-source
+trait to the advisor is engine work, not host wiring. Until then the
+`declare_recommendation_emitter!` surface is dormant. A capability
+manifest approval UI also lands here (phase 2 gates on exported
+surface: `eval_predicate` + `alloc`).
 
 ## Consequences
 
 - Plugins work identically in the plain browser and the Electron shell
   (ADR-0010's "desktop is additive" holds).
 - The browser's own WebAssembly sandbox replaces wasmtime's fuel/memory
-  caps for phase 1; that is acceptable because emission runs **once at
-  load time** on pure exports with no imports. Phase 2 re-introduces
-  budget enforcement (call timeouts + auto-disable) in the JS host.
+  caps; emission runs once at load time, and phase 2's per-call budget
+  is enforced post-hoc (strike-based auto-disable) since synchronous JS
+  cannot preempt a runaway call — a misbehaving plugin can slow a few
+  plans but is then silenced for the session.
 - `crates/plugin-host` remains the native/test host (and the reference
   implementation for ABI semantics); the JS host must stay
   ABI-compatible with `crates/plugin-sdk`'s macros.

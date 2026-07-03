@@ -22,7 +22,7 @@ use poc2_engine::patch::{League, PatchVersion};
 use poc2_engine::{BaseRegistry, ModRegistry};
 use poc2_market::Valuator;
 use poc2_rules::RuleSet;
-use poc2_strategies::{seed_strategies, StrategyRegistry};
+use poc2_strategies::{seed_strategies, PluginPredicateDispatch, StrategyRegistry};
 use wasm_bindgen::prelude::*;
 
 mod commands;
@@ -51,11 +51,50 @@ struct EngineState {
     trained_models: Option<TrainedModelCache>,
     /// `(goal × class)` models currently loaded (diagnostic).
     trained_model_count: usize,
+    /// ADR-0014 phase 2 — synchronous JS callback
+    /// `(pluginId, name, itemJson, argsJson) -> boolean` evaluating a
+    /// plugin custom predicate. The worker owns the plugin instances;
+    /// the engine only calls back. `None` → `ItemPredicate::Custom`
+    /// evaluates to false.
+    plugin_dispatch_fn: Option<js_sys::Function>,
     bundle: poc2_data::Bundle,
     /// Clipboard `Item Class:` display string (lowercased) → canonical class id.
     class_by_display: HashMap<String, ItemClassId>,
     /// `(class, lowercased base name)` → real bundle base id (for paste-import).
     base_by_class_name: HashMap<(ItemClassId, String), BaseTypeId>,
+}
+
+/// ADR-0014 phase 2 — [`PluginPredicateDispatch`] over a synchronous JS
+/// callback living in the same worker thread as the engine. Errors and
+/// non-boolean returns surface as `Err`, which the predicate evaluator
+/// downgrades to `false` (a misbehaving plugin never tanks planning).
+struct JsPluginDispatch<'a> {
+    f: &'a js_sys::Function,
+}
+
+impl PluginPredicateDispatch for JsPluginDispatch<'_> {
+    fn dispatch(
+        &self,
+        plugin_id: &str,
+        name: &str,
+        item: &Item,
+        args: &serde_json::Value,
+    ) -> Result<bool, String> {
+        let item_json = serde_json::to_string(item).map_err(|e| format!("item serialize: {e}"))?;
+        let args_json = serde_json::to_string(args).map_err(|e| format!("args serialize: {e}"))?;
+        let js_args = js_sys::Array::of4(
+            &JsValue::from_str(plugin_id),
+            &JsValue::from_str(name),
+            &JsValue::from_str(&item_json),
+            &JsValue::from_str(&args_json),
+        );
+        let ret = self
+            .f
+            .apply(&JsValue::NULL, &js_args)
+            .map_err(|e| format!("plugin dispatch threw: {e:?}"))?;
+        ret.as_bool()
+            .ok_or_else(|| "plugin dispatch must return a boolean".to_string())
+    }
 }
 
 impl EngineState {
@@ -86,6 +125,7 @@ impl EngineState {
             league: League::current(),
             trained_models: None,
             trained_model_count: 0,
+            plugin_dispatch_fn: None,
             bundle,
             class_by_display,
             base_by_class_name,
@@ -108,6 +148,10 @@ impl EngineState {
             width: top_n.max(3),
             ..BeamConfig::default()
         };
+        let js_dispatch = self
+            .plugin_dispatch_fn
+            .as_ref()
+            .map(|f| JsPluginDispatch { f });
         let input = PlanInput {
             item: item.clone(),
             goal: goal.clone(),
@@ -120,7 +164,9 @@ impl EngineState {
             patch: self.patch,
             league: self.league,
             config,
-            plugin_dispatch: None,
+            plugin_dispatch: js_dispatch
+                .as_ref()
+                .map(|d| d as &dyn PluginPredicateDispatch),
             base_registry: Some(&self.base_registry),
             trained_models: self.trained_models.as_ref(),
         };
@@ -271,6 +317,23 @@ impl Engine {
             "errors": errors,
         })
         .to_string())
+    }
+
+    /// ADR-0014 phase 2 — install the synchronous plugin-predicate
+    /// dispatch callback `(pluginId, name, itemJson, argsJson) ->
+    /// boolean`. The worker owns the plugin instances and the perf
+    /// guard; the engine calls back during planning whenever a rule or
+    /// strategy references an `ItemPredicate::Custom`.
+    #[wasm_bindgen(js_name = setPluginDispatch)]
+    pub fn set_plugin_dispatch(&mut self, f: &js_sys::Function) {
+        self.state.plugin_dispatch_fn = Some(f.clone());
+    }
+
+    /// Remove the plugin dispatch callback — `Custom` predicates return
+    /// to evaluating as false.
+    #[wasm_bindgen(js_name = clearPluginDispatch)]
+    pub fn clear_plugin_dispatch(&mut self) {
+        self.state.plugin_dispatch_fn = None;
     }
 
     /// Recommend the top-N next actions. `item_json` / `goal_json` are JSON of

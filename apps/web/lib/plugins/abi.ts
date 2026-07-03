@@ -8,12 +8,27 @@
 /// network, filesystem, or DOM. Emission runs once at load time; live
 /// dispatch (predicates/emitters) is ADR-0014 phase 2.
 
-/** The exports surface phase 1 consumes (structurally typed so tests can
- * inject fakes without compiling real wasm). */
+/** The exports surface the host consumes (structurally typed so tests can
+ * inject fakes without compiling real wasm). Emission exports are phase 1;
+ * `alloc`/`reset_arena`/`eval_predicate` are the phase 2 dispatch surface. */
 export interface PluginExports {
   memory?: WebAssembly.Memory;
   list_strategies?: () => bigint;
   list_rules?: () => bigint;
+  /** Grow the guest arena; returns a writable pointer (SDK export). */
+  alloc?: (len: number) => number;
+  /** Clear the guest arena between calls (SDK export). */
+  reset_arena?: () => void;
+  /** `eval_predicate(namePtr, nameLen, itemPtr, itemLen, argsPtr, argsLen)
+   * -> 0 | 1` (SDK `declare_predicate!`). */
+  eval_predicate?: (
+    namePtr: number,
+    nameLen: number,
+    itemPtr: number,
+    itemLen: number,
+    argsPtr: number,
+    argsLen: number,
+  ) => number;
 }
 
 /** Unpack the SDK's `(len << 32) | ptr` i64 return. */
@@ -59,6 +74,60 @@ export function extractContent(exports: PluginExports): PluginContent {
     strategies: readEmission(exports, "list_strategies"),
     rules: readEmission(exports, "list_rules"),
   };
+}
+
+/** True when the plugin exports the phase 2 predicate surface. */
+export function hasPredicateSurface(exports: PluginExports): boolean {
+  return (
+    typeof exports.eval_predicate === "function" && typeof exports.alloc === "function"
+  );
+}
+
+/** Write `bytes` into the guest arena via `alloc`, returning the pointer.
+ * The view is taken AFTER the alloc — growing memory detaches earlier
+ * buffers, but previously returned pointers stay valid addresses. */
+function writeToGuest(exports: PluginExports, bytes: Uint8Array): number {
+  const alloc = exports.alloc;
+  const memory = exports.memory;
+  if (!alloc || !memory) throw new Error("plugin lacks alloc/memory exports");
+  const ptr = alloc(bytes.length);
+  if (ptr === 0 && bytes.length > 0) throw new Error("plugin alloc returned null");
+  new Uint8Array(memory.buffer, ptr, bytes.length).set(bytes);
+  return ptr;
+}
+
+/**
+ * Synchronously evaluate a plugin custom predicate — mirrors the native
+ * host's protocol (`crates/plugin-host/src/predicate.rs`): reset the
+ * arena, `alloc` + write name/item/args, call `eval_predicate`, non-zero
+ * means true. Throws on ABI violations (the dispatcher downgrades to
+ * `false` + a strike).
+ */
+export function callPredicate(
+  exports: PluginExports,
+  name: string,
+  itemJson: string,
+  argsJson: string,
+): boolean {
+  const evalFn = exports.eval_predicate;
+  if (typeof evalFn !== "function") throw new Error("plugin has no eval_predicate export");
+  exports.reset_arena?.();
+  const enc = new TextEncoder();
+  const nameBytes = enc.encode(name);
+  const itemBytes = enc.encode(itemJson);
+  const argsBytes = enc.encode(argsJson);
+  const namePtr = writeToGuest(exports, nameBytes);
+  const itemPtr = writeToGuest(exports, itemBytes);
+  const argsPtr = writeToGuest(exports, argsBytes);
+  const result = evalFn(
+    namePtr,
+    nameBytes.length,
+    itemPtr,
+    itemBytes.length,
+    argsPtr,
+    argsBytes.length,
+  );
+  return result !== 0;
 }
 
 /** Instantiate a plugin module with an empty import object (sandboxed). */

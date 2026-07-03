@@ -370,10 +370,11 @@ export function SettingsPanel() {
             {plugins.length === 0 && (
               <p className={`${styles.note} faint`}>
                 No plugins loaded. Plugins built with{" "}
-                <span className="num">poc2-plugin-sdk</span> can ship extra strategies and
-                rules (see <span className="num">examples/plugins/</span>); they run
-                sandboxed with no network or filesystem access. Custom predicates are
-                phase 2 (ADR-0014).
+                <span className="num">poc2-plugin-sdk</span> can ship extra strategies,
+                rules and custom predicates (see{" "}
+                <span className="num">examples/plugins/</span>); they run sandboxed with
+                no network or filesystem access. The file name is the plugin id that
+                rule TOMLs reference. Recommendation emitters are future work (ADR-0014).
               </p>
             )}
             {plugins.map((p) => (
@@ -381,7 +382,8 @@ export function SettingsPanel() {
                 <span>
                   <span className={p.error ? "danger" : undefined}>{p.name}</span>{" "}
                   <span className="faint num">
-                    {p.error ?? `${p.strategies} strategies · ${p.rules} rules`}
+                    {p.error ??
+                      `${p.strategies} strategies · ${p.rules} rules${p.predicates ? " · predicates" : ""}`}
                   </span>
                 </span>
                 <button

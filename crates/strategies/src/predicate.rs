@@ -41,7 +41,13 @@ pub trait StashView: Send + Sync {
 /// Defined as a trait so this crate doesn't depend on
 /// `poc2_plugin_host` (which would pull in wasmtime). The host crate
 /// provides an `impl PluginPredicateDispatch for PluginHost`.
-pub trait PluginPredicateDispatch: Send + Sync {
+///
+/// Deliberately NOT `Send + Sync`: dispatch is only ever consumed as a
+/// borrow inside a single synchronous planning call (`PlanInput` /
+/// `PredicateContext` hold `&dyn`), and the ADR-0014 browser host wraps
+/// a thread-local `js_sys::Function`, which can never be `Send`. Hosts
+/// that ARE thread-safe (the native wasmtime host) lose nothing.
+pub trait PluginPredicateDispatch {
     /// Evaluate `plugin_id::name(item, args)`. `Err` on plugin-side
     /// failure; the predicate evaluator surfaces the error as
     /// `false` to keep a misbehaving plugin from tanking a planning

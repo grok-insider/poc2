@@ -23,6 +23,7 @@ import type {
   NinjaExchangeSnapshot,
   ParseClipboardResponse,
   PluginContentView,
+  PluginLoadView,
   PoeScoutSnapshot,
   RecordOutcome,
   RecordOutcomeResponse,
@@ -61,12 +62,12 @@ function getWorker(): Worker {
   return worker;
 }
 
-function call<T>(method: string, args: unknown[] = []): Promise<T> {
+function call<T>(method: string, args: unknown[] = [], transfer: Transferable[] = []): Promise<T> {
   const id = ++seq;
   const w = getWorker();
   return new Promise<T>((resolve, reject) => {
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-    w.postMessage({ id, method, args });
+    w.postMessage({ id, method, args }, transfer);
   });
 }
 
@@ -159,11 +160,22 @@ export const engine = {
   /** Fuzzy-resolve a noisy item/currency name onto a canonical key. */
   resolveName: (args: ResolveNameArgs) => call<ResolveView>("resolveName", [args]),
 
-  // ---- plugins (ADR-0014 phase 1) ----------------------------------------
+  // ---- plugins (ADR-0014) -------------------------------------------------
   /** Install plugin-emitted strategy/rule TOMLs (set semantics: registries
    * rebuild as seeds + this content; call with `[], []` to reset). */
   setPluginContent: (strategies: string[], rules: string[]) =>
     call<PluginContentView>("setPluginContent", [strategies, rules]),
+
+  /** Load plugin wasm INTO THE WORKER (bytes are transferred): installs
+   * emitted content (phase 1) and wires `eval_predicate`-capable plugins
+   * into the engine's live predicate dispatch (phase 2). Call with `[]`
+   * to unload everything. */
+  loadPlugins: (plugins: { name: string; bytes: ArrayBuffer }[]) =>
+    call<PluginLoadView>(
+      "__loadPlugins",
+      [plugins],
+      plugins.map((p) => p.bytes),
+    ),
 
   // ---- genesis tree ------------------------------------------------------
   /** The Genesis Tree view (0.5): wombs, nodes, goal presets, farming notes. */
