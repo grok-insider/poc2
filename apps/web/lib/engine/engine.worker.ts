@@ -15,6 +15,17 @@ const ready: Promise<void> = (async () => {
   if (!res.ok) throw new Error(`bundle fetch failed: ${res.status}`);
   const bytes = new Uint8Array(await res.arrayBuffer());
   engine = new Engine(bytes);
+
+  // Optional trained Q-tables (M16.4): operators drop the artefact
+  // `train-advisor` writes at public/trained-models.json. Absent (404)
+  // or stale-schema artefacts leave the planner on pure heuristics —
+  // this must never block engine boot.
+  try {
+    const tm = await fetch("/trained-models.json");
+    if (tm.ok) engine.loadTrainedModels(await tm.text());
+  } catch {
+    /* optional asset */
+  }
 })();
 
 type Req = { id: number; method: string; args: unknown[] };

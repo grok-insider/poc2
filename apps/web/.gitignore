@@ -21,6 +21,9 @@ out/
 # vendored Tesseract.js OCR runtime — worker + core wasm + eng model
 # (regenerate with `bun run ocr:assets`; large blob, fetched not committed)
 /public/ocr/
+# trained advisor Q-tables (optional; produce with `train-advisor` and copy
+# here — the worker loads it at boot when present; never committed)
+/public/trained-models.json
 
 # misc
 *.tsbuildinfo

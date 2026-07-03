@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 
+use poc2_advisor::training::{load_artefacts_str, TrainedModelCache};
 use poc2_advisor::{plan, AdvisorAction, BeamConfig, Goal, PlanInput, Recommendation, Stash};
 use poc2_engine::currency::DefaultCurrencyResolver;
 use poc2_engine::ids::{BaseTypeId, ItemClassId};
@@ -44,6 +45,12 @@ struct EngineState {
     valuator: Valuator,
     patch: PatchVersion,
     league: League,
+    /// Trained Q-table cache (M16.4), loaded at runtime from the
+    /// optional `/trained-models.json` static asset via
+    /// [`Engine::load_trained_models`]. `None` → pure heuristic planning.
+    trained_models: Option<TrainedModelCache>,
+    /// `(goal × class)` models currently loaded (diagnostic).
+    trained_model_count: usize,
     bundle: poc2_data::Bundle,
     /// Clipboard `Item Class:` display string (lowercased) → canonical class id.
     class_by_display: HashMap<String, ItemClassId>,
@@ -77,6 +84,8 @@ impl EngineState {
             valuator: Valuator::default(),
             patch,
             league: League::current(),
+            trained_models: None,
+            trained_model_count: 0,
             bundle,
             class_by_display,
             base_by_class_name,
@@ -113,7 +122,7 @@ impl EngineState {
             config,
             plugin_dispatch: None,
             base_registry: Some(&self.base_registry),
-            trained_models: None,
+            trained_models: self.trained_models.as_ref(),
         };
         plan(&input)
     }
@@ -175,6 +184,93 @@ impl Engine {
     #[wasm_bindgen(getter, js_name = modCount)]
     pub fn mod_count(&self) -> usize {
         self.state.bundle.mods.len()
+    }
+
+    /// Load trained Q-table artefacts (the JSON `train-advisor` writes —
+    /// a `Vec<TrainedModelArtefact>`). Merges into the existing cache;
+    /// artefacts trained against a different bundle/engine schema are
+    /// version-skipped (heuristic planning stays correct without them).
+    /// Returns JSON `{ "loaded": n, "version_skipped": n, "total": n }`.
+    #[wasm_bindgen(js_name = loadTrainedModels)]
+    pub fn load_trained_models(&mut self, artefacts_json: &str) -> Result<String, JsError> {
+        let mut cache = self.state.trained_models.take().unwrap_or_default();
+        let (loaded, version_skipped) = load_artefacts_str(artefacts_json, &mut cache)
+            .map_err(|e| JsError::new(&format!("trained-models load failed: {e}")))?;
+        self.state.trained_model_count += loaded;
+        // An all-stale file leaves the cache as-is; only keep a cache
+        // when it actually holds models (planner treats None as "off").
+        if self.state.trained_model_count > 0 {
+            self.state.trained_models = Some(cache);
+        }
+        Ok(serde_json::json!({
+            "loaded": loaded,
+            "version_skipped": version_skipped,
+            "total": self.state.trained_model_count,
+        })
+        .to_string())
+    }
+
+    /// Number of trained `(goal × class)` models the planner consults
+    /// (0 = pure heuristic planning).
+    #[wasm_bindgen(getter, js_name = trainedModelCount)]
+    pub fn trained_model_count(&self) -> usize {
+        self.state.trained_model_count
+    }
+
+    /// ADR-0014 phase 1 — install plugin-emitted content. Inputs are
+    /// JSON arrays of TOML documents (the browser host extracts them
+    /// from plugin wasm via the SDK's `list_strategies` / `list_rules`
+    /// exports). **Set semantics**: registries rebuild as seeds + the
+    /// given content, so repeated calls never duplicate. Documents that
+    /// fail to parse are skipped and reported, mirroring the native
+    /// host's warn-and-skip. Returns JSON
+    /// `{ "strategies_added": n, "rules_added": n, "errors": [..] }`.
+    #[wasm_bindgen(js_name = setPluginContent)]
+    pub fn set_plugin_content(
+        &mut self,
+        strategies_json: &str,
+        rules_json: &str,
+    ) -> Result<String, JsError> {
+        let strategy_tomls: Vec<String> = serde_json::from_str(strategies_json)
+            .map_err(|e| JsError::new(&format!("strategies arg must be a JSON string[]: {e}")))?;
+        let rule_tomls: Vec<String> = serde_json::from_str(rules_json)
+            .map_err(|e| JsError::new(&format!("rules arg must be a JSON string[]: {e}")))?;
+
+        let mut errors: Vec<String> = Vec::new();
+
+        let mut strategies = seed_strategies();
+        let mut strategies_added = 0usize;
+        for (i, toml) in strategy_tomls.iter().enumerate() {
+            match poc2_strategies::load_strategy_str(toml) {
+                Ok(s) => {
+                    strategies.push(s);
+                    strategies_added += 1;
+                }
+                Err(e) => errors.push(format!("strategy[{i}]: {e}")),
+            }
+        }
+
+        let mut rules = poc2_rules::seed_rules();
+        let mut rules_added = 0usize;
+        for (i, toml) in rule_tomls.iter().enumerate() {
+            match poc2_rules::load_rules_str(toml) {
+                Ok(rs) => {
+                    rules_added += rs.len();
+                    rules.extend(rs);
+                }
+                Err(e) => errors.push(format!("rules[{i}]: {e}")),
+            }
+        }
+
+        self.state.strategies = StrategyRegistry::from_strategies(strategies);
+        self.state.rules = RuleSet::from_rules(rules);
+
+        Ok(serde_json::json!({
+            "strategies_added": strategies_added,
+            "rules_added": rules_added,
+            "errors": errors,
+        })
+        .to_string())
     }
 
     /// Recommend the top-N next actions. `item_json` / `goal_json` are JSON of

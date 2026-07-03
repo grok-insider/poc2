@@ -7,12 +7,13 @@
 - **Current wiring note (2026-07):** the SDK (`crates/plugin-sdk`) and
   wasmtime host (`crates/plugin-host`) shipped and are tested, using a
   **raw-Wasm `(ptr, len)` ABI** (the Component Model remains future
-  work, despite the v1 title below). However, the current browser/WASM
-  app plans with `plugin_dispatch: None` — the in-process host was tied
-  to the retired Tauri shell and has not been re-wired into the
-  web/Electron architecture. Re-integration is roadmap work
-  (`docs/70-roadmap.md`) and needs its own design note (native-only in
-  the Electron main process vs. wasm-in-wasm).
+  work, despite the v1 title below). The app-side re-wire is governed by
+  [ADR-0014](0014-plugin-rewire-browser-host.md): a **browser-side JS
+  host** — phase 1 (strategy/rule emission via `Engine.setPluginContent`
+  + Settings → Plugins) is live; phase 2 (custom predicates +
+  recommendation emitters during planning) is pending, so
+  `plugin_dispatch` is still `None` and `ItemPredicate::Custom`
+  evaluates to false.
 
 ## Decision
 

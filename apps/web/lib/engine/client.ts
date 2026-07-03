@@ -22,6 +22,7 @@ import type {
   Item,
   NinjaExchangeSnapshot,
   ParseClipboardResponse,
+  PluginContentView,
   PoeScoutSnapshot,
   RecordOutcome,
   RecordOutcomeResponse,
@@ -79,6 +80,9 @@ export const engine = {
   // ---- bundle metadata -------------------------------------------------
   patch: () => call<string>("patch"),
   modCount: () => call<number>("modCount"),
+  /** Trained `(goal × class)` Q-models loaded (0 = pure heuristics). The
+   * worker loads the optional `/trained-models.json` asset at boot. */
+  trainedModelCount: () => call<number>("trainedModelCount"),
 
   // ---- league ruleset ----------------------------------------------------
   /** Current engine League ("standard" | "challenge"). */
@@ -154,6 +158,12 @@ export const engine = {
   // ---- resolve -----------------------------------------------------------
   /** Fuzzy-resolve a noisy item/currency name onto a canonical key. */
   resolveName: (args: ResolveNameArgs) => call<ResolveView>("resolveName", [args]),
+
+  // ---- plugins (ADR-0014 phase 1) ----------------------------------------
+  /** Install plugin-emitted strategy/rule TOMLs (set semantics: registries
+   * rebuild as seeds + this content; call with `[], []` to reset). */
+  setPluginContent: (strategies: string[], rules: string[]) =>
+    call<PluginContentView>("setPluginContent", [strategies, rules]),
 
   // ---- genesis tree ------------------------------------------------------
   /** The Genesis Tree view (0.5): wombs, nodes, goal presets, farming notes. */

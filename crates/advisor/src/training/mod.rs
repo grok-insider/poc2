@@ -26,8 +26,8 @@ pub mod model_learner;
 pub mod value_iteration;
 
 pub use artefact::{
-    load_artefact_file, load_cache_from_dir, ArtefactLoadOutcome, TrainedModelArtefact,
-    TrainingArtefactMetrics,
+    load_artefact_file, load_artefacts_str, load_cache_from_dir, ArtefactLoadOutcome,
+    TrainedModelArtefact, TrainingArtefactMetrics,
 };
 pub use hybrid::{
     goal_hash, score_with_trained_policy, sim_to_real_gap, trained_model_from, QEntry, RewardKind,

@@ -89,6 +89,7 @@ export function Console() {
   const historyLen = useCraft((s) => s.history.length);
   const undo = useCraft((s) => s.undo);
   const captureStatus = useCraft((s) => s.captureStatus);
+  const trainedModels = useCraft((s) => s.trainedModels);
 
   return (
     <div className={styles.app}>
@@ -125,6 +126,14 @@ export function Console() {
           >
             <Undo2 size={15} />
           </button>
+          {trainedModels > 0 && (
+            <span
+              className="chip num"
+              title={`${trainedModels} trained (goal × class) Q-models loaded — the planner blends trained-policy scores with heuristics`}
+            >
+              ⚛ {trainedModels}
+            </span>
+          )}
           <span className="chip num">patch {patch}</span>
           <button
             className="btn btn-ghost"

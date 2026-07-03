@@ -56,12 +56,15 @@ kind = "guidance"
 2. Edit `Cargo.toml` (rename) + `src/lib.rs` (your closure).
 3. Edit `poc2-plugin.toml` to set the right id + capabilities.
 4. `cargo build --release --target wasm32-unknown-unknown`.
-5. Drop the resulting `.wasm` + `poc2-plugin.toml` in
-   `~/.config/poc2/plugins/<your-plugin-id>/`.
-6. The host (`PluginHost::discover_plugins`) walks the plugins dir on
-   load. **Note:** the current browser/Electron app does not load
-   plugins (`plugin_dispatch: None` — see ADR-0008's wiring note);
-   today the host runs in native tests/tools only.
+5. Load it into the app: **Settings → Plugins → Add plugin…** (the
+   ADR-0014 browser host stores the `.wasm` in IndexedDB, instantiates
+   it sandboxed, and installs its emitted strategies/rules). The native
+   host (`PluginHost::discover_plugins` over
+   `~/.config/poc2/plugins/<id>/`) remains for tests/tools.
+6. **Note:** phase 1 covers strategy/rule emission only. Custom
+   predicates (`eval_predicate`) and recommendation emitters need the
+   phase 2 dispatch (`plugin_dispatch` is still `None` during planning
+   — see ADR-0014).
 
 ## Capabilities cheat sheet
 

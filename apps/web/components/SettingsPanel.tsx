@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, RotateCcw, Trash2, Database, Cpu } from "lucide-react";
+import { RefreshCw, RotateCcw, Trash2, Database, Cpu, Puzzle } from "lucide-react";
 import { useCraft } from "@/lib/store";
+import { addStoredPlugin, removeStoredPlugin } from "@/lib/plugins/store";
 import { getDesktopBridge, type PriceStatus as CacheStatus } from "@/lib/desktop";
 import { engine } from "@/lib/engine/client";
 import type { PoeScoutCurrencyEntry, PoeScoutSnapshot } from "@/lib/types";
@@ -87,6 +88,22 @@ export function SettingsPanel() {
   const loadFixture = useCraft((s) => s.loadFixture);
   const clearHistory = useCraft((s) => s.clearHistory);
   const replan = useCraft((s) => s.replan);
+  const plugins = useCraft((s) => s.plugins);
+  const reloadPlugins = useCraft((s) => s.reloadPlugins);
+
+  async function onAddPlugin(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const bytes = await file.arrayBuffer();
+    await addStoredPlugin(file.name.replace(/\.wasm$/i, ""), bytes);
+    await reloadPlugins();
+  }
+
+  async function onRemovePlugin(name: string) {
+    await removeStoredPlugin(name);
+    await reloadPlugins();
+  }
 
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceStatus, setPriceStatus] = useState<PriceStatus>(null);
@@ -334,6 +351,49 @@ export function SettingsPanel() {
             {captureLastError && (
               <p className={`${styles.note} danger`}>{captureLastError}</p>
             )}
+          </section>
+
+          {/* ---- PLUGINS (ADR-0014 phase 1) ---- */}
+          <section className={`card ${styles.section}`}>
+            <div className={styles.sectionHead}>
+              <span className="eyebrow">Plugins</span>
+              <label className="btn" title="Add a plugin .wasm built with poc2-plugin-sdk">
+                <Puzzle size={13} /> Add plugin…
+                <input
+                  type="file"
+                  accept=".wasm"
+                  style={{ display: "none" }}
+                  onChange={(e) => void onAddPlugin(e)}
+                />
+              </label>
+            </div>
+            {plugins.length === 0 && (
+              <p className={`${styles.note} faint`}>
+                No plugins loaded. Plugins built with{" "}
+                <span className="num">poc2-plugin-sdk</span> can ship extra strategies and
+                rules (see <span className="num">examples/plugins/</span>); they run
+                sandboxed with no network or filesystem access. Custom predicates are
+                phase 2 (ADR-0014).
+              </p>
+            )}
+            {plugins.map((p) => (
+              <div key={p.name} className={styles.sectionHead}>
+                <span>
+                  <span className={p.error ? "danger" : undefined}>{p.name}</span>{" "}
+                  <span className="faint num">
+                    {p.error ?? `${p.strategies} strategies · ${p.rules} rules`}
+                  </span>
+                </span>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => void onRemovePlugin(p.name)}
+                  title="Remove this plugin"
+                  aria-label={`Remove plugin ${p.name}`}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
           </section>
 
           {/* ---- NOTES ---- */}

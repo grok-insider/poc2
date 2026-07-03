@@ -71,27 +71,16 @@ pub enum ArtefactLoadOutcome {
     Skipped(String),
 }
 
-/// Load one artefact file at `path` and merge its models into `cache`.
-/// Returns the number of `(goal × class)` entries inserted, or a
-/// human-readable error reason. Either path-length or cost models are
-/// inserted depending on whether the cache already has a hit for the
-/// same key.
-pub fn load_artefact_file(path: &Path, cache: &mut TrainedModelCache) -> ArtefactLoadOutcome {
-    let raw = match fs::read_to_string(path) {
-        Ok(r) => r,
-        Err(e) => {
-            return ArtefactLoadOutcome::Skipped(format!("read {} failed: {e}", path.display()))
-        }
-    };
-    let artefacts: Vec<TrainedModelArtefact> = match serde_json::from_str(&raw) {
-        Ok(a) => a,
-        Err(e) => {
-            return ArtefactLoadOutcome::Skipped(format!(
-                "parse {} as Vec<TrainedModelArtefact> failed: {e}",
-                path.display()
-            ));
-        }
-    };
+/// Parse a raw artefact JSON payload (`Vec<TrainedModelArtefact>`) and
+/// merge its models into `cache`. Filesystem-free — the WASM engine
+/// feeds it a fetched static asset, the native loader a file's text.
+/// Returns `(inserted, version_skipped)` or a parse error.
+pub fn load_artefacts_str(
+    raw: &str,
+    cache: &mut TrainedModelCache,
+) -> Result<(usize, usize), String> {
+    let artefacts: Vec<TrainedModelArtefact> = serde_json::from_str(raw)
+        .map_err(|e| format!("parse as Vec<TrainedModelArtefact> failed: {e}"))?;
     let mut inserted = 0;
     let mut version_skipped = 0;
     for artefact in artefacts {
@@ -120,14 +109,31 @@ pub fn load_artefact_file(path: &Path, cache: &mut TrainedModelCache) -> Artefac
     }
     if version_skipped > 0 {
         tracing::warn!(
-            path = %path.display(),
             version_skipped,
             expected_bundle = poc2_data::BUNDLE_SCHEMA_VERSION,
             expected_engine = poc2_engine::ENGINE_SCHEMA_VERSION,
             "skipped trained-model artefacts trained against a different schema; retrain the corpus"
         );
     }
-    ArtefactLoadOutcome::Loaded(inserted)
+    Ok((inserted, version_skipped))
+}
+
+/// Load one artefact file at `path` and merge its models into `cache`.
+/// Returns the number of `(goal × class)` entries inserted, or a
+/// human-readable error reason. Either path-length or cost models are
+/// inserted depending on whether the cache already has a hit for the
+/// same key.
+pub fn load_artefact_file(path: &Path, cache: &mut TrainedModelCache) -> ArtefactLoadOutcome {
+    let raw = match fs::read_to_string(path) {
+        Ok(r) => r,
+        Err(e) => {
+            return ArtefactLoadOutcome::Skipped(format!("read {} failed: {e}", path.display()))
+        }
+    };
+    match load_artefacts_str(&raw, cache) {
+        Ok((inserted, _version_skipped)) => ArtefactLoadOutcome::Loaded(inserted),
+        Err(reason) => ArtefactLoadOutcome::Skipped(format!("{}: {reason}", path.display())),
+    }
 }
 
 /// Scan `dir` for artefact files and merge every one into a single
@@ -212,6 +218,27 @@ mod tests {
                 initial_state_v_cost: -2.0,
             },
         }
+    }
+
+    #[test]
+    fn load_artefacts_str_inserts_and_reports_version_skips() {
+        // The filesystem-free entry point the WASM engine uses: current-
+        // schema models insert, stale-schema models count as skipped.
+        let mut stale = mk_artefact(7, "BodyArmour");
+        stale.model_path_length.bundle_schema_version =
+            poc2_data::BUNDLE_SCHEMA_VERSION.wrapping_sub(1);
+        let artefacts = vec![mk_artefact(42, "BodyArmour"), stale];
+        let raw = serde_json::to_string(&artefacts).unwrap();
+
+        let mut cache = TrainedModelCache::new();
+        let (inserted, version_skipped) = load_artefacts_str(&raw, &mut cache).unwrap();
+        assert_eq!(inserted, 1);
+        assert_eq!(version_skipped, 1);
+        assert!(cache.lookup(42, &ItemClassId::from("BodyArmour")).is_some());
+
+        // Garbage payload → parse error, cache untouched.
+        assert!(load_artefacts_str("not json", &mut cache).is_err());
+        assert_eq!(cache.len(), 1);
     }
 
     #[test]

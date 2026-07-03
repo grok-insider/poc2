@@ -218,6 +218,15 @@ export interface TrainedModelStatus {
   cache_dir_exists: boolean;
 }
 
+/** ADR-0014 phase 1 — result of `Engine.setPluginContent` (plugin-emitted
+ * strategy/rule TOMLs installed with set semantics). */
+export interface PluginContentView {
+  strategies_added: number;
+  rules_added: number;
+  /** Per-document parse errors (warn-and-skip semantics). */
+  errors: string[];
+}
+
 /// Phase F — Wasm plugin info surfaced by the plugin host.
 export interface PluginInfo {
   id: string;

@@ -12,6 +12,7 @@ import { loadCraft, saveCraft, type PersistedCraft } from "./persist";
 import { seedSpecsFromItem } from "./concepts";
 import { validateArchetype, type Archetype } from "./archetypes";
 import { loadBaseIconManifest } from "./baseIcons";
+import type { PluginInfoView } from "./plugins/load";
 import type {
   AdvisorAction,
   BaseIconManifest,
@@ -58,6 +59,10 @@ interface CraftState {
   engineError: string | null;
   patch: string;
   modCount: number;
+  /** Trained (goal × class) Q-models the planner consults (0 = heuristics). */
+  trainedModels: number;
+  /** Loaded plugin status (ADR-0014 phase 1; empty = no plugins). */
+  plugins: PluginInfoView[];
 
   // craft
   item: Item;
@@ -132,6 +137,8 @@ interface CraftState {
   refreshEligible: () => Promise<void>;
   seedTargetFromItem: () => void;
   applyArchetype: (arch: Archetype) => void;
+  /** (Re)load stored plugin wasm into the engine, then re-plan. */
+  reloadPlugins: () => Promise<void>;
 
   boot: () => Promise<void>;
   replan: () => Promise<void>;
@@ -160,6 +167,8 @@ export const useCraft = create<CraftState>((set, get) => ({
   engineError: null,
   patch: "",
   modCount: 0,
+  trainedModels: 0,
+  plugins: [],
 
   item: FRESH_BODY_ARMOUR,
   goal: WORKED_EXAMPLE_GOAL,
@@ -343,6 +352,17 @@ export const useCraft = create<CraftState>((set, get) => ({
     get().setGoal(next);
   },
 
+  reloadPlugins: async () => {
+    try {
+      const { applyPlugins } = await import("./plugins/load");
+      const res = await applyPlugins();
+      set({ plugins: res.infos });
+      await get().replan();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
   boot: async () => {
     try {
       const saved = await loadCraft();
@@ -373,10 +393,25 @@ export const useCraft = create<CraftState>((set, get) => ({
       void loadBaseIconManifest().then((m) => m && set({ iconManifest: m }));
 
       const { engine } = await import("./engine/client");
-      const [patch, modCount] = await Promise.all([engine.patch(), engine.modCount()]);
+      const [patch, modCount, trainedModels] = await Promise.all([
+        engine.patch(),
+        engine.modCount(),
+        engine.trainedModelCount().catch(() => 0),
+      ]);
       // Sync the persisted engine-League ruleset before the first plan.
       await engine.setLeague(get().engineLeague).catch(() => {});
-      set({ engineReady: true, patch, modCount, engineError: null });
+      set({ engineReady: true, patch, modCount, trainedModels, engineError: null });
+
+      // Plugin content (ADR-0014 phase 1): stored wasm → strategy/rule
+      // TOMLs → engine registries, BEFORE the first plan so plugin
+      // strategies participate from the start. Optional; soft-fails.
+      try {
+        const { applyPlugins } = await import("./plugins/load");
+        const res = await applyPlugins();
+        set({ plugins: res.infos });
+      } catch {
+        /* plugins are optional */
+      }
 
       // Capture-daemon bridge (ADR-0011): hotkey-captured items pushed from
       // `poc2-capture serve`. Best-effort — silently retries; browser-only
