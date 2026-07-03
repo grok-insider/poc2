@@ -121,7 +121,10 @@ export function cleanLines(raw: string): string[] {
 
 /**
  * OCR a pasted screenshot and reconstruct PoE2 clipboard text.
- * Lazy-loads tesseract.js (workers + traineddata fetched on demand).
+ *
+ * Uses the same vendored, origin-relative `/ocr/` runtime as the price
+ * overlay (`lib/ocr/tesseract.ts`) — one Tesseract setup for the whole
+ * app, no CDN fetches, and it works over the desktop `app://` scheme.
  */
 export async function ocrImageToItemText(
   file: Blob,
@@ -130,14 +133,13 @@ export async function ocrImageToItemText(
   const warnings: string[] = [];
   const dataUrl = await preprocess(file);
 
-  const Tesseract = (await import("tesseract.js")).default;
-  const worker = await Tesseract.createWorker("eng");
+  const { createOcrWorker } = await import("./ocr/tesseract");
+  const worker = await createOcrWorker({
+    psm: "6",
+    charWhitelist:
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 %+-,.':()/",
+  });
   try {
-    await worker.setParameters({
-      tessedit_pageseg_mode: "6" as never,
-      tessedit_char_whitelist:
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 %+-,.':()/",
-    });
     const { data } = await worker.recognize(dataUrl);
     const lines = cleanLines(data.text ?? "");
     if (lines.length === 0) {
