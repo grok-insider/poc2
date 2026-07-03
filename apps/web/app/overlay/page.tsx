@@ -183,6 +183,16 @@ export default function OverlayPage() {
     // desktop poe2scout cache so the very first scan can price + resolve.
     void loadPriceSource();
 
+    // Hydrate the persisted calibrated region: the overlay window may be
+    // created AFTER calibration happened, so relying on the push alone
+    // made the first hotkey scan race (and fail with "no region").
+    void bridge
+      .getCaptureRegion?.()
+      .then((rect) => {
+        if (rect && !regionRef.current) regionRef.current = rect;
+      })
+      .catch(() => {});
+
     const offRegion = bridge.onRegionCalibrated((rect) => {
       regionRef.current = rect;
     });

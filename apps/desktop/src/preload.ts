@@ -18,6 +18,7 @@ const CHANNELS = {
   overlayHide: "poc2:overlay-hide",
   overlaySetRegion: "poc2:overlay-set-region",
   calibrateRegion: "poc2:calibrate-region",
+  getCaptureRegion: "poc2:get-capture-region",
   regionCalibrated: "poc2:region-calibrated",
   overlayState: "poc2:overlay-state",
   // --- poe2scout price cache ---
@@ -81,6 +82,10 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   /** Open the calibrator (no arg) or report a calibrated rect back to main. */
   calibrateRegion(rect?: CaptureRect): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.calibrateRegion, rect ?? null);
+  },
+  /** The persisted calibrated region, or null (overlay-mount hydration). */
+  getCaptureRegion(): Promise<CaptureRect | null> {
+    return ipcRenderer.invoke(CHANNELS.getCaptureRegion);
   },
   /** Subscribe to "a region was calibrated" pushes. Returns an unsubscribe. */
   onRegionCalibrated(cb: (rect: CaptureRect) => void): () => void {

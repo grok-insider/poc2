@@ -115,6 +115,10 @@ export interface Poc2DesktopBridge {
   overlaySetRegion(rect: CaptureRect): Promise<boolean>;
   /** Open the calibrator (no arg) or report a calibrated rect back to main. */
   calibrateRegion(rect?: CaptureRect): Promise<boolean>;
+  /** The persisted calibrated region, or null. Optional — absent on
+   * pre-hydration shells; the overlay pulls it on mount so the FIRST
+   * scan doesn't race the calibration push. */
+  getCaptureRegion?(): Promise<CaptureRect | null>;
   /** Subscribe to "a region was calibrated" pushes. Returns an unsubscribe. */
   onRegionCalibrated(cb: (rect: CaptureRect) => void): () => void;
   /** Subscribe to overlay state pushes (show/hide + degraded). */

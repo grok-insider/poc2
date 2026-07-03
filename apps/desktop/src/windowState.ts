@@ -44,8 +44,11 @@ export interface PersistedCaptureRegion {
   /** Calibrated screen rectangle (global logical px) for the price overlay. */
   rect?: Rectangle;
   /**
-   * xdg-desktop-portal restore token (Wayland). Reused on subsequent grabs so
-   * the user is only prompted once. Opaque; persisted verbatim.
+   * xdg-desktop-portal restore token (Wayland). RESERVED: Electron's
+   * `desktopCapturer` does not currently expose the ScreenCast portal's
+   * restore token, so nothing writes or consumes this yet — the field
+   * stays in the schema so token reuse lands without a state migration
+   * once upstream support exists. Opaque; persisted verbatim.
    */
   portalToken?: string;
 }

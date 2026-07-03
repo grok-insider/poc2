@@ -7,6 +7,7 @@ import { captureItemText, status as captureStatus } from "./capture";
 import type { Capabilities } from "./capture/capabilities";
 import { captureRegion, coerceRect, type CaptureRect } from "./capture/screen";
 import { isAllowlistedUrl } from "./fetchAllowlist";
+import { loadCaptureRegion } from "./windowState";
 import { getPriceSnapshot, getPriceStatus, refreshNow, setPriceLeague } from "./prices/scheduler";
 import { tradeFetch, tradeSearch } from "./trade/proxy";
 
@@ -29,6 +30,7 @@ export const CHANNELS = {
   overlayHide: "poc2:overlay-hide", // renderer → main (invoke)
   overlaySetRegion: "poc2:overlay-set-region", // renderer → main (invoke)
   calibrateRegion: "poc2:calibrate-region", // renderer → main (invoke / push-back)
+  getCaptureRegion: "poc2:get-capture-region", // renderer → main (invoke: persisted rect)
   regionCalibrated: "poc2:region-calibrated", // main → renderer (push)
   overlayState: "poc2:overlay-state", // main → renderer (push: show/hide/degraded)
   // --- poe2scout price cache (hourly poe2scout → node:sqlite) ---
@@ -127,6 +129,11 @@ export function registerIpc(
     overlay?.setOverlayRegion(parsed);
     return true;
   });
+
+  // Persisted-region hydration: the overlay route pulls the calibrated
+  // rect on mount so the FIRST hotkey scan works even when the overlay
+  // window was created after calibration (the push-only path raced it).
+  ipcMain.handle(CHANNELS.getCaptureRegion, () => loadCaptureRegion().rect ?? null);
 
   // Calibration is bi-directional: the renderer may *open* the calibrator
   // (no arg) or *report* a calibrated rect back (the drag-select result).

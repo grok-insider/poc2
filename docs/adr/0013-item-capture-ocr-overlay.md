@@ -98,7 +98,9 @@ overlay is **capability-gated** per session.
   assets) with row-locking de-flicker, resolves names via the engine's fuzzy
   `resolveName`, and prices rows from the desktop poe2scout price cache
   (hourly, node:sqlite, poe.ninja fallback). `/calibrate` is the real
-  drag-select calibrator. Known gaps (roadmap): the overlay does not yet
-  hydrate the persisted region on first load (a first scan can race the
-  calibration push), and the persisted portal restore token is not yet
-  passed back to the Wayland portal.
+  drag-select calibrator. The overlay hydrates the persisted region on
+  mount (`getCaptureRegion` bridge call), so the first hotkey scan no
+  longer races the calibration push. Portal restore-token reuse remains
+  **blocked upstream**: Electron's `desktopCapturer` does not expose the
+  ScreenCast portal's restore token; the persisted `portalToken` field
+  stays reserved until it does.
