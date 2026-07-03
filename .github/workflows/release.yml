@@ -32,7 +32,10 @@ jobs:
   # triggers the `release` job (via the resulting push to master).
   release-plz-pr:
     name: release-plz PR
-    if: github.repository_owner == 'grok-insider'
+    # Canonical-org guard (fork protection). Cargo metadata names
+    # `anomalyco`; the automation account is `grok-insider` — accept both
+    # until the canonical remote is settled (AGENTS.md "Release Notes").
+    if: contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
     runs-on: ubuntu-latest
     # release-plz runs `cargo package` per crate to detect changes, which fetches
     # the crates.io index + git deps. That network step is flaky on hosted runners;
@@ -105,7 +108,7 @@ jobs:
   # whether a release was cut (and its tag/version) to the artifact jobs below.
   release-plz-release:
     name: release-plz release
-    if: github.repository_owner == 'grok-insider'
+    if: contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -191,6 +194,22 @@ jobs:
 
       - name: Install web deps
         run: bun install --frozen-lockfile
+
+      # Keep the packaged app's version in lockstep with the release tag:
+      # electron-builder reads apps/desktop/package.json, which is NOT
+      # bumped by release-plz (it owns the Cargo workspace version only).
+      - name: Sync desktop package version to the release
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const f = 'apps/desktop/package.json';
+            const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+            j.version = process.env.VERSION;
+            fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
+          "
 
       # The engine ships as WebAssembly; the web export imports lib/wasm/*, so this
       # must run before the web build. build-wasm.mjs warns-and-skips wasm-opt when
