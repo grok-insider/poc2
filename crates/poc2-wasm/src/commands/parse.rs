@@ -149,6 +149,17 @@ fn class_display_keys(canonical: &str) -> Vec<String> {
         format!("{split}s"),
         format!("{lower}s"),
     ];
+    // In-game display names that diverge from the canonical class id
+    // (the 0.5 non-gear crafting surfaces).
+    let aliases: &[&str] = match canonical {
+        "Map" => &["waystone", "waystones"],
+        "TowerAugmentation" => &["precursor tablet", "precursor tablets", "tablet", "tablets"],
+        "UltimatumKey" => &["inscribed ultimatum", "inscribed ultimatums"],
+        // PoE2 belt charms ship under the UtilityFlask class.
+        "UtilityFlask" => &["charm", "charms"],
+        _ => &[],
+    };
+    keys.extend(aliases.iter().map(|s| (*s).to_string()));
     keys.sort();
     keys.dedup();
     keys
