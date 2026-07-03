@@ -102,6 +102,30 @@ impl MinModLevelVariant {
     }
 }
 
+/// Resolve the Minimum-Modifier-Level floor for a currency id at a patch.
+///
+/// Returns `0` (no floor) for base-tier orbs and any unknown id. Public so
+/// the advisor's analytic transition model can enumerate the exact pool a
+/// Greater/Perfect orb draws from (via
+/// [`crate::currency::enumerate_eligible_mods`]) without applying the orb.
+/// The id strings match the `Currency::id` values defined in this module.
+pub fn min_mod_level_floor(id: &CurrencyId, patch: crate::patch::PatchVersion) -> u32 {
+    let variant = match id.as_str() {
+        "GreaterOrbOfTransmutation" => MinModLevelVariant::GreaterTransmute,
+        "PerfectOrbOfTransmutation" => MinModLevelVariant::PerfectTransmute,
+        "GreaterOrbOfAugmentation" => MinModLevelVariant::GreaterAugment,
+        "PerfectOrbOfAugmentation" => MinModLevelVariant::PerfectAugment,
+        "GreaterRegalOrb" => MinModLevelVariant::GreaterRegal,
+        "PerfectRegalOrb" => MinModLevelVariant::PerfectRegal,
+        "GreaterExaltedOrb" => MinModLevelVariant::GreaterExalt,
+        "PerfectExaltedOrb" => MinModLevelVariant::PerfectExalt,
+        "GreaterChaosOrb" => MinModLevelVariant::GreaterChaos,
+        "PerfectChaosOrb" => MinModLevelVariant::PerfectChaos,
+        _ => return 0,
+    };
+    variant.floor(patch)
+}
+
 /// Generic implementation of "promote rarity, add 1 mod ≥ min_level".
 /// Shared by Transmute / Greater / Perfect Transmutation variants.
 fn add_one_mod_with_min(

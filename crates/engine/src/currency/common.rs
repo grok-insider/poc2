@@ -3,9 +3,12 @@
 //! Every "add a mod" orb (basic orbs, Greater / Perfect variants, Vaal
 //! brick replacement) samples through [`sample_eligible_mod`] or the
 //! lower-level [`pick_weighted`] draw; removal-side orbs (Annul / Chaos)
-//! use [`collect_removable_filtered`] / [`remove_mod_at`]. Everything here
-//! is `pub(crate)`: the kernel is an implementation detail of the
-//! `currency` modules, not engine API.
+//! use [`collect_removable_filtered`] / [`remove_mod_at`]. Most of this is
+//! `pub(crate)`: the kernel is an implementation detail of the `currency`
+//! modules. The exceptions — [`enumerate_eligible_mods`],
+//! [`collect_removable_filtered`], and [`BASIC_ORB_EXCLUDES`] — are exposed
+//! (re-exported via `currency`) so the advisor's analytic transition model
+//! can build the *exact* distributions the sampler draws from.
 
 use rand::Rng;
 use smallvec::SmallVec;
@@ -25,7 +28,7 @@ use crate::registry::{ModIndex, ModRegistry};
 ///
 /// Per `docs/81-engine-training-and-rule-encoding-plan.md` §4.3 Tier 1.3
 /// and rule R232.
-pub(crate) const BASIC_ORB_EXCLUDES: ModFlags = ModFlags::ESSENCE_ONLY
+pub const BASIC_ORB_EXCLUDES: ModFlags = ModFlags::ESSENCE_ONLY
     .union(ModFlags::DESECRATED_ONLY)
     .union(ModFlags::CORRUPTED_ONLY);
 
@@ -75,6 +78,46 @@ pub(crate) fn sample_eligible_mod<'r>(
     min_required_level: u32,
     excludes: ModFlags,
 ) -> Option<&'r ModDefinition> {
+    let eligible = enumerate_eligible_mods(
+        registry,
+        base_registry,
+        item,
+        affix,
+        patch,
+        min_required_level,
+        excludes,
+    );
+    pick_weighted(registry, &eligible, rng)
+}
+
+/// Enumerate the eligible `(mod, weight)` pool for an add-a-mod draw —
+/// the **sampling-identical** pool builder behind [`sample_eligible_mod`].
+///
+/// This is the analytic counterpart of the weighted draw: normalizing the
+/// returned weights yields the exact categorical distribution that
+/// [`sample_eligible_mod`] samples from. The advisor's analytic transition
+/// model (docs/81 successor) consumes this to construct exact
+/// `P(next mod | state, action)` distributions without Monte Carlo.
+///
+/// Eligibility, weighting (inclusive higher-tier via
+/// [`ModRegistry::inclusive_weight_for_on_base`]), the Min-Modifier-Level
+/// floor, and the keep-≥1-tier sub-floor exception are all identical to the
+/// sampling path — by construction, since the sampler delegates here.
+///
+/// NOTE: this is **not** the wasm `eligibleMods` inspector path
+/// (`poc2-wasm/src/commands/eligible.rs`), which reports raw base weights
+/// for UI display and does not apply `BASIC_ORB_EXCLUDES` or the sub-floor
+/// exception.
+#[allow(clippy::too_many_arguments)]
+pub fn enumerate_eligible_mods(
+    registry: &ModRegistry,
+    base_registry: &crate::base_registry::BaseRegistry,
+    item: &Item,
+    affix: AffixType,
+    patch: crate::patch::PatchVersion,
+    min_required_level: u32,
+    excludes: ModFlags,
+) -> SmallVec<[(ModIndex, f64); 64]> {
     let class = class_for_item(item, base_registry);
     // Base tags drive tag-intersection weighting (leftmost-tag-wins) when no
     // numeric CoE weight covers a mod. Empty when no BaseRegistry is threaded
@@ -168,7 +211,7 @@ pub(crate) fn sample_eligible_mod<'r>(
         }
     }
 
-    pick_weighted(registry, &eligible, rng)
+    eligible
 }
 
 /// One weighted draw over `(mod, weight)` candidates using the f64
@@ -240,7 +283,11 @@ pub(crate) fn collect_occupied_groups(
 ///   type (Sinistral/Dextral Annulment, Sinistral/Dextral Erasure).
 /// - `desecrated_only` restricts to mods of `kind = Desecrated` (Omen of
 ///   Light: next Annul removes only Desecrated mods).
-pub(crate) fn collect_removable_filtered(
+///
+/// `pub` (not `pub(crate)`) alongside [`enumerate_eligible_mods`]: the
+/// advisor's analytic transition model enumerates removal outcomes with the
+/// exact list the Annul/Chaos removal draw is uniform over.
+pub fn collect_removable_filtered(
     item: &Item,
     affix_filter: Option<AffixType>,
     desecrated_only: bool,

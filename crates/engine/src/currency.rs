@@ -35,6 +35,7 @@ pub mod variants;
 pub use alloy::Alloy;
 pub use bone::{reveal_at_well_of_souls, sample_reveal_options, Bone, RevealOptions};
 pub use catalyst::{Catalyst, CatalystTarget, CATALYST_INCREMENT_DEFAULT, CATALYST_QUALITY_CAP};
+pub use common::{collect_removable_filtered, enumerate_eligible_mods, BASIC_ORB_EXCLUDES};
 pub use essence::{Essence, EssenceQuality, EssenceTarget};
 pub use fracturing::FracturingOrb;
 pub use hinekora::HinekorasLock;
@@ -43,6 +44,7 @@ pub use recombinator::{
     recombine_with_chance, RecombinatorOutcome,
 };
 pub use resolver::{CurrencyResolver, DefaultCurrencyResolver};
+pub use variants::min_mod_level_floor;
 
 use rand::RngCore;
 

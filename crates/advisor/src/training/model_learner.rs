@@ -293,6 +293,32 @@ impl TableModel {
             v
         })
     }
+
+    /// True when the model already holds an entry for `alias`. Used by the
+    /// learners to spend the per-alias budget (samples or analytic
+    /// enumeration) exactly once.
+    #[must_use]
+    pub fn contains_alias(&self, alias: &StateActionAlias) -> bool {
+        self.transitions.contains_key(alias)
+    }
+
+    /// Insert a pre-computed probability distribution for `alias`.
+    ///
+    /// Used by the analytic transition builder
+    /// ([`crate::training::analytic_model`]), which computes exact
+    /// categorical distributions from the engine's pool-weight enumeration
+    /// instead of Monte Carlo counting. `samples` feeds
+    /// [`Self::sample_count`]; exact entries pass
+    /// [`crate::training::analytic_model::EXACT_DISTRIBUTION_SAMPLES`].
+    pub fn insert_distribution(
+        &mut self,
+        alias: StateActionAlias,
+        dist: AHashMap<FeatureVec, f64>,
+        samples: u64,
+    ) {
+        self.sample_counts.insert(alias.clone(), samples);
+        self.transitions.insert(alias, dist);
+    }
 }
 
 /// Mutable accumulator used during `learn_transition_model`. Encapsulates

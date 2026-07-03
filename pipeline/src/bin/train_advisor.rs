@@ -5,23 +5,27 @@
 //!
 //! 1. For each goal, build a [`CraftingTask`] over a synthetic registry
 //!    (or a bundle when `--bundle` is supplied).
-//! 2. Run [`learn_transition_model`] to produce the per-action transition
-//!    model `P(s' | s, a)`.
+//! 2. Build the per-action transition model `P(s' | s, a)` — **exactly**
+//!    via [`learn_transition_model_analytic`] (`--model analytic`, the
+//!    default) or by Monte Carlo sampling via [`learn_transition_model`]
+//!    (`--model mc`, the historical Britz-style path kept for
+//!    cross-validation).
 //! 3. Solve the Bellman equation twice via [`value_iteration`] — once
 //!    with the path-length reward, once with the cost reward.
 //! 4. Package the results into a [`TrainedModel`] per goal × class.
-//! 5. Serialize the `Vec<TrainedModel>` to JSON (or bincode when
-//!    `--format bincode` is supplied) and write to `--out`.
+//! 5. Serialize the `Vec<TrainedModel>` to JSON and write to `--out`.
 //!
-//! ## Smoke vs production parameters
+//! ## Runtime
 //!
-//! v3 ships a smoke-level default (`--samples 1000`) that completes in
-//! seconds and verifies the pipeline end-to-end. Production training
-//! uses `--samples 100000` per Britz; full corpus training takes a few
-//! hours per patch.
+//! `--model analytic` completes the full corpus in seconds-to-minutes:
+//! the engine's pool weights are enumerated in closed form, so `--samples`
+//! only budgets the Monte Carlo *fallback* used for actions without a
+//! closed form. `--model mc` reproduces the historical behavior
+//! (`--samples 100000` ≈ hours for the full corpus per Britz).
 //!
 //! Reference: `docs/81-engine-training-and-rule-encoding-plan.md` §6.6
-//! Tier 3.6.
+//! Tier 3.6 (MC path); `crates/advisor/src/training/analytic_model.rs`
+//! (analytic successor).
 
 use std::collections::HashSet;
 use std::fs;
@@ -32,8 +36,9 @@ use clap::Parser;
 use poc2_advisor::action::AdvisorAction;
 use poc2_advisor::featurize::FeatureVec;
 use poc2_advisor::training::{
-    learn_transition_model, trained_model_from, value_iteration, CraftingTask, LearnConfig,
-    RewardKind, TrainedModelArtefact, TrainingArtefactMetrics, ValueIterationConfig,
+    learn_transition_model, learn_transition_model_analytic, trained_model_from, value_iteration,
+    AnalyticConfig, CraftingTask, LearnConfig, RewardKind, TrainedModelArtefact,
+    TrainingArtefactMetrics, ValueIterationConfig,
 };
 use poc2_advisor::{featurize, Goal};
 use poc2_data::Bundle;
@@ -65,8 +70,17 @@ struct Cli {
     #[arg(long, default_value = "trained-models.json")]
     out: PathBuf,
 
-    /// Monte Carlo samples per (state, action) pair. Smoke = 1000;
-    /// production ship-prep = 100000.
+    /// Transition-model construction. `analytic` (default) builds exact
+    /// distributions from the engine's pool-weight enumeration — zero
+    /// sampling error, seconds per corpus. `mc` is the historical Monte
+    /// Carlo learner, kept for cross-validation.
+    #[arg(long, value_enum, default_value = "analytic")]
+    model: ModelKind,
+
+    /// Monte Carlo samples per (state, action) pair. With `--model mc`
+    /// this is the full per-pair budget (smoke = 1000, production ship-prep
+    /// = 100000 per Britz). With `--model analytic` it only budgets the MC
+    /// *fallback* for actions without a closed form.
     #[arg(long, default_value_t = 1_000)]
     samples: u32,
 
@@ -109,6 +123,14 @@ struct Cli {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 enum OutputFormat {
     Json,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ModelKind {
+    /// Exact analytic transition construction (production default).
+    Analytic,
+    /// Monte Carlo estimation (historical / cross-validation path).
+    Mc,
 }
 
 /// One entry in the corpus TOML — a serializable [`Goal`] specification.
@@ -380,9 +402,11 @@ fn build_terminal_predicate(goal: &Goal) -> impl Fn(&FeatureVec) -> bool {
     move |state: &FeatureVec| mask != 0 && (state.target_match & mask) == mask
 }
 
+#[allow(clippy::too_many_arguments)] // operator binary: every knob is an explicit CLI flag
 fn train_one_goal(
     corpus_goal: &CorpusGoal,
     ctx: &EngineContext,
+    model_kind: ModelKind,
     samples: u32,
     max_states: u32,
     afterstate_aliasing: bool,
@@ -403,17 +427,9 @@ fn train_one_goal(
         omens: OmenSet::new(),
     };
 
-    let learn_config = LearnConfig {
-        samples_per_state_action: samples,
-        afterstate_aliasing,
-        seed: 0x_5EED_C0DE_C0DE_5EED,
-        max_states,
-        max_actions_per_state: 32,
-    };
-
     if verbose {
         eprintln!(
-            "training `{}` (class={}, base={}, ilvl={}, budget={}): samples/pair={}",
+            "training `{}` (class={}, base={}, ilvl={}, budget={}): model={model_kind:?}, samples/pair={}",
             corpus_goal.id,
             corpus_goal.item_class,
             initial_item.base.as_str(),
@@ -425,9 +441,32 @@ fn train_one_goal(
 
     let actions = enumerate_basic_actions();
     let actions_clone = actions.clone();
-    let model = learn_transition_model(&task, learn_config, move |_item, _goal| {
-        actions_clone.clone()
-    });
+    let model = match model_kind {
+        ModelKind::Analytic => {
+            let config = AnalyticConfig {
+                afterstate_aliasing,
+                seed: 0x_5EED_C0DE_C0DE_5EED,
+                max_states,
+                max_actions_per_state: 32,
+                mc_fallback_samples: samples,
+            };
+            learn_transition_model_analytic(&task, config, move |_item, _goal| {
+                actions_clone.clone()
+            })
+        }
+        ModelKind::Mc => {
+            let learn_config = LearnConfig {
+                samples_per_state_action: samples,
+                afterstate_aliasing,
+                seed: 0x_5EED_C0DE_C0DE_5EED,
+                max_states,
+                max_actions_per_state: 32,
+            };
+            learn_transition_model(&task, learn_config, move |_item, _goal| {
+                actions_clone.clone()
+            })
+        }
+    };
 
     let initial_features = featurize(&initial_item, &goal, &ctx.registry);
     let value_config = ValueIterationConfig::default();
@@ -678,6 +717,7 @@ fn main() -> Result<()> {
         let artefact = train_one_goal(
             goal,
             &ctx,
+            cli.model,
             cli.samples,
             cli.max_states,
             !cli.no_aliasing,

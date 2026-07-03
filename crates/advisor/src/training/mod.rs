@@ -2,9 +2,11 @@
 //!
 //! ## Module map
 //!
-//! - [`model_learner`] — builds the per-action transition model
-//!   `P(s' | s, a)` by Monte Carlo sampling over the engine simulator
-//!   (M16.2).
+//! - [`analytic_model`] — builds the per-action transition model
+//!   `P(s' | s, a)` **exactly** from the engine's pool-weight enumeration
+//!   (the production default; Monte Carlo fallback for exotic actions).
+//! - [`model_learner`] — the original Monte Carlo learner (M16.2), kept as
+//!   the cross-validation reference and the `--model mc` path.
 //! - [`value_iteration`] — solves the Bellman equation over the learned
 //!   transition model to produce a Q-table (M16.3).
 //!
@@ -18,6 +20,7 @@
 //! state shape and the v3 plan's afterstate-aliasing policy
 //! (`docs/81-engine-training-and-rule-encoding-plan.md` §6).
 
+pub mod analytic_model;
 pub mod artefact;
 pub mod hybrid;
 pub mod imitation;
@@ -25,6 +28,9 @@ pub mod metrics;
 pub mod model_learner;
 pub mod value_iteration;
 
+pub use analytic_model::{
+    learn_transition_model_analytic, AnalyticConfig, EXACT_DISTRIBUTION_SAMPLES,
+};
 pub use artefact::{
     load_artefact_file, load_artefacts_str, load_cache_from_dir, ArtefactLoadOutcome,
     TrainedModelArtefact, TrainingArtefactMetrics,

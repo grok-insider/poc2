@@ -198,13 +198,18 @@ canonical org (see below).
 
 Ordered by expected value; none are started unless noted.
 
-- [ ] **Production advisor retrain** (operator action, ~hours):
-  `cargo run --release --bin train-advisor -- --corpus
-  pipeline/data/training_goals.toml --bundle <0.5 bundle> --out … 
-  --samples 100000`, then copy the artefact to
-  `apps/web/public/trained-models.json`. The wiring is live and smoke-
-  validated; only the compute run remains. Consider a CI/release lane
-  that publishes the artefact alongside releases.
+- [ ] **Production advisor retrain** (operator action, ~seconds since the
+  analytic trainer landed): `cargo run --release --bin train-advisor --
+  --corpus pipeline/data/training_goals.toml --bundle <0.5 bundle> --out …`
+  (default `--model analytic` builds exact transition distributions from
+  the engine's pool-weight enumeration; the old Monte Carlo path survives
+  as `--model mc` for cross-validation), then copy the artefact to
+  `apps/web/public/trained-models.json`. Consider a CI/release lane that
+  publishes the artefact alongside releases. Known corpus wart: 4 goals
+  (`shield-es-spellblock`, `quiver-attack`, `ring-caster-spell-mana`,
+  `amulet-attack-skill-life`) sit at the −1000 V-floor under BOTH models —
+  unreachable under the 7-action training set / bitmap terminal; see the
+  training-quality pass.
 - [ ] **Plugin phase 3 (ADR-0014):** recommendation emitters — needs a
   candidate-source hook in the planner (`PlanInput` only carries
   predicate dispatch today), then the JS host wires
