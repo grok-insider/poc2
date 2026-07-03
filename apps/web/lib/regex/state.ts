@@ -7,7 +7,10 @@
 import { create } from "zustand";
 import { emptyVendorSettings, type VendorSettings } from "./vendor";
 
-export type RegexTab = "goal" | "mods" | "vendor";
+export type RegexTab = "goal" | "mods" | "waystone" | "tablet" | "vendor";
+
+/** Tabs that pick mods out of an engine pool (share the picker core). */
+export type PoolSlice = "mods" | "waystone" | "tablet";
 
 export interface ModSelection {
   /** Selected mod ids (per-tier ids; selecting a group selects a tier). */
@@ -24,17 +27,19 @@ interface RegexState {
   customText: string;
   autoCopy: boolean;
   mods: ModSelection;
+  waystone: ModSelection;
+  tablet: ModSelection;
   vendor: VendorSettings;
 
   setTab: (t: RegexTab) => void;
   setCustomText: (t: string) => void;
   setAutoCopy: (v: boolean) => void;
-  setMods: (m: Partial<ModSelection>) => void;
+  setSelection: (slice: PoolSlice, m: Partial<ModSelection>) => void;
   setVendor: (v: VendorSettings) => void;
   resetTab: () => void;
 }
 
-const emptyMods = (): ModSelection => ({
+const emptySelection = (): ModSelection => ({
   selected: [],
   minValues: {},
   unwanted: [],
@@ -45,18 +50,24 @@ export const useRegex = create<RegexState>((set, get) => ({
   tab: "goal",
   customText: "",
   autoCopy: false,
-  mods: emptyMods(),
+  mods: emptySelection(),
+  waystone: emptySelection(),
+  tablet: emptySelection(),
   vendor: emptyVendorSettings(),
 
   setTab: (tab) => set({ tab }),
   setCustomText: (customText) => set({ customText }),
   setAutoCopy: (autoCopy) => set({ autoCopy }),
-  setMods: (m) => set({ mods: { ...get().mods, ...m } }),
+  setSelection: (slice, m) => set({ [slice]: { ...get()[slice], ...m } }),
   setVendor: (vendor) => set({ vendor }),
   resetTab: () => {
     const { tab } = get();
-    if (tab === "mods") set({ mods: emptyMods(), customText: "" });
-    else if (tab === "vendor") set({ vendor: emptyVendorSettings(), customText: "" });
-    else set({ customText: "" });
+    if (tab === "mods" || tab === "waystone" || tab === "tablet") {
+      set({ [tab]: emptySelection(), customText: "" });
+    } else if (tab === "vendor") {
+      set({ vendor: emptyVendorSettings(), customText: "" });
+    } else {
+      set({ customText: "" });
+    }
   },
 }));

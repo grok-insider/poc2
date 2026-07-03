@@ -139,7 +139,16 @@ export function termsForMods(
   if (targets.length === 0) return { terms: [], exact: true, warnings: ["no matching mods"] };
 
   const all = poolLines(pool);
+  // Same-group tiers share their template by definition — selecting one
+  // tier means "this mod family" (an optional value floor distinguishes
+  // tiers), so siblings must not count as "other mods" when judging
+  // line exclusivity. Without this, any pick from a multi-tier group
+  // fell back to over-matching whole-line alternatives.
+  const targetGroups = new Set(targets.map((v) => v.mod_group));
   const targetIds = new Set(targets.map((v) => v.mod_id));
+  for (const v of pool) {
+    if (targetGroups.has(v.mod_group)) targetIds.add(v.mod_id);
+  }
   const { lines, dropped } = exclusiveLines(targets, pool, targetIds);
 
   let targetLines = lines;

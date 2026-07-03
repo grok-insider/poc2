@@ -14,13 +14,15 @@
 
 import { useRegex, type RegexTab } from "@/lib/regex/state";
 import { RegexGoalTab } from "./RegexGoalTab";
-import { RegexModsTab } from "./RegexModsTab";
+import { RegexModsTab, RegexTabletTab, RegexWaystoneTab } from "./RegexModsTab";
 import { RegexVendorTab } from "./RegexVendorTab";
 import styles from "./RegexPanel.module.css";
 
 const TABS: { id: RegexTab; label: string; title: string }[] = [
   { id: "goal", label: "Goal", title: "Search string from your craft target" },
   { id: "mods", label: "Item mods", title: "Pick mods from this base's pool" },
+  { id: "waystone", label: "Waystone", title: "Waystone map-mod search strings" },
+  { id: "tablet", label: "Tablet", title: "Precursor Tablet search strings" },
   { id: "vendor", label: "Vendor", title: "Shopping filters for vendor/stash search" },
 ];
 
@@ -50,6 +52,8 @@ export function RegexPanel() {
         <div className={styles.stack}>
           {tab === "goal" && <RegexGoalTab />}
           {tab === "mods" && <RegexModsTab />}
+          {tab === "waystone" && <RegexWaystoneTab />}
+          {tab === "tablet" && <RegexTabletTab />}
           {tab === "vendor" && <RegexVendorTab />}
         </div>
       </div>
