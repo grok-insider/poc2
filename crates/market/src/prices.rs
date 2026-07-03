@@ -414,6 +414,76 @@ pub fn default_id_mapping() -> HashMap<String, CurrencyId> {
             "PerfectEssenceOfTheInfinite",
         ),
         ("perfect-essence-of-seeking", "PerfectEssenceOfSeeking"),
+        // ---- Verisium Alloys (0.5) ------------------------------------
+        // Slugs follow poe2scout's kebab-case-of-display-name convention
+        // (apostrophes dropped), the same rule every observed slug above
+        // obeys. Unmatched slugs fall through harmlessly, and the
+        // name-keyed poe.ninja path + the desktop price cache cover any
+        // divergence.
+        ("runic-alloy", "RunicAlloy"),
+        ("adaptive-alloy", "AdaptiveAlloy"),
+        ("protective-alloy", "ProtectiveAlloy"),
+        ("expansive-alloy", "ExpansiveAlloy"),
+        ("swift-alloy", "SwiftAlloy"),
+        ("cyclonic-alloy", "CyclonicAlloy"),
+        ("prismatic-alloy", "PrismaticAlloy"),
+        ("mystic-alloy", "MysticAlloy"),
+        ("sovereign-alloy", "SovereignAlloy"),
+        ("celestial-alloy", "CelestialAlloy"),
+        ("transcendent-alloy", "TranscendentAlloy"),
+        ("the-runebinders-alloy", "TheRunebindersAlloy"),
+        ("the-runefathers-alloy", "TheRunefathersAlloy"),
+        // ---- Distilled Emotions (0.5) ---------------------------------
+        ("diluted-liquid-ire", "DilutedLiquidIre"),
+        ("diluted-liquid-guilt", "DilutedLiquidGuilt"),
+        ("diluted-liquid-greed", "DilutedLiquidGreed"),
+        ("liquid-paranoia", "LiquidParanoia"),
+        ("liquid-envy", "LiquidEnvy"),
+        ("liquid-disgust", "LiquidDisgust"),
+        ("liquid-despair", "LiquidDespair"),
+        ("concentrated-liquid-fear", "ConcentratedLiquidFear"),
+        (
+            "concentrated-liquid-suffering",
+            "ConcentratedLiquidSuffering",
+        ),
+        (
+            "concentrated-liquid-isolation",
+            "ConcentratedLiquidIsolation",
+        ),
+        ("ancient-diluted-liquid-ire", "AncientDilutedLiquidIre"),
+        ("ancient-diluted-liquid-guilt", "AncientDilutedLiquidGuilt"),
+        ("ancient-diluted-liquid-greed", "AncientDilutedLiquidGreed"),
+        ("ancient-liquid-paranoia", "AncientLiquidParanoia"),
+        ("ancient-liquid-envy", "AncientLiquidEnvy"),
+        ("ancient-liquid-disgust", "AncientLiquidDisgust"),
+        ("ancient-liquid-despair", "AncientLiquidDespair"),
+        (
+            "ancient-concentrated-liquid-fear",
+            "AncientConcentratedLiquidFear",
+        ),
+        (
+            "ancient-concentrated-liquid-suffering",
+            "AncientConcentratedLiquidSuffering",
+        ),
+        (
+            "ancient-concentrated-liquid-isolation",
+            "AncientConcentratedLiquidIsolation",
+        ),
+        ("potent-liquid-melancholy", "PotentLiquidMelancholy"),
+        ("potent-liquid-ferocity", "PotentLiquidFerocity"),
+        ("potent-liquid-contempt", "PotentLiquidContempt"),
+        (
+            "ancient-potent-liquid-melancholy",
+            "AncientPotentLiquidMelancholy",
+        ),
+        (
+            "ancient-potent-liquid-ferocity",
+            "AncientPotentLiquidFerocity",
+        ),
+        (
+            "ancient-potent-liquid-contempt",
+            "AncientPotentLiquidContempt",
+        ),
         // ---- Bones (Phase F) ------------------------------------------
         // poe2scout exposes bones under the `abyss` category. Slugs
         // observed: `gnawed-rib`, `preserved-rib`, etc.
@@ -872,6 +942,13 @@ mod tests {
         tail.starts_with("EssenceOf")
     }
 
+    /// Verisium Alloy / Distilled Emotion ids are bundle-driven (0.5
+    /// catalogues; `tests/id_mapping_05.rs` cross-checks them against the
+    /// shipped bundle) — the canon test accepts their naming schemes.
+    fn is_alloy_or_emotion_id(s: &str) -> bool {
+        s.ends_with("Alloy") || s.contains("Liquid")
+    }
+
     #[test]
     fn default_id_mapping_targets_known_engine_ids() {
         use poc2_engine::currency::{CurrencyResolver, DefaultCurrencyResolver};
@@ -896,7 +973,8 @@ mod tests {
             let known = omen_canon.contains(s)
                 || resolver.resolve(&id).is_some()
                 || CATALOGUE_IDS.contains(&s)
-                || is_essence_id(s);
+                || is_essence_id(s)
+                || is_alloy_or_emotion_id(s);
             assert!(known, "slug {slug:?} maps to unknown engine id {s:?}");
         }
     }

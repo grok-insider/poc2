@@ -37,3 +37,6 @@ net = ["dep:reqwest", "dep:tokio", "dep:urlencoding", "dep:futures"]
 [dev-dependencies]
 insta.workspace = true
 tempfile = "3.13"
+# Cross-checks default_id_mapping against the shipped bundle's alloy /
+# emotion catalogues (tests/id_mapping_05.rs).
+poc2-data.workspace = true
