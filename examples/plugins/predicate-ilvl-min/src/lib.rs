@@ -27,10 +27,41 @@
 
 #![allow(unsafe_code)]
 
-use poc2_plugin_sdk::{declare_predicate, serde_json};
+use poc2_plugin_sdk::serde_json::Value;
+use poc2_plugin_sdk::{declare_predicate, declare_rules, serde_json};
 
-declare_predicate!(ilvl_at_least, |item, args| {
+declare_predicate!(ilvl_at_least, |item: &Value, args: &Value| {
     let ilvl = item.get("ilvl").and_then(serde_json::Value::as_u64).unwrap_or(0);
     let min = args.get("min").and_then(serde_json::Value::as_u64).unwrap_or(82);
     ilvl >= min
 });
+
+// Phase 1 + 2 combined demo: the plugin ALSO ships a rule that is gated
+// by its own custom predicate. When loaded in the app
+// (Settings → Plugins), fresh Normal ilvl-82+ items get an extra
+// plugin-sourced suggestion — visible proof that both the rule emission
+// (phase 1) and the live predicate dispatch (phase 2) work end-to-end.
+declare_rules!(
+    r#"
+[[rule]]
+id = "R-PLUGIN-ilvl-min-transmute"
+category = "base_selection"
+explanation = "Plugin demo: ilvl_at_least(82) gate satisfied - this base is endgame-viable."
+source = "predicate-ilvl-min example plugin"
+confidence = "experimental"
+
+[rule.when]
+all = [
+    { rarity = "normal" },
+    { custom = { plugin_id = "predicate-ilvl-min", name = "ilvl_at_least", args = { min = 82 } } },
+]
+
+[[rule.then]]
+note = "predicate-ilvl-min: ilvl >= 82 confirmed by the plugin predicate - a Greater Transmute keeps the mod level floor at 44+."
+priority = 60
+[rule.then.action]
+kind = "apply_currency"
+currency = "GreaterOrbOfTransmutation"
+omens = []
+"#,
+);

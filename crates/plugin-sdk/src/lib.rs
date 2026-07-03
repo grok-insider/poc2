@@ -97,6 +97,14 @@ pub extern "C" fn reset_arena() {
 /// Write `bytes` to the arena and return `(ptr, len)` as a packed i64
 /// (`(len as i64) << 32 | ptr as i64`). Plugin export wrappers use
 /// this to return JSON outputs back to the host.
+///
+/// `ptr` is an ABSOLUTE linear-memory address (what [`alloc`] returns
+/// and what hosts read via the module's exported memory), so the copy
+/// goes through a raw pointer — NOT a `Vec` index. The original v1
+/// implementation indexed the arena `Vec` with the absolute address,
+/// which panicked (→ `unreachable` trap) on every real emission call;
+/// it went unnoticed because the host tests exercised hand-written WAT
+/// fixtures, never an SDK-built plugin.
 #[must_use]
 pub fn write_output(bytes: &[u8]) -> (i32, i32) {
     let len = bytes.len() as i32;
@@ -104,30 +112,28 @@ pub fn write_output(bytes: &[u8]) -> (i32, i32) {
     if ptr == 0 {
         return (0, 0);
     }
-    ARENA.with(|a| {
-        let mut a = a.borrow_mut();
-        let offset = ptr as usize;
-        a[offset..offset + bytes.len()].copy_from_slice(bytes);
-    });
+    // SAFETY: `alloc` just reserved exactly `len` bytes at this address
+    // inside the arena, and nothing reallocates the arena between the
+    // reservation and this copy (single-threaded guest).
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as usize as *mut u8, bytes.len());
+    }
     (ptr, len)
 }
 
-/// Read `len` bytes from the arena starting at `ptr`. Used by export
-/// wrappers to deserialize host inputs.
+/// Read `len` bytes of linear memory starting at absolute address
+/// `ptr`. Used by export wrappers to deserialize host inputs (the host
+/// writes them at addresses previously returned by [`alloc`]).
 #[must_use]
 pub fn read_input(ptr: i32, len: i32) -> Vec<u8> {
     if ptr <= 0 || len <= 0 {
         return Vec::new();
     }
-    let ptr_usize = ptr as usize;
-    let len_usize = len as usize;
-    ARENA.with(|a| {
-        let a = a.borrow();
-        if ptr_usize + len_usize > a.len() {
-            return Vec::new();
-        }
-        a[ptr_usize..ptr_usize + len_usize].to_vec()
-    })
+    // SAFETY: the host contract is that `(ptr, len)` came from `alloc`
+    // reservations it wrote into; reading them as a shared slice while
+    // no `&mut` borrow of the arena is live is sound in the
+    // single-threaded guest.
+    unsafe { std::slice::from_raw_parts(ptr as usize as *const u8, len as usize).to_vec() }
 }
 
 /// Re-export serde_json so plugins don't need to depend on it

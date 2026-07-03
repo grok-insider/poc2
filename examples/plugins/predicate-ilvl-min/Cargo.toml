@@ -1,3 +1,7 @@
+# Standalone package (NOT a member of the repo's cargo workspace — an
+# empty [workspace] table keeps `cargo build` here self-contained).
+[workspace]
+
 [package]
 name = "predicate-ilvl-min"
 description = "Example poc2 plugin: custom predicate matching item-level >= threshold"
