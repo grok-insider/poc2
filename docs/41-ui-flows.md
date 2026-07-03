@@ -34,7 +34,7 @@ Rail sections → panels (one component per workflow):
 | History | `HistoryTab` | recorded outcomes, undo, cost ledger |
 | Database | `DatabasePanel` | bases + materials browser (engine `listDatabaseEntries` / `databaseEntryDetail`) |
 | Price | `PricePanel` | trade2 stat filters from the imported item, live listings (desktop proxy) or deep link (browser) |
-| Regex | `RegexPanel` | in-game search-string generator: Goal (craft target → stash-search), Item mods (pool selection + roll floors + `!`unwanted), Vendor (shopping filters); 250-char budget meter, copy/auto-copy |
+| Regex | `RegexPanel` | in-game search-string generator: Goal (craft target → stash-search), Item mods / Waystone / Tablet (pool selection + roll floors + `!`unwanted), Vendor (shopping filters); 250-char budget meter, copy/auto-copy |
 | Genesis Tree | `GenesisPanel` | full-bleed 0.5 Breach tree with real art + curated goal presets (engine `genesisTree`) |
 | Tools | `ToolsPanel` | simulation runner (`runNTrials`) + recipe library (IndexedDB) |
 | Settings | `SettingsPanel` | market league + price refresh, engine League ruleset, desktop price-cache status, capture diagnostics, plugins (add/remove `.wasm`), notes, data/reset |
@@ -91,7 +91,7 @@ The typed client (`client.ts`) mirrors every Engine method:
 | resolve | `resolveName` (fuzzy name → canonical key; OCR + prices) |
 | genesis | `genesisTree` |
 | trained models | `trainedModelCount` (the worker loads the optional `/trained-models.json` at boot via `loadTrainedModels`; ⚛ topbar chip) |
-| plugins | `setPluginContent` (ADR-0014 phase 1 — Settings → Plugins extracts strategy/rule TOMLs from sandboxed plugin wasm) |
+| plugins | `setPluginContent` (phase 1 emission), `setPluginDispatch`/`clearPluginDispatch` (phase 2 live predicates; wired worker-side via the `__loadPlugins` transfer message) |
 
 New engine-boundary methods must update `client.ts` + `lib/types.ts`
 together, then typecheck.
@@ -165,8 +165,8 @@ region.
 
 ## Bundle loading
 
-The web app fetches `/poc2.bundle.json.gz` (committed 0.5 / schema v3
-bundle). To refresh it, rebuild and copy:
+The web app fetches `/poc2.bundle.json.gz` (a gitignored local asset —
+0.5 / schema v3). To build/refresh it:
 
 ```bash
 cargo run --release -p poc2-pipeline -- build \

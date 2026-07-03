@@ -93,16 +93,19 @@ overlay and is surfaced in Settings.
 
 Inspired by [poe2.re](https://github.com/veiset/poe2.re) (unlicensed —
 clean-room reimplementation). Pure-TS lib (`apps/web/lib/regex/`) +
-panel with three tabs: **Goal** (the craft target as a "the item is
+panel with five tabs: **Goal** (the craft target as a "the item is
 done" stash-search string — per-spec terms, per-mod-group tier→roll
 floors, precision-first skipping of unidentifiable mods), **Item mods**
 (free pool selection with roll floors + negated unwanted group),
-**Vendor** (class/rarity/ilvl/movement/resists/attributes/mod-family
-shopping filters). Shortest-unique fragments are computed at runtime
-against the live bundle pool (digit-free, roll-safe, `^`/`$` anchors),
-so patterns can never drift from the data; assembly enforces the game's
-250-char budget. Bun-tested (exhaustive digit-range verification +
-no-false-positive property tests).
+**Waystone** and **Tablet** (the 0.5 data-gap pools — wanted/unwanted
+map- and tablet-mod strings), **Vendor**
+(class/rarity/ilvl/movement/resists/attributes/mod-family shopping
+filters). Shortest-unique fragments are computed at runtime against the
+live bundle pool (digit-free, roll-safe, `^`/`$` anchors, same-group
+tiers never disqualify a line), so patterns can never drift from the
+data; assembly enforces the game's 250-char budget. Bun-tested
+(exhaustive digit-range verification + no-false-positive property
+tests).
 
 ### Automated data refresh (ADR-0012) ✅
 
@@ -128,19 +131,46 @@ Shipped by the M14 audit (base-name matching through
 `PlanInput.base_registry`) — the old "needs base-level fidelity" note
 was stale. Now pinned by a live-bundle regression test
 (`live_bundle_proposes_emotion_on_matching_jewel_base`); the live-bundle
-smoke tests also run in CI now (they find the committed web bundle).
+smoke tests find the web app's local bundle asset when present (they
+skip-pass where no bundle exists, e.g. CI).
 Still open upstream: 5 Ancient-emotion targets stay display-only until
 RePoE exports their mods.
 
-### Plugin re-wire phase 1 (ADR-0014) ✅
+### Plugin re-wire phases 1 + 2 (ADR-0014) ✅
 
 Decision: **browser-side JS host** (wasmtime can't run in wasm32;
-blocking IPC to Electron main can't serve a sync planner). Phase 1
-shipped: plugin `.wasm` files managed from Settings → Plugins (IndexedDB
-persisted), instantiated sandboxed (no imports) on the main thread, SDK
-emission exports (`list_strategies`/`list_rules`) extracted and fed to
-`Engine.setPluginContent` (set semantics: seeds + content, idempotent,
-warn-and-skip per document).
+blocking IPC to Electron main can't serve a sync planner). Phase 1:
+plugin `.wasm` files managed from Settings → Plugins (IndexedDB
+persisted), instantiated sandboxed (no imports), SDK emission exports
+(`list_strategies`/`list_rules`) fed to `Engine.setPluginContent` (set
+semantics, warn-and-skip per document). Phase 2: **live custom
+predicates** — plugin instances live in the engine worker, the engine
+calls a synchronous JS dispatch (`Engine.setPluginDispatch`) during
+planning, guarded by strike-based auto-disable (ADR-0008's perf
+contract, post-hoc). Verified in-browser end-to-end with the SDK-built
+example plugin (its emitted rule fires through its own predicate).
+Shipping this surfaced and fixed a latent v1 **SDK arena bug** that
+trapped every real emission call (absolute addresses used as `Vec`
+indices; only WAT fixtures had ever been tested).
+
+### 0.5 data-gap pools: Waystones / Tablets / Relics / Flasks / Charms / Ultimatum ✅
+
+The pipeline now ingests the non-gear crafting surfaces RePoE exports
+(they were always real data — the old filter just dropped everything
+outside `domain == "item"`): **Waystones** (class `Map`, 16 tier bases +
+108 mods ≈ poe2db's 109), **Precursor Tablets** (`TowerAugmentation`,
+81 ≈ 83), **Sanctum Relics** (136 ≈ 139), **Life/Mana Flasks** (57 + 52;
+57 exact), **Charms** (`UtilityFlask`, 51 exact), and **Inscribed
+Ultimatum** (31 exact). Pool isolation is pinned per surface at
+ingestion (`pool_domain_classes`) because many surface mods spawn on
+`default` with positive weight — the naive tag→class derivation leaked
+85 of them into the Ring pool. Guarded by
+`pipeline/tests/live_bundle_pools.rs` (counts + both-way isolation);
+audit-matrix now sweeps 39 classes / 2,059 checks with 0 failures.
+Clipboard import learns the in-game display names ("Waystones",
+"Precursor Tablets", "Charms", "Inscribed Ultimatum"). Sanctified
+Relics genuinely have no craftable pool upstream (0 is correct).
+Bundle: **4,100 mods / 3,843 bases / 75 classes**.
 
 ### 0.5 price-id mappings ✅
 
@@ -175,21 +205,18 @@ Ordered by expected value; none are started unless noted.
   `apps/web/public/trained-models.json`. The wiring is live and smoke-
   validated; only the compute run remains. Consider a CI/release lane
   that publishes the artefact alongside releases.
-- [ ] **Plugin phase 2 (ADR-0014):** live dispatch — custom predicates +
-  recommendation emitters via a synchronous JS callback
-  (`Engine.setPluginDispatch`), worker-held plugin instances, ADR-0008's
-  perf contract (timeouts + auto-disable) enforced in the JS host, and a
-  capability-approval UI.
+- [ ] **Plugin phase 3 (ADR-0014):** recommendation emitters — needs a
+  candidate-source hook in the planner (`PlanInput` only carries
+  predicate dispatch today), then the JS host wires
+  `emit_recommendations`; plus a capability-manifest approval UI.
 - [ ] **Remaining data gaps** (blocked on upstream data + curation — not
-  guessable): mod pools for Waystones (109), Precursor Tablets (83),
-  Relics (139), Life/Mana Flasks (57), Charms (51), Inscribed Ultimatum
-  (31), Expedition Logbooks (21); "Thrud's Might" weapon mechanic;
-  Preserved Vertebrae (waystone desecration); Breach Ring quality caps
-  (40/45); Essence of the Abyss granting only one of its two Mark mods
-  per class; Vaal Catalysing Infuser; the 5 Expedition Saga omens.
-  Landing the Waystone/Tablet/Relic pools also unlocks
-  **Waystone/Tablet/Relic tabs in the Regex panel** (the lib is
-  domain-agnostic — it just needs the mod texts in the bundle).
+  guessable): "Thrud's Might" weapon mechanic; Preserved Vertebrae
+  (waystone desecration — the waystone pool now exists, the bone path
+  doesn't); Breach Ring quality caps (40/45); Essence of the Abyss
+  granting only one of its two Mark mods per class; Vaal Catalysing
+  Infuser; the 5 Expedition Saga omens; Expedition Logbooks (21 — no
+  craftable pool in RePoE's export yet). Waystone/Tablet/Relic/Flask/
+  Charm/Ultimatum pools shipped (see above).
 - [ ] **Canonical GitHub org decision** (`anomalyco` vs `grok-insider`):
   the release workflow now tolerates both; once decided, align Cargo
   metadata, docs, and tighten the gate back to one owner.

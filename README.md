@@ -72,10 +72,11 @@ Targets: Linux, NixOS, and Windows 11 (macOS out of scope).
   [poe2.re](https://poe2.re)): turn your **craft target into a stash-search
   string** — paste it in game and a finished item lights up after every
   roll session; pick arbitrary mods from the base's real pool (with roll
-  floors like `(8[5-9]|9\d|\d\d\d).*m life`); or build vendor shopping
-  filters (class / rarity / ilvl / movement / resists). Fragments are
-  computed at runtime against the live bundle pool — shortest unique
-  substring, no false positives, 250-char budget meter.
+  floors like `(8[5-9]|9\d|\d\d\d).*m life`); generate **Waystone and
+  Precursor Tablet** mod strings; or build vendor shopping filters
+  (class / rarity / ilvl / movement / resists). Fragments are computed
+  at runtime against the live bundle pool — shortest unique substring,
+  no false positives, 250-char budget meter.
 - **Genesis Tree panel (0.5)** — the full in-game Breach crafting tree
   (real layout and art, PoE2-style tooltips) with curated, source-cited
   "best nodes per goal" presets: Divine/Exalt/Catalyst farming, minion
@@ -126,8 +127,8 @@ bun run desktop:start                 # serving apps/web/out over app:// (run `b
 
 The web app needs two static assets in `apps/web/public/`: the WASM module
 (`wasm/poc2_wasm_bg.wasm`, produced by `bun run wasm`) and a data bundle
-(`poc2.bundle.json.gz` — a 0.5 bundle is committed; rebuild via First-run
-setup). Optional regenerable assets (never committed): base-item icons
+(`poc2.bundle.json.gz` — a gitignored local asset; build it via First-run
+setup and copy it in). Optional regenerable assets (never committed): base-item icons
 (`fetch-base-icons`), Genesis art (`fetch-genesis-assets`), and the OCR
 runtime (`bun run ocr:assets`).
 
@@ -147,11 +148,12 @@ To clone the reference repos (~1.5 GB):
    ```
    The bundle contains every mod, base, omen, essence, bone, catalyst,
    alloy, emotion, Genesis node, and weight observation the advisor
-   reads. The shipped 0.5 bundle (schema v3) carries **3,626 mods,
-   3,821 bases, 95 essences, 45 omens, 12 catalysts, 10 bones,
-   13 Verisium Alloys (132 class-targets), 26 Distilled Emotions, and
-   6,157 weights**. Copy it to `apps/web/public/poc2.bundle.json.gz` to
-   ship it with the web app.
+   reads. The shipped 0.5 bundle (schema v3) carries **4,100 mods,
+   3,843 bases (incl. the 16 Waystone tiers), 95 essences, 45 omens,
+   13 catalysts, 10 bones, 13 Verisium Alloys (132 class-targets),
+   26 Distilled Emotions, the Waystone/Tablet/Relic/Flask/Charm/
+   Ultimatum pools, and 6,302 weights**. Copy it to
+   `apps/web/public/poc2.bundle.json.gz` to ship it with the web app.
 
 2. **Live prices** (optional): click "Refresh prices" in Settings to
    pull from poe2scout (the desktop shell also keeps its own hourly
@@ -215,7 +217,8 @@ for the rule-priority pipeline.
 | OCR price overlay + calibration + desktop price cache | ✅ shipped (ADR-0013) |
 | Automated data refresh (watch → rebuild → diff → draft PR) | ✅ shipped (ADR-0012) |
 | Trained-model planning (Q-tables in the WASM engine, ⚛ topbar chip) | ✅ shipped — drop a `train-advisor` artefact at `public/trained-models.json`; production-scale retrain is an operator step |
-| Plugins phase 1 (strategy/rule emission, Settings → Plugins, ADR-0014) | ✅ shipped — custom predicates/emitters are phase 2 |
+| Plugins phases 1+2 (Settings → Plugins: strategy/rule emission + live custom predicates, ADR-0014) | ✅ shipped — recommendation emitters are phase 3 |
+| 0.5 non-gear pools: Waystones, Precursor Tablets, Relics, Life/Mana Flasks, Charms, Inscribed Ultimatum | ✅ shipped — near-exact poe2db parity, leak-tested |
 | Advisor candidates for Distilled Emotions | ✅ shipped (M14 audit) — pinned by a live-bundle test |
 | Genesis birth simulation | ❌ intentionally out of scope |
 
@@ -268,13 +271,14 @@ Per [`docs/35-advisor-architecture.md`](docs/35-advisor-architecture.md)
 The Wasm plugin SDK (`crates/plugin-sdk`) lets plugins ship custom
 predicates, strategies, rules, and recommendation emitters (see
 [`examples/plugins/`](examples/plugins/)). Per
-[ADR-0014](docs/adr/0014-plugin-rewire-browser-host.md), the app now runs
-a **browser-side JS plugin host**: add a plugin `.wasm` in
+[ADR-0014](docs/adr/0014-plugin-rewire-browser-host.md), the app runs a
+**browser-side JS plugin host**: add a plugin `.wasm` in
 **Settings → Plugins** and its emitted strategies/rules join the
-advisor's registries (sandboxed instantiation — no network/filesystem).
-**Phase 2** (live custom predicates + recommendation emitters during
-planning) is roadmap work; until then `custom` predicates evaluate to
-false:
+advisor's registries, while its **custom predicates evaluate live during
+planning** (sandboxed instantiation — no network/filesystem; runaway
+plugins are strike-disabled). Recommendation emitters are phase 3
+(needs a planner-side candidate hook). The plugin file name is the
+`plugin_id` rule TOMLs reference:
 
 ```toml
 # Reference a plugin custom predicate from a rule:
