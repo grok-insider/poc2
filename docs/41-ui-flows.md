@@ -37,7 +37,7 @@ Rail sections → panels (one component per workflow):
 | Regex | `RegexPanel` | in-game search-string generator: Goal (craft target → stash-search), Item mods (pool selection + roll floors + `!`unwanted), Vendor (shopping filters); 250-char budget meter, copy/auto-copy |
 | Genesis Tree | `GenesisPanel` | full-bleed 0.5 Breach tree with real art + curated goal presets (engine `genesisTree`) |
 | Tools | `ToolsPanel` | simulation runner (`runNTrials`) + recipe library (IndexedDB) |
-| Settings | `SettingsPanel` | market league + price refresh, engine League ruleset, desktop price-cache status, capture diagnostics, notes, data/reset |
+| Settings | `SettingsPanel` | market league + price refresh, engine League ruleset, desktop price-cache status, capture diagnostics, plugins (add/remove `.wasm`), notes, data/reset |
 
 `OutcomeDialog` (modal) records what actually happened in game:
 add/remove/reroll mod, rarity changes — validated by the engine
@@ -90,6 +90,8 @@ The typed client (`client.ts`) mirrors every Engine method:
 | prices | `applyPrices` (poe2scout), `applyNinjaPrices` (poe.ninja) |
 | resolve | `resolveName` (fuzzy name → canonical key; OCR + prices) |
 | genesis | `genesisTree` |
+| trained models | `trainedModelCount` (the worker loads the optional `/trained-models.json` at boot via `loadTrainedModels`; ⚛ topbar chip) |
+| plugins | `setPluginContent` (ADR-0014 phase 1 — Settings → Plugins extracts strategy/rule TOMLs from sandboxed plugin wasm) |
 
 New engine-boundary methods must update `client.ts` + `lib/types.ts`
 together, then typecheck.

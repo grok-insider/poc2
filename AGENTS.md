@@ -11,18 +11,17 @@
 - Source-of-truth docs: `README.md` (user-facing), `CHANGELOG.md`, `docs/70-roadmap.md` (current/next work), and the ADRs. `docs/72`, `docs/80`, `docs/81`, and `docs/90` are **historical** plan documents.
 - **UI design system: `apps/web/DESIGN.md`** — the web app mimics the PoE2 *in-game* interface (Fontin fonts, black/bronze/gold panels, game-exact rarity colors, `.poe-pop` item popups, Breach-style Genesis tooltips). All new UI must follow it; GGG art is fetched (regenerable, gitignored) via `fetch-genesis-assets` / `fetch-base-icons`, never committed.
 - **Known gaps (the honest list — also mirrored in the roadmap):**
-  - Trained models: `train-advisor` + `PlanInput.trained_models` exist, but the **WASM engine passes `trained_models: None`** — the web app never loads trained Q-tables. Production-scale retrain (`--samples 100000`) on the 0.5 bundle is also pending.
-  - Plugins: SDK + wasmtime host are built and tested, but the **WASM engine passes `plugin_dispatch: None`** — no plugin runtime in the browser/Electron app.
+  - Trained models are **wired** (worker fetches the optional `/trained-models.json`; `Engine.loadTrainedModels` → `PlanInput.trained_models`; ⚛ topbar chip), but the **production-scale retrain** (`--samples 100000`) on the 0.5 bundle is pending — the artefact is an operator asset, never committed (smoke-quality artefacts exist locally under `~/.config/poc2/cache/trained_models/`).
+  - Plugins: **phase 1 wired** (ADR-0014 browser-side JS host — Settings → Plugins, strategy/rule emission via `Engine.setPluginContent`). **Phase 2 pending**: live custom predicates + recommendation emitters (`plugin_dispatch` is still `None` during planning; `ItemPredicate::Custom` evaluates to false).
   - No progressive/streaming recommendations: `replan()` is a single `recommend` call with stale-token discard.
-  - Advisor candidate proposals for Distilled Emotions (engine apply works; candidates need base-level item fidelity); 5 Ancient-emotion targets are display-only until RePoE exports their mods.
-  - poe2scout/poe.ninja id mappings don't yet cover alloys/emotions in the Rust `default_id_mapping` (the desktop cache prices them by name).
+  - 5 Ancient-emotion targets are display-only until RePoE exports their mods (emotion advisor candidates themselves shipped — pinned by `live_bundle_proposes_emotion_on_matching_jewel_base`).
   - Genesis birth simulation stays intentionally out of scope.
 
 ## Stack
 
 - Rust workspace, edition 2021, minimum Rust `1.82`.
 - Web app in `apps/web`: Next.js 16 + React 19, TypeScript, static export (`output: 'export'`), plain CSS modules (no Tailwind), Zustand store, IndexedDB persistence (`idb-keyval`), `tesseract.js` for OCR.
-- WASM boundary in `crates/poc2-wasm` (wasm-bindgen, `cdylib`): an `Engine` exposing `recommend`, `parse`, `eligibleMods`, `checkCanApply`, `recordOutcome`, `rerollableMods`, `runNTrials`, `recoveryHints`, `listBases`, `listDatabaseEntries`, `databaseEntryDetail`, `league`/`setLeague`, `applyPrices`, `applyNinjaPrices`, `resolveName`, `genesisTree`. Built by `bun run wasm` (`scripts/build-wasm.mjs`: cargo wasm32 → wasm-bindgen `--target web` → `wasm-opt -Oz`) into `apps/web/lib/wasm` + `apps/web/public/wasm`.
+- WASM boundary in `crates/poc2-wasm` (wasm-bindgen, `cdylib`): an `Engine` exposing `recommend`, `parse`, `eligibleMods`, `checkCanApply`, `recordOutcome`, `rerollableMods`, `runNTrials`, `recoveryHints`, `listBases`, `listDatabaseEntries`, `databaseEntryDetail`, `league`/`setLeague`, `applyPrices`, `applyNinjaPrices`, `resolveName`, `genesisTree`, `loadTrainedModels`/`trainedModelCount`, `setPluginContent`. Built by `bun run wasm` (`scripts/build-wasm.mjs`: cargo wasm32 → wasm-bindgen `--target web` → `wasm-opt -Oz`) into `apps/web/lib/wasm` + `apps/web/public/wasm`.
 - Desktop shell in `apps/desktop`: Electron main + preload, TypeScript, electron-builder packaging (AppImage/deb + NSIS). Bridge contract: `window.poc2Desktop` (`apps/web/lib/desktop.ts` ⇄ `apps/desktop/src/preload.ts`).
 - `crates/market` networking is behind a `net` feature (off by default at the workspace dep level) so the engine stays WASM-clean; enable with `--features net` for native price fetches.
 - **Bun** is the web package manager + script runner. The repo root is a **Bun workspace** (root `package.json` + single root `bun.lock`) listing `apps/web` **and** `apps/desktop`, so `bun install` and `bun run <dev|build|typecheck|lint|wasm|test:web|test:desktop|desktop:*>` all run **from the repo root**. Node is kept for tooling compatibility.
@@ -62,14 +61,14 @@
 - Desktop shell: `apps/desktop/src/` (`main.ts`, `preload.ts`, `ipc.ts`, `serve.ts`, `capture/`, `trade/`, `prices/`), contract mirror `apps/web/lib/desktop.ts`, docs in `apps/desktop/README.md` + ADR-0010/0011/0013.
 - Data bundles and source joins: `pipeline/`, `pipeline/scripts/`, `crates/data/`; bundle output normally lives under `~/.config/poc2/bundles/`. Automated refresh: `.github/workflows/data-watch.yml` (ADR-0012).
 - Market integrations: `docs/51-market-meta.md`, `crates/market/`, `apps/desktop/src/prices/`.
-- Plugin system (built, not wired into the app): `crates/plugin-host/`, `crates/plugin-sdk/`, `examples/plugins/`, ADR-0008.
+- Plugin system: `crates/plugin-sdk/` (guest macros), `crates/plugin-host/` (native/test host + ABI reference), the browser host `apps/web/lib/plugins/` (ADR-0014 phase 1: emission only), `examples/plugins/`, ADR-0008 + ADR-0014.
 - Hyprland integration: `examples/hyprland/`, ADR-0009; do not add non-Hyprland compositor branches unless requested — the GlobalShortcuts portal path is the generic one.
-- Roadmap and scope decisions: `docs/70-roadmap.md`, ADRs in `docs/adr/` (13 records).
+- Roadmap and scope decisions: `docs/70-roadmap.md`, ADRs in `docs/adr/` (14 records).
 
 ## Future Work And Deferred Scope
 
 - Use `docs/70-roadmap.md`'s "Current / Next" section as the source of truth for unfinished work. Checked boxes in `docs/72` and earlier roadmap milestones are historical.
-- Current candidates (see roadmap): wire trained models into the WASM engine + production retrain; re-wire the plugin host; Emotion advisor candidates; alloy/emotion price-id mappings; remaining data gaps (Waystones/Tablets/Relics/Flasks/Charms pools, "Thrud's Might", Vertebrae, Breach Ring quality caps, Essence of the Abyss dual-mod).
+- Current candidates (see roadmap): production-scale advisor retrain (`--samples 100000`, operator compute run — the wiring shipped); plugin **phase 2** (live custom predicates + recommendation emitters per ADR-0014); remaining data gaps (Waystones/Tablets/Relics/Flasks/Charms pools, "Thrud's Might", Vertebrae, Breach Ring quality caps, Essence of the Abyss dual-mod — blocked on upstream data + curation, which also gates the Regex panel's Waystone/Tablet tabs); canonical GitHub org decision.
 - Do not treat these as current tasks unless the user asks: Cachix binary cache, Hardcore/SSF support, macOS support, self-hosted data pipeline, empirical weight derivation from trade samples, MCTS advisor upgrade, real Wayland layer-shell overlay (deferred by ADR-0009), GGG `/trade2` OAuth, plugin component-model migration, beam-search memoization.
 - Cross-platform scope was changed by the user on 2026-06-10: Linux + NixOS + Windows 11 are supported targets (ADR-0010 supersedes ADR-0002). macOS remains out of scope.
 - Plugin marketplace/signature verification, UI panel plugins, and currency plugins are future work in ADR-0008.
@@ -89,7 +88,7 @@
 - Runtime is `wasmtime` in `crates/plugin-host` (raw-Wasm `(ptr, len)` ABI — the Component Model is future work), with capability gating, per-plugin sandboxing/fuel, and a predicate dispatch cache.
 - SDK macros live in `crates/plugin-sdk`: `declare_predicate!`, `declare_strategies!`, `declare_rules!`, `declare_recommendation_emitter!`. Example plugin: `examples/plugins/predicate-ilvl-min/`.
 - `ItemPredicate::Custom` can be referenced from rule and strategy TOML; without a live dispatch it evaluates to false.
-- **Not currently wired into the app**: the WASM engine plans with `plugin_dispatch: None`. Re-integration is roadmap work.
+- **App wiring (ADR-0014)**: phase 1 runs a browser-side JS host (`apps/web/lib/plugins/` — sandboxed `WebAssembly.instantiate`, no imports; emission exports → `Engine.setPluginContent`, set semantics). During planning the WASM engine still passes `plugin_dispatch: None` — live predicates/emitters are phase 2.
 - Important known debugging note: do not enable `epoch_interruption(true)` without setting deadlines; this caused immediate Wasmtime traps in plugin tests and was disabled.
 
 ## Common Commands

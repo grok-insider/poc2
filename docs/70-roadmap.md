@@ -110,49 +110,89 @@ no-false-positive property tests).
 `diff-bundle` markdown changelogs, `audit-matrix` legality sweeps, and
 the `data-watch.yml` cron workflow that opens draft PRs against `dev`.
 
+### Trained models in the WASM engine (M16.4 wiring) ✅
+
+`Engine.loadTrainedModels` merges `train-advisor` artefacts (schema-
+guarded — stale bundles are refused and planning stays heuristic) and
+`recommend` passes the cache to the planner; the worker loads the
+optional `/trained-models.json` static asset at boot; the topbar shows a
+⚛ chip with the model count. Validated end-to-end with a 51-goal smoke
+train against the shipped 0.5 bundle (non-degenerate `V_path`). The
+artefact is an **operator asset** (never committed): produce it with
+`train-advisor --bundle … --out …` and copy to
+`apps/web/public/trained-models.json`.
+
+### Distilled Emotion advisor candidates ✅
+
+Shipped by the M14 audit (base-name matching through
+`PlanInput.base_registry`) — the old "needs base-level fidelity" note
+was stale. Now pinned by a live-bundle regression test
+(`live_bundle_proposes_emotion_on_matching_jewel_base`); the live-bundle
+smoke tests also run in CI now (they find the committed web bundle).
+Still open upstream: 5 Ancient-emotion targets stay display-only until
+RePoE exports their mods.
+
+### Plugin re-wire phase 1 (ADR-0014) ✅
+
+Decision: **browser-side JS host** (wasmtime can't run in wasm32;
+blocking IPC to Electron main can't serve a sync planner). Phase 1
+shipped: plugin `.wasm` files managed from Settings → Plugins (IndexedDB
+persisted), instantiated sandboxed (no imports) on the main thread, SDK
+emission exports (`list_strategies`/`list_rules`) extracted and fed to
+`Engine.setPluginContent` (set semantics: seeds + content, idempotent,
+warn-and-skip per document).
+
+### 0.5 price-id mappings ✅
+
+`default_id_mapping` covers all 13 Verisium Alloys + 26 Distilled
+Emotions (kebab-slug convention), cross-checked against the shipped
+bundle's catalogues by `crates/market/tests/id_mapping_05.rs`.
+
+### Overlay + OCR polish ✅
+
+The `/overlay` route hydrates the persisted calibrated region on mount
+(`getCaptureRegion` bridge call) — the first hotkey scan no longer races
+the calibration push. Item-screenshot OCR now shares the overlay's
+vendored origin-relative `/ocr/` runtime (one Tesseract setup, works
+over `app://`). Portal restore-token reuse is **blocked upstream**
+(Electron doesn't expose the ScreenCast token; field stays reserved).
+
+### Release metadata ✅ (partial)
+
+`release.yml` now syncs `apps/desktop/package.json` to the released
+version before packaging, and the owner gate accepts both candidate orgs
+(`grok-insider`, `anomalyco`). Still open: actually settling the
+canonical org (see below).
+
 ## Current / Next
 
 Ordered by expected value; none are started unless noted.
 
-- [ ] **Wire trained models into the WASM engine.** The planner consumes
-  `PlanInput.trained_models` and `train-advisor` produces artefacts, but
-  the web engine passes `None`. Needs: artefact loading over the worker
-  boundary (fetch a `trained-models.json` static asset), cache lookup by
-  `(goal_hash, item_class)`, and a UI badge when the Q-policy drove the
-  pick. Then run the **production retrain** (`--samples 100000`) on the
-  0.5 bundle.
-- [ ] **Advisor candidates for Distilled Emotions.** Engine apply works;
-  candidate generation needs base-level item fidelity (real jewel base
-  names on the item). 5 Ancient-emotion targets stay display-only until
-  RePoE exports their mods.
-- [ ] **Re-wire the plugin host.** SDK + wasmtime host are built and
-  tested but the app plans with `plugin_dispatch: None`. Decide the
-  shape: native-only (desktop main process) vs. wasm-in-wasm is a real
-  design question — needs a small ADR before code.
-- [ ] **Price-id mappings for 0.5 currencies.** `default_id_mapping`
-  (Rust) lacks alloys/emotions/bones-by-slug for poe2scout; the desktop
-  cache already prices them by name. Extend the map + tests.
-- [ ] **Remaining data gaps** (tracked since the poe2db pass): mod pools
-  for Waystones (109), Precursor Tablets (83), Relics (139), Life/Mana
-  Flasks (57), Charms (51), Inscribed Ultimatum (31), Expedition
-  Logbooks (21); "Thrud's Might" weapon mechanic; Preserved Vertebrae
-  (waystone desecration); Breach Ring quality caps (40/45); Essence of
-  the Abyss granting only one of its two Mark mods per class; Vaal
-  Catalysing Infuser; the 5 Expedition Saga omens. Landing the
-  Waystone/Tablet/Relic pools also unlocks **Waystone/Tablet/Relic tabs
-  in the Regex panel** (the lib is domain-agnostic — it just needs the
-  mod texts in the bundle).
-- [ ] **Overlay polish:** persisted-region hydration on the overlay
-  route's first load (today the first scan can race the calibration
-  push); portal restore-token reuse on Wayland (`windowState.portalToken`
-  is persisted but not passed to the portal yet).
-- [ ] **Unify the two OCR paths** — the item-screenshot OCR
-  (`lib/ocr.ts`) should use the same vendored origin-relative `/ocr/`
-  runtime as the overlay (`lib/ocr/tesseract.ts`).
-- [ ] **Repo metadata alignment:** decide the canonical GitHub org
-  (Cargo metadata says `anomalyco`, release workflow gates on
-  `grok-insider`), and sync `apps/desktop/package.json` versioning with
-  release-plz (document or automate).
+- [ ] **Production advisor retrain** (operator action, ~hours):
+  `cargo run --release --bin train-advisor -- --corpus
+  pipeline/data/training_goals.toml --bundle <0.5 bundle> --out … 
+  --samples 100000`, then copy the artefact to
+  `apps/web/public/trained-models.json`. The wiring is live and smoke-
+  validated; only the compute run remains. Consider a CI/release lane
+  that publishes the artefact alongside releases.
+- [ ] **Plugin phase 2 (ADR-0014):** live dispatch — custom predicates +
+  recommendation emitters via a synchronous JS callback
+  (`Engine.setPluginDispatch`), worker-held plugin instances, ADR-0008's
+  perf contract (timeouts + auto-disable) enforced in the JS host, and a
+  capability-approval UI.
+- [ ] **Remaining data gaps** (blocked on upstream data + curation — not
+  guessable): mod pools for Waystones (109), Precursor Tablets (83),
+  Relics (139), Life/Mana Flasks (57), Charms (51), Inscribed Ultimatum
+  (31), Expedition Logbooks (21); "Thrud's Might" weapon mechanic;
+  Preserved Vertebrae (waystone desecration); Breach Ring quality caps
+  (40/45); Essence of the Abyss granting only one of its two Mark mods
+  per class; Vaal Catalysing Infuser; the 5 Expedition Saga omens.
+  Landing the Waystone/Tablet/Relic pools also unlocks
+  **Waystone/Tablet/Relic tabs in the Regex panel** (the lib is
+  domain-agnostic — it just needs the mod texts in the bundle).
+- [ ] **Canonical GitHub org decision** (`anomalyco` vs `grok-insider`):
+  the release workflow now tolerates both; once decided, align Cargo
+  metadata, docs, and tighten the gate back to one owner.
 
 ## Deferred / out of scope (unchanged decisions)
 

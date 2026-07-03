@@ -214,9 +214,9 @@ for the rule-priority pipeline.
 | Electron shell + item capture + trade2 price check | ✅ shipped (ADR-0010) |
 | OCR price overlay + calibration + desktop price cache | ✅ shipped (ADR-0013) |
 | Automated data refresh (watch → rebuild → diff → draft PR) | ✅ shipped (ADR-0012) |
-| Training pipeline (`train-advisor` Q-tables) | ✅ shipped — **not yet loaded by the web engine** (roadmap) |
-| Wasm plugin SDK + host (`crates/plugin-sdk`, `plugin-host`) | ✅ built & tested — **not wired into browser planning** (roadmap) |
-| Advisor candidates for Distilled Emotions | ⏳ engine apply works; candidate proposals need base-level fidelity |
+| Trained-model planning (Q-tables in the WASM engine, ⚛ topbar chip) | ✅ shipped — drop a `train-advisor` artefact at `public/trained-models.json`; production-scale retrain is an operator step |
+| Plugins phase 1 (strategy/rule emission, Settings → Plugins, ADR-0014) | ✅ shipped — custom predicates/emitters are phase 2 |
+| Advisor candidates for Distilled Emotions | ✅ shipped (M14 audit) — pinned by a live-bundle test |
 | Genesis birth simulation | ❌ intentionally out of scope |
 
 ## Performance
@@ -265,14 +265,16 @@ Per [`docs/35-advisor-architecture.md`](docs/35-advisor-architecture.md)
 
 ## Plugins
 
-The Wasm plugin SDK (`crates/plugin-sdk`) and wasmtime host
-(`crates/plugin-host`) let plugins ship custom predicates, strategies,
-rules, and recommendation emitters (see
-[`examples/plugins/`](examples/plugins/)). The crates are built and
-tested, but the **browser/Electron planning path does not currently load
-plugins** (the WASM engine plans with `plugin_dispatch: None`) — re-wiring
-the host into the current app is roadmap work. The TOML surface still
-accepts `custom` predicates:
+The Wasm plugin SDK (`crates/plugin-sdk`) lets plugins ship custom
+predicates, strategies, rules, and recommendation emitters (see
+[`examples/plugins/`](examples/plugins/)). Per
+[ADR-0014](docs/adr/0014-plugin-rewire-browser-host.md), the app now runs
+a **browser-side JS plugin host**: add a plugin `.wasm` in
+**Settings → Plugins** and its emitted strategies/rules join the
+advisor's registries (sandboxed instantiation — no network/filesystem).
+**Phase 2** (live custom predicates + recommendation emitters during
+planning) is roadmap work; until then `custom` predicates evaluate to
+false:
 
 ```toml
 # Reference a plugin custom predicate from a rule:
