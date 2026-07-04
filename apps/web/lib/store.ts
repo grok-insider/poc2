@@ -472,7 +472,12 @@ export const useCraft = create<CraftState>((set, get) => ({
     try {
       const recs = await engine.recommend(item, goal, risk, depth, 5);
       if (token !== replanToken) return; // a newer re-plan superseded this one
-      set({ recommendations: recs, planning: false });
+      // ADR-0015: a cache-missing goal is solved on demand inside the
+      // recommend call — refresh the ⚛ chip so on-demand growth (and
+      // league-switch invalidation) is visible without a reload.
+      const trainedModels = await engine.trainedModelCount().catch(() => get().trainedModels);
+      if (token !== replanToken) return;
+      set({ recommendations: recs, planning: false, trainedModels });
     } catch (e) {
       if (token !== replanToken) return;
       set({ error: String(e), planning: false });

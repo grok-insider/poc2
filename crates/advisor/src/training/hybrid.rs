@@ -194,6 +194,17 @@ impl TrainedModel {
         self.q_index = index;
     }
 
+    /// Does this model's solved state space include `state`? Consulted by
+    /// the on-demand solver (ADR-0015): a cache hit whose reachable set
+    /// doesn't cover the CURRENT item (e.g. solved from an empty base,
+    /// user then pasted a mid-craft Rare) is re-solved from the new root
+    /// rather than silently missing every Q lookup.
+    #[must_use]
+    pub fn covers_state(&self, state: FeatureVec) -> bool {
+        let packed = state.pack();
+        self.value_path_length.iter().any(|(s, _)| *s == packed)
+    }
+
     /// `Q(state, action)` lookup — via the index when built, else a
     /// linear scan over `q_table` (models constructed directly in tests).
     #[must_use]

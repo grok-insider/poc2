@@ -13,9 +13,13 @@
 
 use std::collections::HashMap;
 
-use poc2_advisor::training::{load_artefacts_str, TrainedModelCache};
+use poc2_advisor::featurize::featurize;
+use poc2_advisor::training::{
+    enumerate_solver_actions, goal_hash, load_artefacts_str, solve_goal, CraftingTask,
+    SolveProfile, TrainedModelCache,
+};
 use poc2_advisor::{plan, AdvisorAction, BeamConfig, Goal, PlanInput, Recommendation, Stash};
-use poc2_engine::currency::DefaultCurrencyResolver;
+use poc2_engine::currency::{DefaultCurrencyResolver, Essence};
 use poc2_engine::ids::{BaseTypeId, ItemClassId};
 use poc2_engine::item::Item;
 use poc2_engine::patch::{League, PatchVersion};
@@ -45,12 +49,20 @@ struct EngineState {
     valuator: Valuator,
     patch: PatchVersion,
     league: League,
-    /// Trained Q-table cache (M16.4), loaded at runtime from the
+    /// Trained Q-table cache (M16.4 + ADR-0015): warm-started from the
     /// optional `/trained-models.json` static asset via
-    /// [`Engine::load_trained_models`]. `None` → pure heuristic planning.
+    /// [`Engine::load_trained_models`], then grown **on demand** — a
+    /// `recommend` whose `(goal, item-class)` misses (or whose cached
+    /// model doesn't cover the current item's state) solves the goal
+    /// right there via `training::solve` and caches the exact policy.
+    /// `None` → no models yet (first recommend populates).
     trained_models: Option<TrainedModelCache>,
-    /// `(goal × class)` models currently loaded (diagnostic).
+    /// `(goal × class)` models currently held (diagnostic; mirrors the
+    /// cache len across loads, solves, and invalidation clears).
     trained_model_count: usize,
+    /// Essence catalogue (also registered in `resolver`); the on-demand
+    /// solver enumerates goal-relevant essences from it.
+    essences: Vec<Essence>,
     /// ADR-0014 phase 2 — synchronous JS callback
     /// `(pluginId, name, itemJson, argsJson) -> boolean` evaluating a
     /// plugin custom predicate. The worker owns the plugin instances;
@@ -107,8 +119,9 @@ impl EngineState {
         // base-targeted alloys mechanically).
         let mut alloy_likes = bundle.alloy_catalogue();
         alloy_likes.extend(bundle.emotion_catalogue());
+        let essences = bundle.essence_catalogue();
         let resolver = DefaultCurrencyResolver::new()
-            .with_essences(bundle.essence_catalogue())
+            .with_essences(essences.clone())
             .with_catalysts(bundle.catalyst_catalogue())
             .with_alloys(alloy_likes);
         let patch = bundle.header.game_patch;
@@ -125,6 +138,7 @@ impl EngineState {
             league: League::current(),
             trained_models: None,
             trained_model_count: 0,
+            essences,
             plugin_dispatch_fn: None,
             bundle,
             class_by_display,
@@ -132,14 +146,74 @@ impl EngineState {
         }
     }
 
+    /// Hard cap on cached `(goal × class)` models. On-demand solving
+    /// accumulates one entry per distinct goal; past the cap the cache is
+    /// cleared wholesale (crude but sufficient — a solve is sub-second,
+    /// and a user cycling through 250+ goals in one session is churn, not
+    /// a working set).
+    const TRAINED_CACHE_CAP: usize = 256;
+
+    /// ADR-0015 — make sure a trained model exists (and covers the
+    /// current item's state) for `(goal, item-class)` before planning.
+    /// Cache miss or root-coverage miss → solve the goal on the spot at
+    /// the on-demand budget and cache the exact policy pair. Empty-target
+    /// goals never solve (no terminal to reach).
+    fn ensure_goal_model(&mut self, item: &Item, goal: &Goal) {
+        if goal.target.prefixes.is_empty() && goal.target.suffixes.is_empty() {
+            return;
+        }
+        let item_class = self.base_registry.resolve_item_class(item);
+        let goal_h = goal_hash(goal);
+        let root_fv = featurize(item, goal, &self.registry);
+        if let Some(cache) = self.trained_models.as_ref() {
+            if let Some(model) = cache.lookup(goal_h, &item_class) {
+                if model.covers_state(root_fv) {
+                    return;
+                }
+                // Cached, but solved from a different starting point —
+                // re-solve from the current item so lookups hit again.
+            }
+        }
+
+        let task = CraftingTask {
+            initial_item: item.clone(),
+            goal: goal.clone(),
+            registry: &self.registry,
+            base_registry: &self.base_registry,
+            resolver: &self.resolver,
+            patch: self.patch,
+            omens: poc2_engine::omen::OmenSet::new(),
+        };
+        let actions = enumerate_solver_actions(goal, &item_class, &self.essences, &self.registry);
+        let solved = solve_goal(&task, &item_class, &actions, SolveProfile::on_demand());
+
+        let mut cache = self.trained_models.take().unwrap_or_default();
+        if cache.len() >= Self::TRAINED_CACHE_CAP {
+            cache.clear();
+        }
+        cache.insert_pair(solved.path, Some(solved.cost));
+        self.trained_model_count = cache.len();
+        self.trained_models = Some(cache);
+    }
+
+    /// Drop every trained model (file-loaded and on-demand). Called when
+    /// the League ruleset or plugin content/dispatch changes — both alter
+    /// candidate/goal semantics, so cached policies may be stale. The
+    /// next recommend re-solves its goal on demand.
+    fn invalidate_trained_models(&mut self) {
+        self.trained_models = None;
+        self.trained_model_count = 0;
+    }
+
     fn recommend(
-        &self,
+        &mut self,
         item: &Item,
         goal: &Goal,
         risk: f64,
         depth: u32,
         top_n: u32,
     ) -> Vec<Recommendation> {
+        self.ensure_goal_model(item, goal);
         let stash = Stash::unlimited();
         let config = BeamConfig {
             depth: depth.max(1),
@@ -214,7 +288,7 @@ impl Engine {
     /// `"challenge"` (the 0.5 challenge league is Runes of Aldur).
     #[wasm_bindgen(js_name = setLeague)]
     pub fn set_league(&mut self, league: &str) -> Result<(), JsError> {
-        self.state.league = match league.to_ascii_lowercase().as_str() {
+        let new_league = match league.to_ascii_lowercase().as_str() {
             "standard" => League::Standard,
             "challenge" => League::Challenge,
             other => {
@@ -223,6 +297,13 @@ impl Engine {
                 )))
             }
         };
+        if new_league != self.state.league {
+            self.state.league = new_league;
+            // League gates the candidate set (recombinator, omens), so
+            // cached trained policies may be stale — clear; on-demand
+            // solving rebuilds per goal (ADR-0015).
+            self.state.invalidate_trained_models();
+        }
         Ok(())
     }
 
@@ -242,7 +323,8 @@ impl Engine {
         let mut cache = self.state.trained_models.take().unwrap_or_default();
         let (loaded, version_skipped) = load_artefacts_str(artefacts_json, &mut cache)
             .map_err(|e| JsError::new(&format!("trained-models load failed: {e}")))?;
-        self.state.trained_model_count += loaded;
+        // Mirror the cache length (same-key merges don't double-count).
+        self.state.trained_model_count = cache.len();
         // An all-stale file leaves the cache as-is; only keep a cache
         // when it actually holds models (planner treats None as "off").
         if self.state.trained_model_count > 0 {
@@ -327,6 +409,9 @@ impl Engine {
     #[wasm_bindgen(js_name = setPluginDispatch)]
     pub fn set_plugin_dispatch(&mut self, f: &js_sys::Function) {
         self.state.plugin_dispatch_fn = Some(f.clone());
+        // Custom predicates can appear in goal abandon criteria /
+        // constraints — trained policies solved without them are stale.
+        self.state.invalidate_trained_models();
     }
 
     /// Remove the plugin dispatch callback — `Custom` predicates return
@@ -334,12 +419,19 @@ impl Engine {
     #[wasm_bindgen(js_name = clearPluginDispatch)]
     pub fn clear_plugin_dispatch(&mut self) {
         self.state.plugin_dispatch_fn = None;
+        self.state.invalidate_trained_models();
     }
 
     /// Recommend the top-N next actions. `item_json` / `goal_json` are JSON of
     /// the engine `Item` / advisor `Goal`; returns JSON of `Vec<Recommendation>`.
+    ///
+    /// `&mut self` since ADR-0015: a cache-missing goal is solved on
+    /// demand (exact analytic model + value iteration, sub-second at the
+    /// on-demand budget) and the resulting policy pair is cached — check
+    /// [`Engine::trained_model_count`] to observe growth. The worker is
+    /// single-threaded, so the mutation is race-free.
     pub fn recommend(
-        &self,
+        &mut self,
         item_json: &str,
         goal_json: &str,
         risk: f64,
@@ -621,7 +713,7 @@ mod tests {
             eprintln!("poc2-wasm parity: no bundle on disk; skipping (set POC2_BUNDLE).");
             return;
         };
-        let engine = Engine::new(&bytes).expect("engine init");
+        let mut engine = Engine::new(&bytes).expect("engine init");
         assert!(engine.state.bundle.mods.len() > 100);
 
         let base = engine

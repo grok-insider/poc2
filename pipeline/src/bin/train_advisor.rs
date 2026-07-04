@@ -34,17 +34,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use poc2_advisor::action::AdvisorAction;
-use poc2_advisor::featurize::FeatureVec;
 use poc2_advisor::training::{
-    learn_transition_model, learn_transition_model_analytic, trained_model_from, value_iteration,
-    AnalyticConfig, CraftingTask, LearnConfig, RewardKind, TrainedModelArtefact,
-    TrainingArtefactMetrics, ValueIterationConfig,
+    enumerate_solver_actions, learn_transition_model, solve_goal, synthetic_cost_for_action,
+    terminal_predicate, trained_model_from, value_iteration, CraftingTask, LearnConfig, RewardKind,
+    SolveProfile, TrainedModelArtefact, TrainingArtefactMetrics, ValueIterationConfig, SOLVE_SEED,
 };
 use poc2_advisor::{featurize, Goal};
 use poc2_data::Bundle;
 use poc2_engine::base_registry::BaseRegistry;
-use poc2_engine::currency::{DefaultCurrencyResolver, Essence, EssenceQuality};
-use poc2_engine::ids::{BaseTypeId, ConceptId, CurrencyId, ItemClassId};
+use poc2_engine::currency::{DefaultCurrencyResolver, Essence};
+use poc2_engine::ids::{BaseTypeId, ConceptId, ItemClassId};
 use poc2_engine::item::{AffixType, Item, QualityKind, Rarity};
 use poc2_engine::omen::OmenSet;
 use poc2_engine::patch::PatchVersion;
@@ -267,140 +266,6 @@ fn pick_base_for_class(
     BaseTypeId::from(class.as_str())
 }
 
-/// Full action set explored at every state during training: the basic-orb
-/// catalogue plus every goal-relevant essence (see
-/// [`enumerate_training_actions`]). Bones and Vaal remain future work
-/// (class-aware bone reveal needs the desecrated pool threaded through the
-/// simulator).
-fn enumerate_training_actions(
-    corpus_goal: &CorpusGoal,
-    item_class: &ItemClassId,
-    ctx: &EngineContext,
-) -> Vec<AdvisorAction> {
-    let mut actions = enumerate_basic_actions();
-
-    // Goal concepts wanted on either side — an essence is proposed only
-    // when its granted mod for THIS class carries a wanted concept.
-    // Undirected essence spam would blow the max_actions_per_state cap
-    // and dilute the per-alias budget for nothing.
-    let wanted: HashSet<&str> = corpus_goal
-        .target
-        .prefixes
-        .iter()
-        .chain(corpus_goal.target.suffixes.iter())
-        .flat_map(|s| {
-            s.concept
-                .as_deref()
-                .into_iter()
-                .chain(s.concept_any.iter().map(String::as_str))
-        })
-        .collect();
-    if wanted.is_empty() {
-        return actions;
-    }
-
-    for essence in &ctx.essences {
-        // Greater (Magic → Rare promote) and Perfect (Rare remove-add)
-        // are the training-relevant tiers: Lesser/Normal are strictly
-        // weaker duplicates of Greater's mechanic, and Corrupted needs
-        // Vaal state the trainer doesn't model yet.
-        if !matches!(
-            essence.quality,
-            EssenceQuality::Greater | EssenceQuality::Perfect
-        ) {
-            continue;
-        }
-        let granted: Vec<&poc2_engine::ids::ModId> = if essence.class_targets.is_empty() {
-            vec![&essence.target_mod]
-        } else {
-            let targets: Vec<_> = essence
-                .class_targets
-                .iter()
-                .filter(|t| &t.class == item_class)
-                .map(|t| &t.mod_id)
-                .collect();
-            if targets.is_empty() {
-                // Class-targeted essence with no entry for this class —
-                // illegal on the class, skip.
-                continue;
-            }
-            targets
-        };
-        let relevant = granted.iter().any(|mod_id| {
-            ctx.registry
-                .get(mod_id)
-                .is_some_and(|def| def.concept_set.iter().any(|c| wanted.contains(c.as_str())))
-        });
-        if relevant {
-            actions.push(AdvisorAction::ApplyCurrency {
-                currency: essence.id.clone(),
-                omens: vec![],
-            });
-        }
-    }
-    actions
-}
-
-/// The static basic-orb action set (Perfect tiers + Annul + Divine).
-fn enumerate_basic_actions() -> Vec<AdvisorAction> {
-    vec![
-        AdvisorAction::ApplyCurrency {
-            currency: CurrencyId::from("PerfectOrbOfTransmutation"),
-            omens: vec![],
-        },
-        AdvisorAction::ApplyCurrency {
-            currency: CurrencyId::from("PerfectOrbOfAugmentation"),
-            omens: vec![],
-        },
-        AdvisorAction::ApplyCurrency {
-            currency: CurrencyId::from("PerfectRegalOrb"),
-            omens: vec![],
-        },
-        AdvisorAction::ApplyCurrency {
-            currency: CurrencyId::from("PerfectExaltedOrb"),
-            omens: vec![],
-        },
-        AdvisorAction::ApplyCurrency {
-            currency: CurrencyId::from("PerfectChaosOrb"),
-            omens: vec![],
-        },
-        AdvisorAction::ApplyCurrency {
-            currency: CurrencyId::from("OrbOfAnnulment"),
-            omens: vec![],
-        },
-        AdvisorAction::ApplyCurrency {
-            currency: CurrencyId::from("DivineOrb"),
-            omens: vec![],
-        },
-    ]
-}
-
-fn cost_for_action(action: &AdvisorAction) -> f64 {
-    // Synthetic cost-reward weights — the production training binary
-    // wires in a real `Valuator` so live league prices drive the cost
-    // reward. Smoke training uses these stable defaults so the trained
-    // models are reproducible across runs.
-    let AdvisorAction::ApplyCurrency { currency, .. } = action else {
-        return 0.05;
-    };
-    match currency.as_str() {
-        "PerfectOrbOfTransmutation" => 0.5,
-        "PerfectOrbOfAugmentation" => 0.4,
-        "PerfectRegalOrb" => 0.6,
-        "PerfectExaltedOrb" => 1.5,
-        "PerfectChaosOrb" => 0.8,
-        "OrbOfAnnulment" => 0.3,
-        "DivineOrb" => 0.5,
-        // Catalogue essences (goal-relevant, added per-goal by
-        // `enumerate_training_actions`). Perfect essences are the
-        // expensive deterministic finisher; Greater the mid-tier
-        // promoter. Synthetic weights like the orbs above.
-        s if s.starts_with("PerfectEssence") => 2.0,
-        s if s.contains("Essence") => 0.7,
-        _ => 0.05,
-    }
-}
-
 /// Engine context passed to every `train_one_goal` call. Built once in
 /// `main()` from either the loaded bundle (`--bundle`) or a synthetic
 /// empty registry (smoke testing only).
@@ -459,33 +324,6 @@ impl EngineContext {
     }
 }
 
-/// Build the bitmap-full terminal predicate for `goal`.
-///
-/// Returns a closure that fires when every spec the goal cares about
-/// has its corresponding `target_match` bit set. Uses the same
-/// 16-spec cap as [`FeatureVec::target_match`].
-///
-/// Since artefact schema v2, `target_match` bit `i` means "spec `i`
-/// FULLY satisfied" (count-aware, via `goal::spec_satisfied`), so this
-/// predicate agrees exactly with the runtime `is_satisfied` check —
-/// except for `target.constraints` (cost/market predicates), which the
-/// bitmap cannot carry, and `min_tier`, which `spec_satisfied` itself
-/// doesn't evaluate yet. Real satisfaction is re-checked by the planner
-/// via [`is_satisfied_with_ctx`] at runtime.
-fn build_terminal_predicate(goal: &Goal) -> impl Fn(&FeatureVec) -> bool {
-    let n_specs = (goal.target.prefixes.len() + goal.target.suffixes.len()).min(16);
-    let mask: u16 = if n_specs == 16 {
-        u16::MAX
-    } else if n_specs == 0 {
-        // Empty target — never terminal (defensive; the planner
-        // short-circuits empty goals before reaching here).
-        0
-    } else {
-        (1u16 << n_specs) - 1
-    };
-    move |state: &FeatureVec| mask != 0 && (state.target_match & mask) == mask
-}
-
 #[allow(clippy::too_many_arguments)] // operator binary: every knob is an explicit CLI flag
 fn train_one_goal(
     corpus_goal: &CorpusGoal,
@@ -523,7 +361,7 @@ fn train_one_goal(
         );
     }
 
-    let actions = enumerate_training_actions(corpus_goal, &item_class, ctx);
+    let actions = enumerate_solver_actions(&goal, &item_class, &ctx.essences, &ctx.registry);
     if verbose {
         let ids: Vec<&str> = actions
             .iter()
@@ -534,91 +372,95 @@ fn train_one_goal(
             .collect();
         eprintln!("  actions ({}): {}", ids.len(), ids.join(", "));
     }
-    let actions_clone = actions.clone();
-    let model = match model_kind {
+
+    let (model_path_length, model_cost, metrics) = match model_kind {
+        // The analytic path is the shared solver (`training::solve`) —
+        // the SAME code the WASM engine runs on-demand (ADR-0015), at the
+        // offline budget.
         ModelKind::Analytic => {
-            let config = AnalyticConfig {
-                afterstate_aliasing,
-                seed: 0x_5EED_C0DE_C0DE_5EED,
-                max_states,
-                max_actions_per_state: 32,
-                mc_fallback_samples: samples,
+            let mut profile = SolveProfile::offline(max_states, samples);
+            profile.afterstate_aliasing = afterstate_aliasing;
+            let solved = solve_goal(&task, &item_class, &actions, profile);
+            let metrics = TrainingArtefactMetrics {
+                states_visited: solved.metrics.states_visited,
+                transitions_learned: solved.metrics.states_visited,
+                value_iteration_iters_path: solved.metrics.vi_iterations_path,
+                value_iteration_iters_cost: solved.metrics.vi_iterations_cost,
+                initial_state_v_path: solved.metrics.v_path_s0,
+                initial_state_v_cost: solved.metrics.v_cost_s0,
             };
-            learn_transition_model_analytic(&task, config, move |_item, _goal| {
-                actions_clone.clone()
-            })
+            (solved.path, solved.cost, metrics)
         }
+        // Historical Monte Carlo path, kept for cross-validation.
         ModelKind::Mc => {
             let learn_config = LearnConfig {
                 samples_per_state_action: samples,
                 afterstate_aliasing,
-                seed: 0x_5EED_C0DE_C0DE_5EED,
+                seed: SOLVE_SEED,
                 max_states,
                 max_actions_per_state: 32,
             };
-            learn_transition_model(&task, learn_config, move |_item, _goal| {
+            let actions_clone = actions.clone();
+            let model = learn_transition_model(&task, learn_config, move |_item, _goal| {
                 actions_clone.clone()
-            })
+            });
+
+            let initial_features = featurize(&initial_item, &goal, &ctx.registry);
+            let value_config = ValueIterationConfig::default();
+            let terminal = terminal_predicate(&goal);
+            let path_result = value_iteration(
+                &model,
+                &actions,
+                afterstate_aliasing,
+                &terminal,
+                |_state, _action| -1.0,
+                value_config,
+            );
+            let cost_result = value_iteration(
+                &model,
+                &actions,
+                afterstate_aliasing,
+                &terminal,
+                |_state, action| -synthetic_cost_for_action(action),
+                value_config,
+            );
+            let goal_h = poc2_advisor::training::goal_hash(&goal);
+            let path = trained_model_from(
+                goal_h,
+                item_class.clone(),
+                poc2_data::BUNDLE_SCHEMA_VERSION,
+                ENGINE_SCHEMA_VERSION,
+                RewardKind::PathLength,
+                &path_result,
+                Some(&cost_result),
+            );
+            let cost = trained_model_from(
+                goal_h,
+                item_class.clone(),
+                poc2_data::BUNDLE_SCHEMA_VERSION,
+                ENGINE_SCHEMA_VERSION,
+                RewardKind::Cost,
+                &cost_result,
+                Some(&cost_result),
+            );
+            let metrics = TrainingArtefactMetrics {
+                states_visited: model.entry_count(),
+                transitions_learned: model.aliases().len(),
+                value_iteration_iters_path: path_result.iterations,
+                value_iteration_iters_cost: cost_result.iterations,
+                initial_state_v_path: path_result
+                    .value
+                    .get(&initial_features)
+                    .copied()
+                    .unwrap_or(0.0),
+                initial_state_v_cost: cost_result
+                    .value
+                    .get(&initial_features)
+                    .copied()
+                    .unwrap_or(0.0),
+            };
+            (path, cost, metrics)
         }
-    };
-
-    let initial_features = featurize(&initial_item, &goal, &ctx.registry);
-    let value_config = ValueIterationConfig::default();
-    let terminal = build_terminal_predicate(&goal);
-
-    let path_result = value_iteration(
-        &model,
-        &actions,
-        afterstate_aliasing,
-        &terminal,
-        |_state, _action| -1.0,
-        value_config,
-    );
-    let cost_result = value_iteration(
-        &model,
-        &actions,
-        afterstate_aliasing,
-        &terminal,
-        |_state, action| -cost_for_action(action),
-        value_config,
-    );
-
-    let goal_h = poc2_advisor::training::goal_hash(&goal);
-
-    let model_path_length = trained_model_from(
-        goal_h,
-        item_class.clone(),
-        poc2_data::BUNDLE_SCHEMA_VERSION,
-        ENGINE_SCHEMA_VERSION,
-        RewardKind::PathLength,
-        &path_result,
-        Some(&cost_result),
-    );
-    let model_cost = trained_model_from(
-        goal_h,
-        item_class.clone(),
-        poc2_data::BUNDLE_SCHEMA_VERSION,
-        ENGINE_SCHEMA_VERSION,
-        RewardKind::Cost,
-        &cost_result,
-        Some(&cost_result),
-    );
-
-    let metrics = TrainingArtefactMetrics {
-        states_visited: model.entry_count(),
-        transitions_learned: model.aliases().len(),
-        value_iteration_iters_path: path_result.iterations,
-        value_iteration_iters_cost: cost_result.iterations,
-        initial_state_v_path: path_result
-            .value
-            .get(&initial_features)
-            .copied()
-            .unwrap_or(0.0),
-        initial_state_v_cost: cost_result
-            .value
-            .get(&initial_features)
-            .copied()
-            .unwrap_or(0.0),
     };
 
     Ok(TrainedModelArtefact {
@@ -1066,7 +908,8 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use poc2_engine::ids::ModGroupId;
+    use poc2_advisor::featurize::FeatureVec;
+    use poc2_engine::ids::{CurrencyId, ModGroupId};
     use poc2_engine::mods::{ModDefinition, ModDomain, ModFlags, ModGroup, ModKind};
     use poc2_engine::patch::PatchRange;
 
@@ -1221,7 +1064,7 @@ mod tests {
     #[test]
     fn terminal_predicate_fires_only_when_full_bitmap_set() {
         let goal = mk_goal_with_n_specs(1, 1);
-        let terminal = build_terminal_predicate(&goal);
+        let terminal = terminal_predicate(&goal);
         // 0b00 — no specs satisfied → not terminal
         assert!(!terminal(&fv(0b00)));
         // 0b01 — only prefix → not terminal
@@ -1238,7 +1081,7 @@ mod tests {
     #[test]
     fn terminal_predicate_never_fires_for_empty_goal() {
         let goal = mk_goal_with_n_specs(0, 0);
-        let terminal = build_terminal_predicate(&goal);
+        let terminal = terminal_predicate(&goal);
         // An empty target is degenerate; the predicate must never fire
         // because the planner short-circuits empty goals upstream.
         assert!(!terminal(&fv(0)));

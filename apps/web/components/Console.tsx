@@ -129,7 +129,7 @@ export function Console() {
           {trainedModels > 0 && (
             <span
               className="chip num"
-              title={`${trainedModels} trained (goal × class) Q-models loaded — the planner blends trained-policy scores with heuristics`}
+              title={`${trainedModels} trained (goal × class) Q-models held — solved on demand per goal (plus any preloaded artefact); the planner blends trained-policy scores with heuristics`}
             >
               ⚛ {trainedModels}
             </span>

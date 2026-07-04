@@ -198,22 +198,28 @@ canonical org (see below).
 
 Ordered by expected value; none are started unless noted.
 
-- [ ] **Production advisor retrain** (operator action, ~30 s since the
-  analytic trainer landed): `cargo run --release --bin train-advisor --
-  --corpus pipeline/data/training_goals.toml --bundle <0.5 bundle> --out …`
-  (default `--model analytic` builds exact transition distributions from
-  the engine's pool-weight enumeration; the old Monte Carlo path survives
-  as `--model mc` for cross-validation), then copy the artefact to
-  `apps/web/public/trained-models.json`. Consider a CI/release lane that
-  publishes the artefact alongside releases. Since the training-quality
-  pass (artefact schema v2), all 42 trainable corpus goals converge to a
+- [x] **On-demand goal solving (ADR-0015, shipped):** trained policies
+  are no longer corpus-bounded — `Engine.recommend` analytically solves
+  any cache-missing `(goal, item-class)` in the worker (sub-second) and
+  caches the exact policy pair; league/plugin-dispatch changes clear the
+  cache. The corpus artefact is now an optional **warm start** (operator
+  action, ~30 s): `cargo run --release --bin train-advisor -- --corpus
+  pipeline/data/training_goals.toml --bundle <0.5 bundle> --out …`
+  (default `--model analytic`; the Monte Carlo path survives as
+  `--model mc` for cross-validation), copy to
+  `apps/web/public/trained-models.json`. Since the training-quality pass
+  (artefact schema v2), all 42 trainable corpus goals converge to a
   finite `V_path(s0)`; 9 goals are **audit-dropped** with per-spec reasons
   (Block on BodyArmour/Helmet/Staff suffixes, the `Armour` concept missing
   entirely, Sceptre minion / Amulet attack / Ring caster concepts absent
   per class) — these are upstream taxonomy gaps, tracked with the data
-  gaps below. Follow-up candidate: add goal-relevant **Verisium Alloys**
-  to the training action set (Swift Alloy is the only CastSpeed-on-Gloves
+  gaps below.
+- [ ] **Alloys in the solver action set:** add goal-relevant **Verisium
+  Alloys** to `training::solve::enumerate_solver_actions` (they're
+  runtime candidates already; Swift Alloy is the only CastSpeed-on-Gloves
   source, so `gloves-cast-speed-es` stays audit-dropped until then).
+  Consider a CI/release lane that publishes the warm-start artefact
+  alongside releases.
 - [ ] **Plugin phase 3 (ADR-0014):** recommendation emitters — needs a
   candidate-source hook in the planner (`PlanInput` only carries
   predicate dispatch today), then the JS host wires

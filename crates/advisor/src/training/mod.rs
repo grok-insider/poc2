@@ -27,6 +27,7 @@ pub mod hybrid;
 pub mod imitation;
 pub mod metrics;
 pub mod model_learner;
+pub mod solve;
 pub mod value_iteration;
 
 pub use analytic_model::{
@@ -45,5 +46,9 @@ pub use metrics::{argmax_actions, loop_iteration_estimate, top_action_agreement,
 pub use model_learner::{
     learn_transition_model, CraftingTask, LearnConfig, StateActionAlias, TableModel,
     TableModelBuilder,
+};
+pub use solve::{
+    basic_solver_actions, enumerate_solver_actions, solve_goal, synthetic_cost_for_action,
+    terminal_predicate, SolveMetrics, SolveProfile, SolvedGoal, SOLVE_SEED,
 };
 pub use value_iteration::{value_iteration, ValueIterationConfig, ValueIterationResult};
