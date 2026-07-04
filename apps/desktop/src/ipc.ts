@@ -10,6 +10,7 @@ import { isAllowlistedUrl } from "./fetchAllowlist";
 import { loadCaptureRegion } from "./windowState";
 import { getPriceSnapshot, getPriceStatus, refreshNow, setPriceLeague } from "./prices/scheduler";
 import { tradeFetch, tradeSearch } from "./trade/proxy";
+import { sendHyprOverlay } from "./capture/hyprOverlay";
 
 // Re-export so callers/tests have one import site (impl is electron-free).
 export { isAllowlistedUrl } from "./fetchAllowlist";
@@ -33,6 +34,7 @@ export const CHANNELS = {
   getCaptureRegion: "poc2:get-capture-region", // renderer → main (invoke: persisted rect)
   regionCalibrated: "poc2:region-calibrated", // main → renderer (push)
   overlayState: "poc2:overlay-state", // main → renderer (push: show/hide/degraded)
+  hyprOverlayRender: "poc2:hypr-overlay-render", // renderer → main (invoke)
   // --- poe2scout price cache (hourly poe2scout → node:sqlite) ---
   pricesSnapshot: "poc2:prices-snapshot", // renderer → main (invoke)
   pricesStatus: "poc2:prices-status", // renderer → main (invoke)
@@ -121,6 +123,10 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.overlayHide, () => {
     overlay?.hideOverlay();
     return true;
+  });
+
+  ipcMain.handle(CHANNELS.hyprOverlayRender, async (_e, payload: unknown) => {
+    return sendHyprOverlay(payload as Parameters<typeof sendHyprOverlay>[0]);
   });
 
   ipcMain.handle(CHANNELS.overlaySetRegion, (_e, rect: unknown) => {

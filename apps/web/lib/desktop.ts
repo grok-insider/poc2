@@ -31,7 +31,7 @@ export interface DesktopCapabilities {
   /** Region capture can be taken without a per-grab permission prompt. */
   silentRegionCapture: boolean;
   /** Whether a real click-through overlay window is usable. */
-  overlayMode: "full" | "degraded";
+  overlayMode: "full" | "degraded" | "hyprland-plugin";
   /** Classified session, for diagnostics + fallback copy. */
   sessionKind:
     | "win32"
@@ -54,6 +54,20 @@ export interface OverlayState {
   visible: boolean;
   /** True ⇒ no click-through window exists; render the in-app panel instead. */
   degraded: boolean;
+  /** Active overlay transport, when supplied by newer desktop shells. */
+  mode?: DesktopCapabilities["overlayMode"];
+}
+
+export interface HyprOverlayPayload {
+  visible?: boolean;
+  rect: { x: number; y: number; w: number; h: number };
+  ttlMs?: number;
+  rows: Array<{
+    label: string;
+    value?: string;
+    detail?: string;
+    emphasis?: boolean;
+  }>;
 }
 
 /** A single resolved unit price from the cache. */
@@ -107,8 +121,8 @@ export interface Poc2DesktopBridge {
   capabilities(): Promise<DesktopCapabilities | null>;
   /** Capture a screen rectangle; raw cropped frame (preprocess renderer-side). */
   captureRegion(rect: CaptureRect): Promise<CaptureRegionResult>;
-  /** Show the click-through overlay (full mode); returns the active overlay mode. */
-  overlayShow(): Promise<"full" | "degraded">;
+  /** Show the active overlay path; returns the active overlay mode. */
+  overlayShow(): Promise<DesktopCapabilities["overlayMode"]>;
   /** Hide the overlay window. */
   overlayHide(): Promise<boolean>;
   /** Reposition the overlay over a screen region. */
@@ -123,6 +137,8 @@ export interface Poc2DesktopBridge {
   onRegionCalibrated(cb: (rect: CaptureRect) => void): () => void;
   /** Subscribe to overlay state pushes (show/hide + degraded). */
   onOverlayState(cb: (state: OverlayState) => void): () => void;
+  /** Send already-computed rows to the Hyprland compositor overlay plugin. */
+  hyprOverlayRender(payload: HyprOverlayPayload): Promise<boolean>;
 
   // --- poe2scout price cache (hourly poe2scout → node:sqlite) ---
 

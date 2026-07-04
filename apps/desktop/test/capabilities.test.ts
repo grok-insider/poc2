@@ -108,7 +108,7 @@ describe("detectCapabilities", () => {
     expect(caps.silentRegionCapture).toBe(true);
   });
 
-  test("wlroots → degraded, portal capture, NO probe invoked", async () => {
+  test("wlroots without hypr-overlay → degraded, portal capture, NO Electron overlay probe", async () => {
     let probed = false;
     const caps = await detectCapabilities({
       env: env({
@@ -123,6 +123,18 @@ describe("detectCapabilities", () => {
     expect(caps.overlayMode).toBe("degraded");
     expect(caps.silentRegionCapture).toBe(false);
     expect(probed).toBe(false);
+  });
+
+  test("Hyprland with hypr-overlay loaded → compositor plugin overlay", async () => {
+    const caps = await detectCapabilities({
+      env: env({
+        XDG_SESSION_TYPE: "wayland",
+        HYPRLAND_INSTANCE_SIGNATURE: "x",
+      }),
+      probeHyprOverlay: () => true,
+    });
+    expect(caps.overlayMode).toBe("hyprland-plugin");
+    expect(caps.silentRegionCapture).toBe(false);
   });
 
   test("wayland-other with passing probe → full overlay, portal capture", async () => {

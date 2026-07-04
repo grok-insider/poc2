@@ -21,6 +21,7 @@ import {
   detectCapabilities,
 } from "./capture/capabilities";
 import { probeOverlaySupport } from "./capture/overlayProbe";
+import { detectHyprOverlay, hideHyprOverlay } from "./capture/hyprOverlay";
 import type { CaptureRect } from "./capture/screen";
 import { CHANNELS, type OverlayController, registerIpc, runCapture } from "./ipc";
 import { startPriceScheduler } from "./prices/scheduler";
@@ -80,7 +81,10 @@ if (!gotLock) {
 
     // Capability gate runs once at startup. The GNOME/KDE-Wayland branch gets a
     // real runtime overlay probe; every other session decides from env alone.
-    capabilities = await detectCapabilities({ probeOverlay: probeOverlaySupport });
+    capabilities = await detectCapabilities({
+      probeOverlay: probeOverlaySupport,
+      probeHyprOverlay: detectHyprOverlay,
+    });
 
     registerIpc(() => mainWindow, overlayController);
     createWindow();
@@ -131,14 +135,13 @@ function triggerScan(): void {
   if (capabilities?.overlayMode === "full" && rect) {
     overlayController.setOverlayRegion(rect);
     overlayController.showOverlay();
+  } else if (capabilities?.overlayMode === "hyprland-plugin") {
+    if (rect) overlayController.setOverlayRegion(rect);
+    overlayController.showOverlay();
   } else {
     pushOverlayState(true, capabilities?.overlayMode !== "full");
   }
-  // Nudge the main renderer to kick off a scan of the calibrated region.
-  mainWindow?.webContents.send(CHANNELS.overlayState, {
-    visible: true,
-    degraded: capabilities?.overlayMode !== "full",
-  });
+  // `showOverlay`/degraded branch already push overlayState to every window.
 }
 
 // Esc dismisses a *visible* overlay. Registered only while shown so we don't
@@ -162,7 +165,11 @@ function unregisterEscToHide(): void {
 }
 
 function pushOverlayState(visible: boolean, degraded: boolean): void {
-  const payload = { visible, degraded };
+  const payload = {
+    visible,
+    degraded,
+    mode: capabilities?.overlayMode ?? (degraded ? "degraded" : "full"),
+  };
   mainWindow?.webContents.send(CHANNELS.overlayState, payload);
   overlayWindow?.webContents.send(CHANNELS.overlayState, payload);
 }
@@ -180,6 +187,13 @@ const overlayController: OverlayController = {
     );
   },
   showOverlay(): void {
+    if (this.capabilities().overlayMode === "hyprland-plugin") {
+      ensureOverlayWindow();
+      overlayWindow?.hide();
+      registerEscToHide();
+      pushOverlayState(true, false);
+      return;
+    }
     if (this.capabilities().overlayMode !== "full") {
       // Degraded: no click-through window — tell the renderer to show its panel.
       pushOverlayState(true, true);
@@ -191,9 +205,12 @@ const overlayController: OverlayController = {
     pushOverlayState(true, false);
   },
   hideOverlay(): void {
+    if (this.capabilities().overlayMode === "hyprland-plugin") {
+      void hideHyprOverlay();
+    }
     overlayWindow?.hide();
     unregisterEscToHide();
-    pushOverlayState(false, this.capabilities().overlayMode !== "full");
+    pushOverlayState(false, this.capabilities().overlayMode === "degraded");
   },
   isOverlayVisible(): boolean {
     return overlayWindow?.isVisible() ?? false;
@@ -204,14 +221,21 @@ const overlayController: OverlayController = {
     else overlayWindow.hide();
   },
   setOverlayRegion(rect: CaptureRect): void {
-    if (this.capabilities().overlayMode !== "full") return;
+    if (
+      this.capabilities().overlayMode !== "full" &&
+      this.capabilities().overlayMode !== "hyprland-plugin"
+    ) {
+      return;
+    }
     ensureOverlayWindow();
-    overlayWindow?.setBounds({
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      width: Math.max(1, Math.round(rect.width)),
-      height: Math.max(1, Math.round(rect.height)),
-    });
+    if (this.capabilities().overlayMode === "full") {
+      overlayWindow?.setBounds({
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.max(1, Math.round(rect.width)),
+        height: Math.max(1, Math.round(rect.height)),
+      });
+    }
     // Keep the overlay renderer's cached region in sync with its bounds so a
     // scan triggered right after positioning has a rect to capture.
     overlayWindow?.webContents.send(CHANNELS.regionCalibrated, rect);
@@ -229,7 +253,10 @@ const overlayController: OverlayController = {
     // must receive regionCalibrated too (else it reports "no region" on scan).
     mainWindow?.webContents.send(CHANNELS.regionCalibrated, rect);
     overlayWindow?.webContents.send(CHANNELS.regionCalibrated, rect);
-    if (this.capabilities().overlayMode === "full") {
+    if (
+      this.capabilities().overlayMode === "full" ||
+      this.capabilities().overlayMode === "hyprland-plugin"
+    ) {
       this.setOverlayRegion(rect);
     }
   },

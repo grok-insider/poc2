@@ -15,7 +15,7 @@ export type SessionKind =
   | "linux-wayland-wlroots"
   | "linux-wayland-other";
 
-export type OverlayMode = "full" | "degraded";
+export type OverlayMode = "full" | "degraded" | "hyprland-plugin";
 
 export interface Capabilities {
   /** Region capture can be taken without a per-grab permission prompt. */
@@ -78,6 +78,7 @@ export function classifySession(env: CapabilityEnv): SessionKind {
  * always-on-top window took effect; `false` ⇒ the compositor refused it.
  */
 export type OverlayProbe = () => boolean | Promise<boolean>;
+export type HyprOverlayProbe = () => boolean | Promise<boolean>;
 
 export interface DetectOptions {
   env?: CapabilityEnv;
@@ -87,6 +88,8 @@ export interface DetectOptions {
    * kinds, so unit tests of the pure branches need not supply it.
    */
   probeOverlay?: OverlayProbe;
+  /** Runtime probe for the generic hypr-overlay compositor plugin. */
+  probeHyprOverlay?: HyprOverlayProbe;
 }
 
 function defaultEnv(): CapabilityEnv {
@@ -124,14 +127,24 @@ export async function detectCapabilities(
         silentRegionCapture: true,
       };
     case "linux-wayland-wlroots":
-      // Hyprland/wlroots: layer-shell deferred (ADR-0009), and Electron's
-      // transparent click-through window is unreliable here, so we don't even
-      // probe — straight to the in-app degraded panel. Capture uses the portal.
-      return {
-        sessionKind,
-        overlayMode: "degraded",
-        silentRegionCapture: false,
-      };
+      // Hyprland/wlroots: prefer the compositor plugin when it is loaded.
+      // Without it, layer-shell stays deferred and Electron's transparent
+      // click-through window is unreliable, so we degrade conservatively.
+      {
+        let pluginLoaded = false;
+        if (opts.probeHyprOverlay) {
+          try {
+            pluginLoaded = (await opts.probeHyprOverlay()) === true;
+          } catch {
+            pluginLoaded = false;
+          }
+        }
+        return {
+          sessionKind,
+          overlayMode: pluginLoaded ? "hyprland-plugin" : "degraded",
+          silentRegionCapture: false,
+        };
+      }
     case "linux-wayland-other": {
       let probePassed = false;
       if (opts.probeOverlay) {

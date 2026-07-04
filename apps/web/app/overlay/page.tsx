@@ -22,7 +22,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getDesktopBridge,
+  type DesktopCapabilities,
   type CaptureRect,
+  type HyprOverlayPayload,
   type OverlayState,
 } from "@/lib/desktop";
 import { recognizeRows, resolveAndPrice } from "@/lib/ocr/scan";
@@ -62,6 +64,24 @@ function fmtEach(r: PricedRow): string | null {
   return `${s}${r.unit ? ` ${r.unit}` : ""} ea`;
 }
 
+function toHyprOverlayPayload(
+  rect: CaptureRect,
+  rows: PricedRow[],
+): HyprOverlayPayload {
+  const highest = highestValueIndex(rows);
+  return {
+    visible: rows.length > 0,
+    rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+    ttlMs: 15_000,
+    rows: rows.map((r, i) => ({
+      label: `${r.quantity > 1 ? `${r.quantity}x ` : ""}${r.name}`,
+      value: fmtTotal(r) ?? "no price",
+      detail: fmtEach(r) ?? undefined,
+      emphasis: i === highest,
+    })),
+  };
+}
+
 export default function OverlayPage() {
   const [hasBridge, setHasBridge] = useState(false);
   const [state, setState] = useState<OverlayState | null>(null);
@@ -77,6 +97,7 @@ export default function OverlayPage() {
   const regionRef = useRef<CaptureRect | null>(null);
   const lockRef = useRef<RowLockState>(emptyRowLock());
   const scanningRef = useRef(false);
+  const capsRef = useRef<DesktopCapabilities | null>(null);
 
   // Fallback when the capture portal is denied: use the clipboard item path —
   // read whatever the user has copied and resolve the recognizable name lines.
@@ -165,6 +186,9 @@ export default function OverlayPage() {
       const out = lockedPriced.length > 0 ? lockedPriced : priced;
       setRows(out);
       setStatus(out.length > 0 ? "ready" : "empty");
+      if (capsRef.current?.overlayMode === "hyprland-plugin" && rect) {
+        void bridge.hyprOverlayRender(toHyprOverlayPayload(rect, out));
+      }
       if (out.length === 0) setNote("No item rows recognized.");
     } catch (e) {
       setStatus("empty");
@@ -182,6 +206,9 @@ export default function OverlayPage() {
     // Hydrate window.poc2PriceSource + the fuzzy candidate names from the
     // desktop poe2scout cache so the very first scan can price + resolve.
     void loadPriceSource();
+    void bridge.capabilities().then((caps) => {
+      capsRef.current = caps;
+    }).catch(() => {});
 
     // Hydrate the persisted calibrated region: the overlay window may be
     // created AFTER calibration happened, so relying on the push alone

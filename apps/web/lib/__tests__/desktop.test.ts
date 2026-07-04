@@ -51,6 +51,7 @@ describe("getDesktopBridge", () => {
       calibrateRegion: async () => true,
       onRegionCalibrated: () => () => seen.push("off-region"),
       onOverlayState: () => () => seen.push("off-overlay"),
+      hyprOverlayRender: async () => true,
       pricesSnapshot: async () => ({ league: "L", names: [], byName: {}, fetchedAt: null }),
       pricesStatus: async () => ({
         league: "L",

@@ -21,6 +21,7 @@ const CHANNELS = {
   getCaptureRegion: "poc2:get-capture-region",
   regionCalibrated: "poc2:region-calibrated",
   overlayState: "poc2:overlay-state",
+  hyprOverlayRender: "poc2:hypr-overlay-render",
   // --- poe2scout price cache ---
   pricesSnapshot: "poc2:prices-snapshot",
   pricesStatus: "poc2:prices-status",
@@ -99,6 +100,9 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
       cb(state);
     ipcRenderer.on(CHANNELS.overlayState, listener);
     return () => ipcRenderer.removeListener(CHANNELS.overlayState, listener);
+  },
+  hyprOverlayRender(payload: unknown): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.hyprOverlayRender, payload);
   },
 
   // --- poe2scout price cache ---
