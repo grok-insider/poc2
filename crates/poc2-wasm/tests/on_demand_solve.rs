@@ -200,6 +200,27 @@ fn set_league_invalidates_trained_models() {
 }
 
 #[test]
+fn noop_dispatch_clear_keeps_trained_models() {
+    // The worker's plugin loader calls clearPluginDispatch unconditionally
+    // at boot (zero plugins configured). Without an installed dispatch
+    // that must be a no-op — NOT a cache wipe of the warm start.
+    let mut engine = engine_with_fixture_bundle();
+    let item = item_json(Rarity::Normal, &[], &[]);
+    let goal = es_goal_json();
+    engine
+        .recommend(&item, &goal, 0.5, 3, 3)
+        .expect("recommend");
+    assert_eq!(engine.trained_model_count(), 1);
+
+    engine.clear_plugin_dispatch();
+    assert_eq!(
+        engine.trained_model_count(),
+        1,
+        "no-op dispatch clear must not invalidate trained models"
+    );
+}
+
+#[test]
 fn empty_target_goal_never_solves() {
     let mut engine = engine_with_fixture_bundle();
     let item = item_json(Rarity::Normal, &[], &[]);

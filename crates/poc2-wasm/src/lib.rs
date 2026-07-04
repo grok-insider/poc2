@@ -416,10 +416,16 @@ impl Engine {
 
     /// Remove the plugin dispatch callback — `Custom` predicates return
     /// to evaluating as false.
+    ///
+    /// Invalidates trained models only when a dispatch was actually
+    /// installed: the worker's plugin loader calls this unconditionally at
+    /// boot when zero plugins are configured, and a no-op clear must not
+    /// wipe the freshly warm-started cache (ADR-0015).
     #[wasm_bindgen(js_name = clearPluginDispatch)]
     pub fn clear_plugin_dispatch(&mut self) {
-        self.state.plugin_dispatch_fn = None;
-        self.state.invalidate_trained_models();
+        if self.state.plugin_dispatch_fn.take().is_some() {
+            self.state.invalidate_trained_models();
+        }
     }
 
     /// Recommend the top-N next actions. `item_json` / `goal_json` are JSON of
