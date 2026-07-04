@@ -26,7 +26,8 @@
 //! - `has_fractured`     — fractures lock mods; downstream planning differs
 //! - `is_corrupted`      — terminal-state signal for Vaal-finish branches
 //! - `has_hinekora_lock` — locked items use a deterministic seed
-//! - `extra_flags`       — reserved for future per-class signals
+//! - `extra_flags`       — match-progress lanes for `count > 1` specs
+//!   (bits 4–7 reserved for future per-class signals)
 //!
 //! ## State-space size
 //!
@@ -80,8 +81,10 @@ pub struct FeatureVec {
     pub is_corrupted: bool,
     /// Item carries an active Hinekora's Lock seed.
     pub has_hinekora_lock: bool,
-    /// Reserved for per-class signals (e.g., quality bucket on jewellery,
-    /// implicit count on jewels). Zero in v3; bumped by future tiers.
+    /// Per-spec match-progress lanes for `count > 1` specs (artefact
+    /// schema v2): bits 0–1 = `min(matched, 3)` of the first multi-count
+    /// spec, bits 2–3 = the second. Bits 4–7 remain reserved for future
+    /// per-class signals. See [`multi_count_progress`].
     pub extra_flags: u8,
 }
 
@@ -138,20 +141,76 @@ pub fn featurize(item: &Item, goal: &Goal, registry: &ModRegistry) -> FeatureVec
         has_fractured: item.has_fractured(),
         is_corrupted: item.corrupted,
         has_hinekora_lock: item.hinekora_lock.is_some(),
-        extra_flags: 0,
+        extra_flags: multi_count_progress(item, goal, registry),
     }
+}
+
+/// Per-spec match-progress encoding for `count > 1` specs (artefact
+/// schema v2, `extra_flags`).
+///
+/// The satisfaction bitmap (`target_match`) only flips a `count = N`
+/// spec's bit when all `N` mods are present, which makes intermediate
+/// progress (1-of-3 resistances vs 2-of-3) invisible to the featurized
+/// state — the abstracted MDP then can't represent the path to the
+/// terminal at all (states with different progress collapse, and the
+/// collapsed representative's transitions may never reach the goal).
+///
+/// Encoding: the first **two** `count > 1` specs, in the same canonical
+/// order as the bitmap (prefixes then suffixes), each get 2 bits carrying
+/// `min(matched, 3)`: bits 0–1 for the first such spec, bits 2–3 for the
+/// second. PoE2 caps each affix side at 3 mods, so `count > 3` is
+/// unsatisfiable and 2 bits of progress are exact. Goals with a third+
+/// multi-count spec lose progress resolution on it (the terminal bit
+/// stays exact; only path guidance coarsens — graceful degradation, same
+/// spirit as the 16-spec bitmap cap).
+fn multi_count_progress(item: &Item, goal: &Goal, registry: &ModRegistry) -> u8 {
+    let n_prefix_specs = goal.target.prefixes.len();
+    let total_specs = n_prefix_specs + goal.target.suffixes.len();
+    let cap = total_specs.min(16);
+
+    let mut flags = 0u8;
+    let mut lane = 0u8;
+    for spec_idx in 0..cap {
+        let (spec, slot): (&TargetSpec, &[poc2_engine::item::ModRoll]) =
+            if spec_idx < n_prefix_specs {
+                (&goal.target.prefixes[spec_idx], &item.prefixes[..])
+            } else {
+                (
+                    &goal.target.suffixes[spec_idx - n_prefix_specs],
+                    &item.suffixes[..],
+                )
+            };
+        if spec.count <= 1 {
+            continue;
+        }
+        let matched = crate::goal::spec_match_count(spec, slot, registry).min(3);
+        flags |= matched << (2 * lane);
+        lane += 1;
+        if lane == 2 {
+            break;
+        }
+    }
+    flags
 }
 
 /// Build the target-match bitmap for an item under the supplied goal.
 ///
-/// Bit `i` is set when the item carries at least one mod satisfying the
-/// goal's `i`-th target spec. Specs are enumerated in
+/// Bit `i` is set when the goal's `i`-th target spec is **fully
+/// satisfied** — i.e. the item carries at least `spec.count` mods
+/// matching the spec's concept set, honouring `affix` and
+/// `allow_hybrid`, per the exact predicate [`crate::goal::is_satisfied`]
+/// evaluates ([`crate::goal::spec_satisfied`]). Specs are enumerated in
 /// `target.prefixes` order followed by `target.suffixes` order (cap 16).
 ///
+/// Historical note: v3 originally encoded *presence* ("any one mod
+/// matches"), which made bitmap-based terminal predicates fire before
+/// real satisfaction on `count > 1` goals — the training-quality pass
+/// aligned the bitmap with `spec_satisfied` (artefact schema v2).
+///
 /// Hybrid mods participate in every spec they overlap with — i.e., a
-/// `+ES + +Life` hybrid sets the bits for both an `EnergyShield` spec
-/// and a `Life` spec. This generalizes the trained policy across goals
-/// that include hybrid keepers.
+/// `+ES + +Life` hybrid counts toward both an `EnergyShield` spec
+/// and a `Life` spec (when `allow_hybrid`). This generalizes the trained
+/// policy across goals that include hybrid keepers.
 #[must_use]
 pub fn target_match_bitmap(item: &Item, goal: &Goal, registry: &ModRegistry) -> u16 {
     let mut bitmap = 0u16;
@@ -172,47 +231,11 @@ pub fn target_match_bitmap(item: &Item, goal: &Goal, registry: &ModRegistry) -> 
                     &item.suffixes[..],
                 )
             };
-        if spec_satisfies_any_mod(spec, slot, registry) {
+        if crate::goal::spec_satisfied(spec, slot, registry) {
             bitmap |= 1u16 << spec_idx;
         }
     }
     bitmap
-}
-
-/// True iff at least one mod in `slot` matches the spec, honouring the
-/// spec's `concept` / `concept_any` set + `affix` filter + `allow_hybrid`.
-///
-/// Mirrors [`crate::goal::spec_satisfied`] but returns "any one mod
-/// matched" instead of "matched at least `count` mods" — the bitmap
-/// represents *presence*, not multiplicity.
-fn spec_satisfies_any_mod(
-    spec: &TargetSpec,
-    slot: &[poc2_engine::item::ModRoll],
-    registry: &ModRegistry,
-) -> bool {
-    let concepts: Vec<&poc2_engine::ConceptId> =
-        spec.concept.iter().chain(spec.concept_any.iter()).collect();
-    if concepts.is_empty() {
-        return false;
-    }
-    for roll in slot {
-        if let Some(req) = spec.affix {
-            if roll.affix_type != req {
-                continue;
-            }
-        }
-        let Some(def) = registry.get(&roll.mod_id) else {
-            continue;
-        };
-        let is_hybrid = def.flags.contains(poc2_engine::mods::ModFlags::HYBRID);
-        if is_hybrid && !spec.allow_hybrid {
-            continue;
-        }
-        if def.concept_set.iter().any(|c| concepts.contains(&c)) {
-            return true;
-        }
-    }
-    false
 }
 
 /// Clamp a usize affix count to `0..=3`. The featurization treats
@@ -486,6 +509,82 @@ mod tests {
         let bitmap = target_match_bitmap(&item, &goal, &registry);
         // All 16 visible bits set; the 17th is clamped away.
         assert_eq!(bitmap, 0xFFFF);
+    }
+
+    #[test]
+    fn target_match_bitmap_is_count_aware() {
+        // A count=2 spec must NOT set its bit with only one matching mod
+        // (the historical presence-only bitmap did — the source of the
+        // over-optimistic terminal predicate on count>1 goals).
+        let registry = ModRegistry::from_mods(
+            vec![mk_es_mod("ES1", false), mk_es_mod("ES2", false)],
+            vec![],
+        );
+        let goal = Goal::new(
+            Target {
+                prefixes: vec![es_target(2)],
+                suffixes: vec![],
+                constraints: vec![],
+            },
+            DivEquiv::point(100.0),
+        );
+
+        let one = mk_item(Rarity::Magic, vec!["ES1"], vec![]);
+        assert_eq!(
+            target_match_bitmap(&one, &goal, &registry),
+            0,
+            "count=2 spec must not fire with 1 matching mod"
+        );
+
+        let two = mk_item(Rarity::Rare, vec!["ES1", "ES2"], vec![]);
+        assert_eq!(
+            target_match_bitmap(&two, &goal, &registry),
+            0b1,
+            "count=2 spec fires with 2 matching mods"
+        );
+    }
+
+    #[test]
+    fn extra_flags_encode_multi_count_progress() {
+        // Goal: count=1 ES prefix spec (no lane) + count=3 Life suffix
+        // spec (first multi-count lane, bits 0-1).
+        let registry = ModRegistry::from_mods(
+            vec![
+                mk_es_mod("ES1", false),
+                mk_life_mod("L1"),
+                mk_life_mod("L2"),
+                mk_life_mod("L3"),
+            ],
+            vec![],
+        );
+        let goal = Goal::new(
+            Target {
+                prefixes: vec![es_target(1)],
+                suffixes: vec![life_target(3)],
+                constraints: vec![],
+            },
+            DivEquiv::point(100.0),
+        );
+
+        let zero = mk_item(Rarity::Rare, vec![], vec![]);
+        assert_eq!(featurize(&zero, &goal, &registry).extra_flags, 0);
+
+        let one = mk_item(Rarity::Rare, vec![], vec!["L1"]);
+        let f1 = featurize(&one, &goal, &registry);
+        assert_eq!(f1.extra_flags, 1, "1-of-3 progress in lane 0");
+        assert_eq!(f1.target_match, 0, "count=3 bit must not fire yet");
+
+        let two = mk_item(Rarity::Rare, vec![], vec!["L1", "L2"]);
+        assert_eq!(featurize(&two, &goal, &registry).extra_flags, 2);
+
+        let three = mk_item(Rarity::Rare, vec![], vec!["L1", "L2", "L3"]);
+        let f3 = featurize(&three, &goal, &registry);
+        assert_eq!(f3.extra_flags, 3);
+        assert_eq!(f3.target_match, 0b10, "count=3 spec satisfied");
+
+        // Progress states must be DISTINCT FeatureVecs — this is what
+        // makes count>1 terminals reachable in the abstracted MDP.
+        assert_ne!(f1.pack(), featurize(&two, &goal, &registry).pack());
     }
 
     #[test]

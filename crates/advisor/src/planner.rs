@@ -454,31 +454,55 @@ fn score_node(node: &PlanNode, input: &PlanInput<'_>, cfg: &BeamConfig) -> f64 {
     // pair, blend the Q-value into the score. Q dominates the
     // heuristic; the heuristic stays as a tiebreaker. Lookup miss →
     // pure heuristic ranking.
-    if let Some(q) = trained_policy_q(node, input) {
+    if let Some(q) = trained_policy_q(node, input, cfg.risk) {
         return q * cfg.trained_uplift_weight + heuristic;
     }
     heuristic
 }
 
-/// Look up `Q(featurize(node.item, goal), node.path[0])` in the trained
-/// model cache, when one exists for the current `(goal, item-class)`.
+/// Look up the trained policy's Q-value for a node's **first action** from
+/// the **root state**, when a model exists for the current
+/// `(goal, item-class)`.
+///
+/// `Q(featurize(input.item), path[0])` — deliberately the root state, not
+/// the node's: recommendations are ranked by their first action, and
+/// `Q(s0, a1)` is exactly the trained policy's preference over first
+/// actions. Every descendant of the same first action shares the Q score,
+/// so the v2 heuristic ranks within-path ties at any depth. (The
+/// historical `Q(fv(node), path[0])` keyed the CURRENT state to the FIRST
+/// action — a pair that usually doesn't exist in the model at depth ≥ 2,
+/// silently dropping deep nodes back to heuristic scale mid-frontier.)
+///
+/// When the artefact carries the cost-reward twin, the returned value is
+/// the docs/81 §6.3 risk blend `(1 − risk)·Q_cost + risk·Q_steps` — a
+/// cautious (low-risk) user prioritizes expected cost, a greedy one
+/// expected steps. Path-only artefacts fall back to `Q_steps` alone.
+///
 /// Returns `None` when:
 ///
 /// - no cache supplied
 /// - node is the root (no first action yet)
 /// - cache miss for the goal hash + class
-/// - the trained model doesn't have an entry for this `(state, action)`
+/// - the path-length model has no entry for `(root_state, first_action)`
 ///
 /// The advisor uses `None` as the signal to fall back to v2 heuristic
 /// scoring.
-fn trained_policy_q(node: &PlanNode, input: &PlanInput<'_>) -> Option<f64> {
+fn trained_policy_q(node: &PlanNode, input: &PlanInput<'_>, risk: f64) -> Option<f64> {
     let cache = input.trained_models?;
     let first_action = node.path.first()?;
-    let item_class = item_class_for(&node.item, input.base_registry);
+    let item_class = item_class_for(&input.item, input.base_registry);
     let goal_h = goal_hash(&input.goal);
-    let model = cache.lookup(goal_h, &item_class)?;
-    let fv = featurize(&node.item, &input.goal, input.registry);
-    score_with_trained_policy(model, fv, first_action)
+    let (path_model, cost_model) = cache.lookup_pair(goal_h, &item_class)?;
+    let root_fv = featurize(&input.item, &input.goal, input.registry);
+    let q_steps = score_with_trained_policy(path_model, root_fv, first_action)?;
+    let q_cost = cost_model.and_then(|m| m.q_at(root_fv, first_action));
+    Some(match q_cost {
+        Some(qc) => {
+            let r = risk.clamp(0.0, 1.0);
+            (1.0 - r) * qc + r * q_steps
+        }
+        None => q_steps,
+    })
 }
 
 /// Resolve `Item.base` → `ItemClassId`, honouring [`BaseRegistry`]
@@ -846,7 +870,7 @@ mod tests {
         };
         let dummy_node = PlanNode::root(input.item.clone());
         // Empty path → no first action → None even if a cache had one.
-        assert!(trained_policy_q(&dummy_node, &input).is_none());
+        assert!(trained_policy_q(&dummy_node, &input, 0.5).is_none());
     }
 
     /// Score a fresh `Normal`-rarity body armour through the planner

@@ -198,18 +198,22 @@ canonical org (see below).
 
 Ordered by expected value; none are started unless noted.
 
-- [ ] **Production advisor retrain** (operator action, ~seconds since the
+- [ ] **Production advisor retrain** (operator action, ~30 s since the
   analytic trainer landed): `cargo run --release --bin train-advisor --
   --corpus pipeline/data/training_goals.toml --bundle <0.5 bundle> --out …`
   (default `--model analytic` builds exact transition distributions from
   the engine's pool-weight enumeration; the old Monte Carlo path survives
   as `--model mc` for cross-validation), then copy the artefact to
   `apps/web/public/trained-models.json`. Consider a CI/release lane that
-  publishes the artefact alongside releases. Known corpus wart: 4 goals
-  (`shield-es-spellblock`, `quiver-attack`, `ring-caster-spell-mana`,
-  `amulet-attack-skill-life`) sit at the −1000 V-floor under BOTH models —
-  unreachable under the 7-action training set / bitmap terminal; see the
-  training-quality pass.
+  publishes the artefact alongside releases. Since the training-quality
+  pass (artefact schema v2), all 42 trainable corpus goals converge to a
+  finite `V_path(s0)`; 9 goals are **audit-dropped** with per-spec reasons
+  (Block on BodyArmour/Helmet/Staff suffixes, the `Armour` concept missing
+  entirely, Sceptre minion / Amulet attack / Ring caster concepts absent
+  per class) — these are upstream taxonomy gaps, tracked with the data
+  gaps below. Follow-up candidate: add goal-relevant **Verisium Alloys**
+  to the training action set (Swift Alloy is the only CastSpeed-on-Gloves
+  source, so `gloves-cast-speed-es` stays audit-dropped until then).
 - [ ] **Plugin phase 3 (ADR-0014):** recommendation emitters — needs a
   candidate-source hook in the planner (`PlanInput` only carries
   predicate dispatch today), then the JS host wires

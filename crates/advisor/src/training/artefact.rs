@@ -85,26 +85,33 @@ pub fn load_artefacts_str(
     let mut version_skipped = 0;
     for artefact in artefacts {
         // Version guard: a trained model is only valid for the bundle +
-        // engine schema it was trained against. A stale model (e.g. a
-        // 0.4-era schema-v2 artefact next to a v3/0.5 bundle) keys on a
-        // goal_hash / featurization that may collide or mis-estimate, so it
-        // must be refused — the advisor falls back to heuristic planning,
-        // which is always correct. Retraining against the new bundle
-        // regenerates a matching artefact.
+        // engine + artefact (featurization) schema it was trained against.
+        // A stale model (e.g. a 0.4-era schema-v2 artefact next to a
+        // v3/0.5 bundle, or a presence-bitmap v1 artefact under the
+        // count-aware v2 featurization) keys on a goal_hash /
+        // featurization that may collide or mis-estimate, so it must be
+        // refused — the advisor falls back to heuristic planning, which is
+        // always correct. Retraining against the new bundle regenerates a
+        // matching artefact.
         let m = &artefact.model_path_length;
         if m.bundle_schema_version != poc2_data::BUNDLE_SCHEMA_VERSION
             || m.engine_schema_version != poc2_engine::ENGINE_SCHEMA_VERSION
+            || m.artefact_schema_version != super::hybrid::TRAINED_ARTEFACT_SCHEMA_VERSION
         {
             version_skipped += 1;
             continue;
         }
-        // The cache currently keys on (goal_hash, item_class). The
-        // path-length and cost models share the same key, so we insert
-        // path-length as the canonical model. The cost model is kept
-        // alongside in the artefact for the cost-priority side of the
-        // risk slider once the planner consults both reward kinds
-        // (deferred — v3 hybrid scoring uses path-length only).
-        cache.insert(artefact.model_path_length);
+        // The cache keys on (goal_hash, item_class); the path-length model
+        // is the canonical entry and the cost model rides along as the
+        // cost-priority side of the risk slider's Q-blend (docs/81 §6.3).
+        // A cost model with a mismatched schema is dropped rather than
+        // rejected wholesale (the path model alone is still valid).
+        let cost = Some(artefact.model_cost).filter(|c| {
+            c.bundle_schema_version == poc2_data::BUNDLE_SCHEMA_VERSION
+                && c.engine_schema_version == poc2_engine::ENGINE_SCHEMA_VERSION
+                && c.artefact_schema_version == super::hybrid::TRAINED_ARTEFACT_SCHEMA_VERSION
+        });
+        cache.insert_pair(artefact.model_path_length, cost);
         inserted += 1;
     }
     if version_skipped > 0 {
@@ -112,6 +119,7 @@ pub fn load_artefacts_str(
             version_skipped,
             expected_bundle = poc2_data::BUNDLE_SCHEMA_VERSION,
             expected_engine = poc2_engine::ENGINE_SCHEMA_VERSION,
+            expected_artefact = super::hybrid::TRAINED_ARTEFACT_SCHEMA_VERSION,
             "skipped trained-model artefacts trained against a different schema; retrain the corpus"
         );
     }
@@ -183,12 +191,16 @@ mod tests {
     use poc2_engine::ids::{CurrencyId, ItemClassId};
 
     fn mk_model(goal_hash: u64, class: &str) -> TrainedModel {
-        TrainedModel {
-            goal_hash,
-            item_class: ItemClassId::from(class),
-            bundle_schema_version: poc2_data::BUNDLE_SCHEMA_VERSION,
-            engine_schema_version: poc2_engine::ENGINE_SCHEMA_VERSION,
-            q_table: vec![QEntry {
+        // Round-trip through serde so the private `q_index` field doesn't
+        // need to be nameable here; loaders always deserialize anyway.
+        let json = serde_json::json!({
+            "goal_hash": goal_hash,
+            "item_class": class,
+            "artefact_schema_version":
+                crate::training::hybrid::TRAINED_ARTEFACT_SCHEMA_VERSION,
+            "bundle_schema_version": poc2_data::BUNDLE_SCHEMA_VERSION,
+            "engine_schema_version": poc2_engine::ENGINE_SCHEMA_VERSION,
+            "q_table": [QEntry {
                 state: 0,
                 action: AdvisorAction::ApplyCurrency {
                     currency: CurrencyId::from("ChaosOrb"),
@@ -196,10 +208,11 @@ mod tests {
                 },
                 q: -1.5,
             }],
-            value_path_length: vec![(0, -1.5)],
-            value_cost: vec![],
-            reward_kind: RewardKind::PathLength,
-        }
+            "value_path_length": [(0u64, -1.5f64)],
+            "value_cost": [],
+            "reward_kind": RewardKind::PathLength,
+        });
+        serde_json::from_value(json).unwrap()
     }
 
     fn mk_artefact(goal_hash: u64, class: &str) -> TrainedModelArtefact {
@@ -301,6 +314,44 @@ mod tests {
         let outcome = load_artefact_file(&path, &mut cache);
         assert_eq!(outcome, ArtefactLoadOutcome::Loaded(0));
         assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn load_artefacts_str_skips_artefact_schema_mismatch() {
+        // v1 artefacts (presence-only bitmap era) must be refused under the
+        // count-aware v2 featurization — including artefacts written before
+        // the field existed (serde default = 1).
+        let mut stale = mk_artefact(11, "BodyArmour");
+        stale.model_path_length.artefact_schema_version = 1;
+        let raw = serde_json::to_string(&vec![stale]).unwrap();
+        let mut cache = TrainedModelCache::new();
+        let (inserted, version_skipped) = load_artefacts_str(&raw, &mut cache).unwrap();
+        assert_eq!(inserted, 0);
+        assert_eq!(version_skipped, 1);
+
+        // Field absent entirely → defaults to v1 → refused.
+        let mut v = serde_json::to_value(vec![mk_artefact(12, "BodyArmour")]).unwrap();
+        v[0]["model_path_length"]
+            .as_object_mut()
+            .unwrap()
+            .remove("artefact_schema_version");
+        let raw = serde_json::to_string(&v).unwrap();
+        let (inserted, version_skipped) = load_artefacts_str(&raw, &mut cache).unwrap();
+        assert_eq!(inserted, 0);
+        assert_eq!(version_skipped, 1);
+    }
+
+    #[test]
+    fn load_artefacts_str_inserts_cost_twin() {
+        let raw = serde_json::to_string(&vec![mk_artefact(21, "BodyArmour")]).unwrap();
+        let mut cache = TrainedModelCache::new();
+        let (inserted, _) = load_artefacts_str(&raw, &mut cache).unwrap();
+        assert_eq!(inserted, 1);
+        let (path, cost) = cache
+            .lookup_pair(21, &poc2_engine::ids::ItemClassId::from("BodyArmour"))
+            .expect("pair");
+        assert_eq!(path.goal_hash, 21);
+        assert!(cost.is_some(), "cost twin should be cached");
     }
 
     #[test]

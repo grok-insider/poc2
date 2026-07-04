@@ -57,7 +57,10 @@ budget_div = 150.0
 
 [[goal.target.prefixes]]
 concept = "Life"
-count = 3
+# count 2 (was 3): only 2 distinct Life-carrying prefix mod-groups exist on
+# BodyArmour in the 0.5 bundle (IncreasedLife + BaseLocalDefencesAndLife) —
+# mod-group exclusivity makes a third Life prefix unreachable.
+count = 2
 min_tier = 1
 allow_hybrid = true
 
@@ -175,7 +178,9 @@ count = 1
 min_tier = 1
 allow_hybrid = true
 
-[[goal.target.suffixes]]
+[[goal.target.prefixes]]
+# 0.5 bundle: IncreasedAccuracy on Helmet is a PREFIX (audit-verified);
+# as a suffix the goal also over-committed the side (1 + tri-res 3 > 3).
 concept = "Accuracy"
 count = 1
 min_tier = 2
@@ -359,7 +364,8 @@ item_class = "Gloves"
 ilvl = 82
 budget_div = 80.0
 
-[[goal.target.prefixes]]
+[[goal.target.suffixes]]
+# 0.5 bundle: IncreasedAttackSpeed on Gloves is a SUFFIX (audit-verified).
 concept = "AttackSpeed"
 count = 1
 min_tier = 1
@@ -370,7 +376,8 @@ count = 1
 min_tier = 1
 allow_hybrid = true
 
-[[goal.target.suffixes]]
+[[goal.target.prefixes]]
+# 0.5 bundle: IncreasedAccuracy on Gloves is a PREFIX (audit-verified).
 concept = "Accuracy"
 count = 1
 min_tier = 2
@@ -383,7 +390,7 @@ min_tier = 2
 # ---------------------------------------------------------------------
 [[goal]]
 id = "gloves-cast-speed-es"
-display_name = "Cast Speed + ES + Tri-Res Gloves"
+display_name = "Cast Speed + ES + Dual-Res Gloves"
 item_class = "Gloves"
 ilvl = 82
 budget_div = 80.0
@@ -401,7 +408,9 @@ min_tier = 1
 
 [[goal.target.suffixes]]
 concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
-count = 3
+# count 2 (was 3): the other suffix spec + 3 resistance mods would need 4
+# suffix slots — structurally impossible (audit slot-budget check).
+count = 2
 min_tier = 2
 
 # ---------------------------------------------------------------------
@@ -452,7 +461,7 @@ min_tier = 3
 # =====================================================================
 [[goal]]
 id = "belt-life-stun-tri-res"
-display_name = "Life + Stun + Tri-Res Belt"
+display_name = "Life + Stun + Dual-Res Belt"
 item_class = "Belt"
 ilvl = 82
 budget_div = 50.0
@@ -470,7 +479,9 @@ min_tier = 2
 
 [[goal.target.suffixes]]
 concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
-count = 3
+# count 2 (was 3): the other suffix spec + 3 resistance mods would need 4
+# suffix slots — structurally impossible (audit slot-budget check).
+count = 2
 min_tier = 2
 
 # ---------------------------------------------------------------------
@@ -725,10 +736,6 @@ concept = "AttackSpeed"
 count = 1
 min_tier = 2
 
-[[goal.target.suffixes]]
-concept = "ProjectileSpeed"
-count = 1
-min_tier = 2
 
 # ---------------------------------------------------------------------
 [[goal]]
@@ -807,10 +814,6 @@ concept = "AttackSpeed"
 count = 1
 min_tier = 2
 
-[[goal.target.suffixes]]
-concept = "ProjectileSpeed"
-count = 1
-min_tier = 2
 
 # =====================================================================
 # Caster Weapons — Wand / Sceptre / Staff
@@ -827,10 +830,6 @@ concept = "IncreasedSpellDamage"
 count = 1
 min_tier = 1
 
-[[goal.target.prefixes]]
-concept_any = ["AddedFireDamage", "AddedColdDamage", "AddedLightningDamage"]
-count = 1
-min_tier = 1
 
 [[goal.target.suffixes]]
 concept = "CastSpeed"
@@ -964,7 +963,8 @@ count = 2
 min_tier = 1
 allow_hybrid = true
 
-[[goal.target.suffixes]]
+[[goal.target.prefixes]]
+# 0.5 bundle: LocalBlockChance on Shield is a PREFIX (audit-verified).
 concept = "Block"
 count = 1
 min_tier = 1
@@ -999,7 +999,8 @@ concept = "AttackSpeed"
 count = 1
 min_tier = 2
 
-[[goal.target.suffixes]]
+[[goal.target.prefixes]]
+# 0.5 bundle: ProjectileSpeed mods on Quiver are PREFIXES (audit-verified).
 concept = "ProjectileSpeed"
 count = 1
 min_tier = 2
@@ -1160,7 +1161,7 @@ min_tier = 2
 # =====================================================================
 [[goal]]
 id = "amulet-life-attributes-tri-res"
-display_name = "Life + Attributes + Tri-Res Amulet"
+display_name = "Life + Attributes + Dual-Res Amulet"
 item_class = "Amulet"
 ilvl = 82
 budget_div = 80.0
@@ -1178,7 +1179,9 @@ min_tier = 1
 
 [[goal.target.suffixes]]
 concept_any = ["FireResistance", "ColdResistance", "LightningResistance", "AllResistances"]
-count = 3
+# count 2 (was 3): the other suffix spec + 3 resistance mods would need 4
+# suffix slots — structurally impossible (audit slot-budget check).
+count = 2
 min_tier = 2
 
 # ---------------------------------------------------------------------

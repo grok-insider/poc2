@@ -43,9 +43,9 @@ use poc2_advisor::training::{
 use poc2_advisor::{featurize, Goal};
 use poc2_data::Bundle;
 use poc2_engine::base_registry::BaseRegistry;
-use poc2_engine::currency::DefaultCurrencyResolver;
+use poc2_engine::currency::{DefaultCurrencyResolver, Essence, EssenceQuality};
 use poc2_engine::ids::{BaseTypeId, ConceptId, CurrencyId, ItemClassId};
-use poc2_engine::item::{Item, QualityKind, Rarity};
+use poc2_engine::item::{AffixType, Item, QualityKind, Rarity};
 use poc2_engine::omen::OmenSet;
 use poc2_engine::patch::PatchVersion;
 use poc2_engine::registry::ModRegistry;
@@ -267,10 +267,81 @@ fn pick_base_for_class(
     BaseTypeId::from(class.as_str())
 }
 
-/// Action set explored at every state during training. v3 trains on the
-/// basic-orb catalogue + a Greater Essence to seed a deterministic
-/// rare-promotion path. Production training adds bones and Vaal but
-/// requires a populated bundle for class-aware bone reveal.
+/// Full action set explored at every state during training: the basic-orb
+/// catalogue plus every goal-relevant essence (see
+/// [`enumerate_training_actions`]). Bones and Vaal remain future work
+/// (class-aware bone reveal needs the desecrated pool threaded through the
+/// simulator).
+fn enumerate_training_actions(
+    corpus_goal: &CorpusGoal,
+    item_class: &ItemClassId,
+    ctx: &EngineContext,
+) -> Vec<AdvisorAction> {
+    let mut actions = enumerate_basic_actions();
+
+    // Goal concepts wanted on either side — an essence is proposed only
+    // when its granted mod for THIS class carries a wanted concept.
+    // Undirected essence spam would blow the max_actions_per_state cap
+    // and dilute the per-alias budget for nothing.
+    let wanted: HashSet<&str> = corpus_goal
+        .target
+        .prefixes
+        .iter()
+        .chain(corpus_goal.target.suffixes.iter())
+        .flat_map(|s| {
+            s.concept
+                .as_deref()
+                .into_iter()
+                .chain(s.concept_any.iter().map(String::as_str))
+        })
+        .collect();
+    if wanted.is_empty() {
+        return actions;
+    }
+
+    for essence in &ctx.essences {
+        // Greater (Magic → Rare promote) and Perfect (Rare remove-add)
+        // are the training-relevant tiers: Lesser/Normal are strictly
+        // weaker duplicates of Greater's mechanic, and Corrupted needs
+        // Vaal state the trainer doesn't model yet.
+        if !matches!(
+            essence.quality,
+            EssenceQuality::Greater | EssenceQuality::Perfect
+        ) {
+            continue;
+        }
+        let granted: Vec<&poc2_engine::ids::ModId> = if essence.class_targets.is_empty() {
+            vec![&essence.target_mod]
+        } else {
+            let targets: Vec<_> = essence
+                .class_targets
+                .iter()
+                .filter(|t| &t.class == item_class)
+                .map(|t| &t.mod_id)
+                .collect();
+            if targets.is_empty() {
+                // Class-targeted essence with no entry for this class —
+                // illegal on the class, skip.
+                continue;
+            }
+            targets
+        };
+        let relevant = granted.iter().any(|mod_id| {
+            ctx.registry
+                .get(mod_id)
+                .is_some_and(|def| def.concept_set.iter().any(|c| wanted.contains(c.as_str())))
+        });
+        if relevant {
+            actions.push(AdvisorAction::ApplyCurrency {
+                currency: essence.id.clone(),
+                omens: vec![],
+            });
+        }
+    }
+    actions
+}
+
+/// The static basic-orb action set (Perfect tiers + Annul + Divine).
 fn enumerate_basic_actions() -> Vec<AdvisorAction> {
     vec![
         AdvisorAction::ApplyCurrency {
@@ -320,6 +391,12 @@ fn cost_for_action(action: &AdvisorAction) -> f64 {
         "PerfectChaosOrb" => 0.8,
         "OrbOfAnnulment" => 0.3,
         "DivineOrb" => 0.5,
+        // Catalogue essences (goal-relevant, added per-goal by
+        // `enumerate_training_actions`). Perfect essences are the
+        // expensive deterministic finisher; Greater the mid-tier
+        // promoter. Synthetic weights like the orbs above.
+        s if s.starts_with("PerfectEssence") => 2.0,
+        s if s.contains("Essence") => 0.7,
         _ => 0.05,
     }
 }
@@ -331,6 +408,11 @@ struct EngineContext {
     registry: ModRegistry,
     base_registry: BaseRegistry,
     resolver: DefaultCurrencyResolver,
+    /// Essence catalogue from the bundle (empty for synthetic contexts).
+    /// Used by [`enumerate_training_actions`] to add goal-relevant
+    /// essences to the per-goal action set; the same catalogue is also
+    /// registered in `resolver` for apply-time resolution.
+    essences: Vec<Essence>,
     /// Game patch the training simulates against. Comes from the loaded
     /// bundle's header (`--bundle`); synthetic smoke runs use the current
     /// patch. Training against the wrong patch silently changes pool
@@ -348,6 +430,7 @@ impl EngineContext {
             registry: ModRegistry::from_mods(vec![], vec![]),
             base_registry: BaseRegistry::default(),
             resolver: DefaultCurrencyResolver::new(),
+            essences: Vec::new(),
             patch: PatchVersion::PATCH_0_5_0,
             has_bundle: false,
         }
@@ -362,13 +445,14 @@ impl EngineContext {
         let base_registry = BaseRegistry::from_bases(bundle.base_items);
         let registry = ModRegistry::from_mods(bundle.mods, bundle.weights);
         let resolver = DefaultCurrencyResolver::new()
-            .with_essences(essences)
+            .with_essences(essences.clone())
             .with_catalysts(catalysts)
             .with_alloys(alloys);
         Self {
             registry,
             base_registry,
             resolver,
+            essences,
             patch,
             has_bundle: true,
         }
@@ -381,13 +465,13 @@ impl EngineContext {
 /// has its corresponding `target_match` bit set. Uses the same
 /// 16-spec cap as [`FeatureVec::target_match`].
 ///
-/// **Caveat**: the bitmap captures *presence* of a satisfying mod, not
-/// the spec's `count` / `min_tier` constraints. For goals with
-/// `count > 1` or `min_tier > None` the trained `V_path` will be
-/// slightly *over-optimistic* (terminal fires earlier than real
-/// satisfaction). Real satisfaction is re-checked by the desktop
-/// planner via [`is_satisfied_with_ctx`] at runtime; the trained Q
-/// gives directional guidance, not the final yes/no.
+/// Since artefact schema v2, `target_match` bit `i` means "spec `i`
+/// FULLY satisfied" (count-aware, via `goal::spec_satisfied`), so this
+/// predicate agrees exactly with the runtime `is_satisfied` check —
+/// except for `target.constraints` (cost/market predicates), which the
+/// bitmap cannot carry, and `min_tier`, which `spec_satisfied` itself
+/// doesn't evaluate yet. Real satisfaction is re-checked by the planner
+/// via [`is_satisfied_with_ctx`] at runtime.
 fn build_terminal_predicate(goal: &Goal) -> impl Fn(&FeatureVec) -> bool {
     let n_specs = (goal.target.prefixes.len() + goal.target.suffixes.len()).min(16);
     let mask: u16 = if n_specs == 16 {
@@ -439,7 +523,17 @@ fn train_one_goal(
         );
     }
 
-    let actions = enumerate_basic_actions();
+    let actions = enumerate_training_actions(corpus_goal, &item_class, ctx);
+    if verbose {
+        let ids: Vec<&str> = actions
+            .iter()
+            .filter_map(|a| match a {
+                AdvisorAction::ApplyCurrency { currency, .. } => Some(currency.as_str()),
+                _ => None,
+            })
+            .collect();
+        eprintln!("  actions ({}): {}", ids.len(), ids.join(", "));
+    }
     let actions_clone = actions.clone();
     let model = match model_kind {
         ModelKind::Analytic => {
@@ -571,6 +665,13 @@ struct AuditEntry {
     /// Concept ids referenced by the goal that are missing from the
     /// bundle's mod taxonomy. Empty when the goal is fully satisfiable.
     missing_concepts: Vec<String>,
+    /// Specs that no explicit mod (and no essence) can satisfy on this
+    /// goal's item class + affix side. Each entry is a human-readable
+    /// reason (e.g. "suffix spec [Accuracy] has no Suffix-side mod on
+    /// Helmet (concept exists as Prefix — corpus affix-side bug?)").
+    /// Training such a goal produces a −1000 V-floor artefact, so the
+    /// audit drops it.
+    unsatisfiable_specs: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -585,16 +686,21 @@ struct AuditReport {
 impl AuditReport {
     fn print(&self) {
         eprintln!(
-            "corpus audit: {} goal(s) trainable, {} dropped due to unknown concepts",
+            "corpus audit: {} goal(s) trainable, {} dropped (unknown concepts / unsatisfiable specs)",
             self.kept.len(),
             self.dropped.len()
         );
         for entry in &self.dropped {
-            eprintln!(
-                "  drop `{}`: missing concepts = [{}]",
-                entry.goal_id,
-                entry.missing_concepts.join(", ")
-            );
+            if !entry.missing_concepts.is_empty() {
+                eprintln!(
+                    "  drop `{}`: missing concepts = [{}]",
+                    entry.goal_id,
+                    entry.missing_concepts.join(", ")
+                );
+            }
+            for reason in &entry.unsatisfiable_specs {
+                eprintln!("  drop `{}`: {reason}", entry.goal_id);
+            }
         }
     }
 }
@@ -611,45 +717,244 @@ fn known_concepts(registry: &ModRegistry) -> HashSet<String> {
     set
 }
 
-/// Classify each corpus goal as trainable (every referenced concept
-/// exists in the registry) or droppable (at least one missing concept).
-fn audit_corpus(corpus: &CorpusFile, registry: &ModRegistry) -> AuditReport {
+/// Classify each corpus goal as trainable or droppable.
+///
+/// Two drop conditions:
+/// 1. **Unknown concept** — a spec references a concept no mod in the
+///    registry carries at all (taxonomy drift).
+/// 2. **Unsatisfiable spec** — every referenced concept exists somewhere,
+///    but no Explicit mod of the goal's item class on the spec's affix
+///    side carries it, and no catalogue essence grants such a mod either.
+///    Training such a goal can only produce a −1000 V-floor artefact
+///    (the terminal state is unreachable), so it is dropped with a
+///    diagnostic that distinguishes "wrong affix side in the corpus"
+///    from "class simply lacks the concept".
+fn audit_corpus(corpus: &CorpusFile, ctx: &EngineContext) -> AuditReport {
+    let registry = &ctx.registry;
     let known = known_concepts(registry);
     let mut kept = Vec::new();
     let mut dropped = Vec::new();
     for goal in &corpus.goal {
+        let item_class = ItemClassId::from(goal.item_class.as_str());
         let mut missing: Vec<String> = Vec::new();
-        let specs = goal
-            .target
-            .prefixes
-            .iter()
-            .chain(goal.target.suffixes.iter());
-        for spec in specs {
-            if let Some(c) = spec.concept.as_deref() {
-                if !known.contains(c) {
-                    missing.push(c.to_string());
+        let mut unsatisfiable: Vec<String> = Vec::new();
+
+        let sides = [
+            (&goal.target.prefixes, AffixType::Prefix, "prefix"),
+            (&goal.target.suffixes, AffixType::Suffix, "suffix"),
+        ];
+        for (specs, affix, side_label) in sides {
+            for spec in specs.iter() {
+                let concepts: Vec<&str> = spec
+                    .concept
+                    .as_deref()
+                    .into_iter()
+                    .chain(spec.concept_any.iter().map(String::as_str))
+                    .collect();
+                for c in &concepts {
+                    if !known.contains(*c) {
+                        missing.push((*c).to_string());
+                    }
+                }
+                // Spec-level satisfiability: at least ONE of the spec's
+                // concepts must be reachable on this class + side.
+                let reachable = concepts
+                    .iter()
+                    .any(|c| concept_reachable_on(registry, ctx, &item_class, affix, c));
+                if !reachable && !concepts.is_empty() {
+                    let other_side = concepts
+                        .iter()
+                        .any(|c| concept_reachable_on(registry, ctx, &item_class, flip(affix), c));
+                    let hint = if other_side {
+                        format!(
+                            " (concept exists on the {} side — corpus affix-side bug?)",
+                            match flip(affix) {
+                                AffixType::Prefix => "Prefix",
+                                _ => "Suffix",
+                            }
+                        )
+                    } else {
+                        String::new()
+                    };
+                    unsatisfiable.push(format!(
+                        "{side_label} spec [{}] has no {side_label}-side mod or essence on {}{hint}",
+                        concepts.join("|"),
+                        goal.item_class,
+                    ));
+                    continue;
+                }
+                // Group-diversity: a `count = N` spec needs N mods, and
+                // mod-group exclusivity means N DISTINCT groups carrying
+                // the concept on this side. Fewer groups ⇒ the terminal
+                // is unreachable no matter the action sequence.
+                if spec.count >= 2 && !concepts.is_empty() {
+                    let groups = distinct_groups_for(registry, ctx, &item_class, affix, &concepts);
+                    if groups < spec.count as usize {
+                        unsatisfiable.push(format!(
+                            "{side_label} spec [{}] wants count={} but only {} distinct \
+                             mod-group(s) carry those concepts on {} {side_label}es \
+                             (mod-group exclusivity caps matches)",
+                            concepts.join("|"),
+                            spec.count,
+                            groups,
+                            goal.item_class,
+                        ));
+                    }
                 }
             }
-            for c in &spec.concept_any {
-                if !known.contains(c) {
-                    missing.push(c.clone());
-                }
+            // Slot-budget: each affix side holds at most 3 mods. When the
+            // side's specs have pairwise-DISJOINT concept sets (no single
+            // mod can satisfy two of them), the counts add up — a total
+            // above 3 is structurally impossible (the tri-res + stun belt
+            // case: 1 + 3 = 4 suffixes). Overlapping specs skip the check
+            // (one mod may satisfy several, so the sum bound is invalid).
+            let disjoint = specs.iter().enumerate().all(|(i, a)| {
+                specs.iter().skip(i + 1).all(|b| {
+                    let sa: HashSet<&str> = a
+                        .concept
+                        .as_deref()
+                        .into_iter()
+                        .chain(a.concept_any.iter().map(String::as_str))
+                        .collect();
+                    sb_disjoint(&sa, b)
+                })
+            });
+            let total: u32 = specs.iter().map(|s| u32::from(s.count)).sum();
+            if disjoint && total > 3 {
+                unsatisfiable.push(format!(
+                    "{side_label} side over-committed: disjoint specs want {total} mods \
+                     but a side holds at most 3",
+                ));
             }
         }
+
         // Deduplicate so a concept referenced by multiple specs in the
         // same goal is reported once.
         missing.sort();
         missing.dedup();
-        if missing.is_empty() {
+        if missing.is_empty() && unsatisfiable.is_empty() {
             kept.push(goal.id.clone());
         } else {
             dropped.push(AuditEntry {
                 goal_id: goal.id.clone(),
                 missing_concepts: missing,
+                unsatisfiable_specs: unsatisfiable,
             });
         }
     }
     AuditReport { kept, dropped }
+}
+
+fn flip(a: AffixType) -> AffixType {
+    match a {
+        AffixType::Prefix => AffixType::Suffix,
+        _ => AffixType::Prefix,
+    }
+}
+
+/// True when spec `b`'s concept set shares nothing with `sa`.
+fn sb_disjoint(sa: &HashSet<&str>, b: &CorpusTargetSpec) -> bool {
+    !b.concept
+        .as_deref()
+        .into_iter()
+        .chain(b.concept_any.iter().map(String::as_str))
+        .any(|c| sa.contains(c))
+}
+
+/// Number of distinct mod-groups on `(item_class, affix)` that carry any
+/// of `concepts` — via the basic Explicit pool or an essence-granted mod.
+fn distinct_groups_for(
+    registry: &ModRegistry,
+    ctx: &EngineContext,
+    item_class: &ItemClassId,
+    affix: AffixType,
+    concepts: &[&str],
+) -> usize {
+    use poc2_engine::mods::{ModFlags, ModKind};
+    let concept_ids: Vec<ConceptId> = concepts.iter().map(|c| ConceptId::from(*c)).collect();
+    let basic_excludes =
+        ModFlags::ESSENCE_ONLY | ModFlags::DESECRATED_ONLY | ModFlags::CORRUPTED_ONLY;
+    let mut groups: HashSet<String> = HashSet::new();
+    for &idx in registry.for_class_affix(item_class, affix) {
+        if let Some(m) = registry.at(idx) {
+            if m.kind == ModKind::Explicit
+                && !m.flags.intersects(basic_excludes)
+                && m.concept_set.iter().any(|c| concept_ids.contains(c))
+            {
+                groups.insert(m.mod_group.0.as_str().to_string());
+            }
+        }
+    }
+    for e in &ctx.essences {
+        let granted: Vec<&poc2_engine::ids::ModId> = if e.class_targets.is_empty() {
+            vec![&e.target_mod]
+        } else {
+            e.class_targets
+                .iter()
+                .filter(|t| &t.class == item_class)
+                .map(|t| &t.mod_id)
+                .collect()
+        };
+        for mid in granted {
+            if let Some(m) = registry.get(mid) {
+                if m.affix_type == affix && m.concept_set.iter().any(|c| concept_ids.contains(c)) {
+                    groups.insert(m.mod_group.0.as_str().to_string());
+                }
+            }
+        }
+    }
+    groups.len()
+}
+
+/// Can `concept` land on `(item_class, affix)` at all — via any Explicit
+/// mod of the class-side pool, or via a catalogue essence granting such a
+/// mod? Mirrors what the training action set can actually produce (basic
+/// orbs roll Explicit pool mods including essence-only-flagged ones only
+/// through essences; the essence branch covers those).
+fn concept_reachable_on(
+    registry: &ModRegistry,
+    ctx: &EngineContext,
+    item_class: &ItemClassId,
+    affix: AffixType,
+    concept: &str,
+) -> bool {
+    use poc2_engine::mods::{ModFlags, ModKind};
+    let concept_id = ConceptId::from(concept);
+    // Direct pool: an Explicit, non-essence/desecrated/corrupted-only mod
+    // with the concept (what Trans/Aug/Regal/Exalt/Chaos can roll).
+    let basic_excludes =
+        ModFlags::ESSENCE_ONLY | ModFlags::DESECRATED_ONLY | ModFlags::CORRUPTED_ONLY;
+    let direct = registry
+        .for_class_affix(item_class, affix)
+        .iter()
+        .any(|&idx| {
+            registry.at(idx).is_some_and(|m| {
+                m.kind == ModKind::Explicit
+                    && !m.flags.intersects(basic_excludes)
+                    && m.concept_set.contains(&concept_id)
+            })
+        });
+    if direct {
+        return true;
+    }
+    // Essence-granted: any catalogue essence whose granted mod for this
+    // class sits on the right side and carries the concept.
+    ctx.essences.iter().any(|e| {
+        let granted: Vec<&poc2_engine::ids::ModId> = if e.class_targets.is_empty() {
+            vec![&e.target_mod]
+        } else {
+            e.class_targets
+                .iter()
+                .filter(|t| &t.class == item_class)
+                .map(|t| &t.mod_id)
+                .collect()
+        };
+        granted.iter().any(|mid| {
+            registry
+                .get(mid)
+                .is_some_and(|m| m.affix_type == affix && m.concept_set.contains(&concept_id))
+        })
+    })
 }
 
 // =========================================================================
@@ -695,7 +1000,7 @@ fn main() -> Result<()> {
     // Audit the corpus when we have a real bundle. Drop unsatisfiable
     // goals (or fail-fast under --strict-audit).
     let trainable_ids: HashSet<String> = if ctx.has_bundle {
-        let report = audit_corpus(&corpus, &ctx.registry);
+        let report = audit_corpus(&corpus, &ctx);
         report.print();
         if cli.strict_audit && !report.dropped.is_empty() {
             return Err(anyhow!(
@@ -779,10 +1084,25 @@ mod tests {
             stats: smallvec![],
             required_level: 1,
             tier: None,
-            allowed_item_classes: smallvec![],
+            // The per-class audit consults `for_class_affix`, which indexes
+            // on allowed classes — the fixture must carry the class the
+            // audit goals reference.
+            allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),
             text_template: None,
+        }
+    }
+
+    /// Minimal `EngineContext` around a registry, for audit tests.
+    fn ctx_for(registry: ModRegistry) -> EngineContext {
+        EngineContext {
+            registry,
+            base_registry: BaseRegistry::default(),
+            resolver: DefaultCurrencyResolver::new(),
+            essences: Vec::new(),
+            patch: PatchVersion::PATCH_0_5_0,
+            has_bundle: true,
         }
     }
 
@@ -936,7 +1256,7 @@ mod tests {
                 mk_corpus_goal("es-goal", "BodyArmour", 82, "EnergyShield"),
             ],
         };
-        let report = audit_corpus(&corpus, &registry);
+        let report = audit_corpus(&corpus, &ctx_for(registry));
         assert_eq!(report.kept, vec!["life-goal".to_string()]);
         assert_eq!(report.dropped.len(), 1);
         assert_eq!(report.dropped[0].goal_id, "es-goal");
@@ -971,7 +1291,7 @@ mod tests {
                 },
             }],
         };
-        let report = audit_corpus(&corpus, &registry);
+        let report = audit_corpus(&corpus, &ctx_for(registry));
         assert!(report.kept.is_empty());
         assert_eq!(report.dropped.len(), 1);
         // Life appears 3 times across the spec set, EnergyShield once;

@@ -6,7 +6,7 @@ use poc2_advisor::action::AdvisorAction;
 use poc2_advisor::training::{
     QEntry, RewardKind, TrainedModel, TrainedModelArtefact, TrainingArtefactMetrics,
 };
-use poc2_engine::ids::{CurrencyId, ItemClassId};
+use poc2_engine::ids::CurrencyId;
 use poc2_engine::patch::PatchVersion;
 use poc2_wasm::Engine;
 
@@ -17,12 +17,16 @@ fn engine_with_empty_bundle() -> Engine {
 }
 
 fn mk_model(goal_hash: u64, class: &str, bundle_schema: u32) -> TrainedModel {
-    TrainedModel {
-        goal_hash,
-        item_class: ItemClassId::from(class),
-        bundle_schema_version: bundle_schema,
-        engine_schema_version: poc2_engine::ENGINE_SCHEMA_VERSION,
-        q_table: vec![QEntry {
+    // Round-trip through serde: `TrainedModel` carries a private runtime
+    // q-index field, so struct-literal construction is loader-only.
+    let json = serde_json::json!({
+        "goal_hash": goal_hash,
+        "item_class": class,
+        "artefact_schema_version":
+            poc2_advisor::training::TRAINED_ARTEFACT_SCHEMA_VERSION,
+        "bundle_schema_version": bundle_schema,
+        "engine_schema_version": poc2_engine::ENGINE_SCHEMA_VERSION,
+        "q_table": [QEntry {
             state: 0,
             action: AdvisorAction::ApplyCurrency {
                 currency: CurrencyId::from("ChaosOrb"),
@@ -30,10 +34,11 @@ fn mk_model(goal_hash: u64, class: &str, bundle_schema: u32) -> TrainedModel {
             },
             q: -1.5,
         }],
-        value_path_length: vec![(0, -1.5)],
-        value_cost: vec![],
-        reward_kind: RewardKind::PathLength,
-    }
+        "value_path_length": [(0u64, -1.5f64)],
+        "value_cost": [],
+        "reward_kind": RewardKind::PathLength,
+    });
+    serde_json::from_value(json).expect("valid TrainedModel JSON")
 }
 
 fn mk_artefact(goal_hash: u64, class: &str, bundle_schema: u32) -> TrainedModelArtefact {

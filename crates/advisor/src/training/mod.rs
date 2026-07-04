@@ -22,6 +22,7 @@
 
 pub mod analytic_model;
 pub mod artefact;
+pub(crate) mod families;
 pub mod hybrid;
 pub mod imitation;
 pub mod metrics;
@@ -37,7 +38,7 @@ pub use artefact::{
 };
 pub use hybrid::{
     goal_hash, score_with_trained_policy, sim_to_real_gap, trained_model_from, QEntry, RewardKind,
-    SimToRealVerdict, TrainedModel, TrainedModelCache,
+    SimToRealVerdict, TrainedModel, TrainedModelCache, TRAINED_ARTEFACT_SCHEMA_VERSION,
 };
 pub use imitation::{lift_strategy_action, seed_from_strategies, ImitationConfig};
 pub use metrics::{argmax_actions, loop_iteration_estimate, top_action_agreement, TrainingMetrics};

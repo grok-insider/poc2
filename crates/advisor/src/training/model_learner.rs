@@ -81,11 +81,18 @@ pub enum StateActionAlias {
     /// added mod is fixed by the essence's `target_mod` bundle entry,
     /// so the next-state distribution depends only on which existing
     /// mods get preserved + which target_match bit gets flipped.
+    ///
+    /// All afterstate variants carry `progress` (=
+    /// `FeatureVec::extra_flags`, the `count > 1` spec match-progress
+    /// lanes): two states with the same satisfaction bitmap but different
+    /// multi-count progress have different next-state distributions, so
+    /// collapsing them would erase the path to `count >= 2` terminals.
     AfterEssence {
         essence_id: poc2_engine::ids::CurrencyId,
         target_match: u16,
         n_prefixes: u8,
         n_suffixes: u8,
+        progress: u8,
     },
     /// Exalted Orb afterstate: distribution depends only on which
     /// slot is empty (captured in `n_prefixes`/`n_suffixes`) and the
@@ -94,20 +101,23 @@ pub enum StateActionAlias {
         target_match: u16,
         n_prefixes: u8,
         n_suffixes: u8,
+        progress: u8,
     },
     /// Regal Orb afterstate (Magic → Rare with one added mod).
     AfterRegal {
         target_match: u16,
         n_prefixes: u8,
         n_suffixes: u8,
+        progress: u8,
     },
     /// Transmutation afterstate (Normal → Magic with one mod).
-    AfterTransmute { target_match: u16 },
+    AfterTransmute { target_match: u16, progress: u8 },
     /// Augmentation afterstate (Magic, fills empty slot).
     AfterAugment {
         target_match: u16,
         n_prefixes: u8,
         n_suffixes: u8,
+        progress: u8,
     },
 }
 
@@ -127,68 +137,45 @@ impl StateActionAlias {
                 if !omens.is_empty() {
                     return Self::Pair(features, action.clone());
                 }
-                let s = currency.as_str();
-                if is_essence_id(s) {
-                    return Self::AfterEssence {
+                // Family classification is shared with the analytic
+                // transition builder (`training::families`) so aliasing
+                // and analytic construction can't drift.
+                match crate::training::families::classify(currency.as_str()) {
+                    Some(crate::training::families::OrbFamily::Essence) => Self::AfterEssence {
                         essence_id: currency.clone(),
                         target_match: features.target_match,
                         n_prefixes: features.n_prefixes,
                         n_suffixes: features.n_suffixes,
-                    };
-                }
-                if is_exalt(s) {
-                    return Self::AfterExalt {
+                        progress: features.extra_flags,
+                    },
+                    Some(crate::training::families::OrbFamily::Exalt) => Self::AfterExalt {
                         target_match: features.target_match,
                         n_prefixes: features.n_prefixes,
                         n_suffixes: features.n_suffixes,
-                    };
-                }
-                if is_regal(s) {
-                    return Self::AfterRegal {
+                        progress: features.extra_flags,
+                    },
+                    Some(crate::training::families::OrbFamily::Regal) => Self::AfterRegal {
                         target_match: features.target_match,
                         n_prefixes: features.n_prefixes,
                         n_suffixes: features.n_suffixes,
-                    };
-                }
-                if is_transmute(s) {
-                    return Self::AfterTransmute {
+                        progress: features.extra_flags,
+                    },
+                    Some(crate::training::families::OrbFamily::Transmute) => Self::AfterTransmute {
                         target_match: features.target_match,
-                    };
-                }
-                if is_augment(s) {
-                    return Self::AfterAugment {
+                        progress: features.extra_flags,
+                    },
+                    Some(crate::training::families::OrbFamily::Augment) => Self::AfterAugment {
                         target_match: features.target_match,
                         n_prefixes: features.n_prefixes,
                         n_suffixes: features.n_suffixes,
-                    };
+                        progress: features.extra_flags,
+                    },
+                    _ => Self::Pair(features, action.clone()),
                 }
-                Self::Pair(features, action.clone())
             }
             _ => Self::Pair(features, action.clone()),
         }
     }
-}
-
-fn is_essence_id(s: &str) -> bool {
-    s.contains("Essence")
-}
-
-fn is_exalt(s: &str) -> bool {
-    s == "ExaltedOrb" || s == "GreaterExaltedOrb" || s == "PerfectExaltedOrb"
-}
-
-fn is_regal(s: &str) -> bool {
-    s == "RegalOrb" || s == "GreaterRegalOrb" || s == "PerfectRegalOrb"
-}
-
-fn is_transmute(s: &str) -> bool {
-    s == "OrbOfTransmutation"
-        || s == "GreaterOrbOfTransmutation"
-        || s == "PerfectOrbOfTransmutation"
-}
-
-fn is_augment(s: &str) -> bool {
-    s == "OrbOfAugmentation" || s == "GreaterOrbOfAugmentation" || s == "PerfectOrbOfAugmentation"
 }
 
 /// Offline-learned categorical transition model.

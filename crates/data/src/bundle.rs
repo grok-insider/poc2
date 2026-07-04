@@ -234,6 +234,16 @@ impl Bundle {
             let Some(name) = entry.get("name").and_then(|v| v.as_str()) else {
                 continue;
             };
+            // The CoE source table mixes Verisium Alloys (and other
+            // remove-add materials) into the essence rows. Those ship via
+            // [`Self::alloy_catalogue`] with alloy apply semantics —
+            // ingesting them here would fabricate pseudo-essences with
+            // garbage ids (e.g. "Swift Alloy" → Normal-quality essence)
+            // that the resolver can never resolve but that essence-based
+            // reachability checks (corpus audit) wrongly count.
+            if !name.contains("Essence") {
+                continue;
+            }
             let corrupt = entry
                 .get("corrupt")
                 .and_then(serde_json::Value::as_bool)

@@ -305,40 +305,39 @@ enum Family {
     Divine,
 }
 
-/// Classify a currency id into an analytically supported family. Ids match
-/// the `Currency::id` values in `poc2_engine::currency::{basic, variants}`.
+/// Classify a currency id into an analytically supported family, via the
+/// shared [`crate::training::families`] classifier (same source of truth
+/// as the aliasing layer). Essences map to `None` — their apply semantics
+/// live behind the `Currency` trait object, so they take the Monte Carlo
+/// fallback (cheap: promoting essences are feature-deterministic and
+/// remove-add essences have ≤ 6 uniform removal outcomes).
 fn family_for(id: &CurrencyId) -> Option<Family> {
-    match id.as_str() {
-        "OrbOfTransmutation" | "GreaterOrbOfTransmutation" | "PerfectOrbOfTransmutation" => {
-            Some(Family::AddMod(AddModSpec {
-                require: Rarity::Normal,
-                promote: Some(Rarity::Magic),
-                max_slots: 1,
-            }))
-        }
-        "OrbOfAugmentation" | "GreaterOrbOfAugmentation" | "PerfectOrbOfAugmentation" => {
-            Some(Family::AddMod(AddModSpec {
-                require: Rarity::Magic,
-                promote: None,
-                max_slots: 1,
-            }))
-        }
-        "RegalOrb" | "GreaterRegalOrb" | "PerfectRegalOrb" => Some(Family::AddMod(AddModSpec {
+    use crate::training::families::{classify, OrbFamily};
+    match classify(id.as_str())? {
+        OrbFamily::Transmute => Some(Family::AddMod(AddModSpec {
+            require: Rarity::Normal,
+            promote: Some(Rarity::Magic),
+            max_slots: 1,
+        })),
+        OrbFamily::Augment => Some(Family::AddMod(AddModSpec {
+            require: Rarity::Magic,
+            promote: None,
+            max_slots: 1,
+        })),
+        OrbFamily::Regal => Some(Family::AddMod(AddModSpec {
             require: Rarity::Magic,
             promote: Some(Rarity::Rare),
             max_slots: 3,
         })),
-        "ExaltedOrb" | "GreaterExaltedOrb" | "PerfectExaltedOrb" => {
-            Some(Family::AddMod(AddModSpec {
-                require: Rarity::Rare,
-                promote: None,
-                max_slots: 3,
-            }))
-        }
-        "ChaosOrb" | "GreaterChaosOrb" | "PerfectChaosOrb" => Some(Family::Chaos),
-        "OrbOfAnnulment" => Some(Family::Annul),
-        "DivineOrb" => Some(Family::Divine),
-        _ => None,
+        OrbFamily::Exalt => Some(Family::AddMod(AddModSpec {
+            require: Rarity::Rare,
+            promote: None,
+            max_slots: 3,
+        })),
+        OrbFamily::Chaos => Some(Family::Chaos),
+        OrbFamily::Annul => Some(Family::Annul),
+        OrbFamily::Divine => Some(Family::Divine),
+        OrbFamily::Essence => None,
     }
 }
 
@@ -1117,6 +1116,82 @@ mod tests {
                 "alias {alias:?} differs between runs"
             );
         }
+    }
+
+    /// The count>1 reachability pin: a `count = 2` spec's terminal must be
+    /// reachable in the abstracted MDP (finite V(s0)) — this is exactly
+    /// what broke when the satisfaction bitmap went count-aware without
+    /// the `extra_flags` progress lanes (states with 1-of-2 vs 0-of-2
+    /// matches collapsed, and the collapsed transitions never reached the
+    /// terminal).
+    #[test]
+    fn count_goal_terminal_is_reachable_with_progress_lanes() {
+        // Goal: 2× ES prefixes (count=2). Registry has two ES groups so
+        // two distinct ES prefixes can coexist.
+        let registry = ModRegistry::from_mods(
+            vec![
+                mk_mod("ES1", "ES-A", AffixType::Prefix, "EnergyShield", 1),
+                mk_mod("ES2", "ES-B", AffixType::Prefix, "EnergyShield", 1),
+                mk_mod("Life1", "Life", AffixType::Prefix, "Life", 1),
+                mk_mod(
+                    "FireRes1",
+                    "FireRes",
+                    AffixType::Suffix,
+                    "FireResistance",
+                    1,
+                ),
+            ],
+            vec![
+                weight("ES1", 100.0),
+                weight("ES2", 100.0),
+                weight("Life1", 100.0),
+                weight("FireRes1", 100.0),
+            ],
+        );
+        let base_registry = BaseRegistry::default();
+        let resolver = DefaultCurrencyResolver::new();
+        let goal = Goal::new(
+            Target {
+                prefixes: vec![TargetSpec {
+                    concept: Some(ConceptId::from("EnergyShield")),
+                    concept_any: vec![],
+                    affix: None,
+                    count: 2,
+                    min_tier: None,
+                    allow_hybrid: true,
+                }],
+                suffixes: vec![],
+                constraints: vec![],
+            },
+            DivEquiv::point(100.0),
+        );
+        let t = CraftingTask {
+            initial_item: mk_item(Rarity::Normal, &[], &[]),
+            goal,
+            registry: &registry,
+            base_registry: &base_registry,
+            resolver: &resolver,
+            patch: PatchVersion::PATCH_0_5_0,
+            omens: poc2_engine::omen::OmenSet::new(),
+        };
+        let model = learn_transition_model_analytic(&t, AnalyticConfig::default(), |_i, _g| {
+            basic_actions()
+        });
+        let actions = basic_actions();
+        let result = value_iteration(
+            &model,
+            &actions,
+            true,
+            |s: &FeatureVec| (s.target_match & 0b1) == 0b1,
+            |_s, _a| -1.0,
+            ValueIterationConfig::default(),
+        );
+        let f0 = featurize(&t.initial_item, &t.goal, &registry);
+        let v0 = result.value.get(&f0).copied().expect("V(s0)");
+        assert!(
+            v0 > -100.0 && v0 < 0.0,
+            "count=2 terminal must be reachable: V(s0)={v0}"
+        );
     }
 
     #[test]
