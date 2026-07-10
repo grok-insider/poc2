@@ -13,11 +13,34 @@
 ///
 /// Pure + unit-tested — no DOM, no Tesseract import.
 
+import {
+  mapProcessedBaselineToNormalizedSource,
+  mapProcessedBboxToNormalizedSource,
+  type NormalizedBaseline,
+  type NormalizedBbox,
+  type NormalizedPoint,
+  type PreprocessTransform,
+} from "./preprocess";
+import type { StructuredRecognition } from "./tesseract";
+
+export interface OcrLineGeometry {
+  /** Full source-frame coordinates normalized to [0, 1]. */
+  bbox: NormalizedBbox;
+  /** Full source-frame baseline normalized to [0, 1]. */
+  baseline: NormalizedBaseline;
+  /** Bbox center; downstream row locking smooths this between frames. */
+  center: NormalizedPoint;
+}
+
 export interface OcrRow {
   /** Cleaned item/currency name (noise + quantity stripped). */
   name: string;
   /** Stack quantity (the `Nx` multiplier); defaults to 1 when absent. */
   quantity: number;
+  /** Tesseract line confidence, when the row came from structured OCR. */
+  confidence?: number;
+  /** Source-normalized line geometry, absent for clipboard/text fallback rows. */
+  geometry?: OcrLineGeometry;
 }
 
 /** Minimum cleaned-name length to keep a row. */
@@ -92,6 +115,32 @@ export function extractRows(ocrText: string): OcrRow[] {
   for (const raw of ocrText.split(/\r?\n/)) {
     const row = parseRow(raw);
     if (row) out.push(row);
+  }
+  return out;
+}
+
+/** Parse structured OCR lines while retaining confidence and source geometry. */
+export function extractStructuredRows(
+  recognition: StructuredRecognition,
+  transform: PreprocessTransform,
+): OcrRow[] {
+  const out: OcrRow[] = [];
+  for (const line of recognition.lines) {
+    const row = parseRow(line.text);
+    if (!row) continue;
+    const bbox = mapProcessedBboxToNormalizedSource(line.bbox, transform);
+    out.push({
+      ...row,
+      confidence: line.confidence,
+      geometry: {
+        bbox,
+        baseline: mapProcessedBaselineToNormalizedSource(line.baseline, transform),
+        center: {
+          x: (bbox.x0 + bbox.x1) / 2,
+          y: (bbox.y0 + bbox.y1) / 2,
+        },
+      },
+    });
   }
   return out;
 }

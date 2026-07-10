@@ -9,8 +9,8 @@
 ///   2. invert — light-on-dark → dark-on-light (Tesseract's training domain).
 ///   3. upscaleBicubic — 3× bicubic upscale so thin glyph strokes survive.
 ///
-/// Every transform here is a pure `(RgbaFrame) -> RgbaFrame`: no canvas, no DOM,
-/// no `Image`. The canvas-bound edges (decode a captured data-URL into pixels,
+/// Pixel transforms and inverse geometry here are pure: no canvas, no DOM, no
+/// `Image`. The canvas-bound edges (decode a captured data-URL into pixels,
 /// re-encode the processed pixels) live behind {@link CanvasAdapter} so the math
 /// is unit-tested with a hand-built frame and a fake adapter.
 
@@ -20,6 +20,68 @@ export interface RgbaFrame {
   height: number;
   /** RGBA, 4 bytes per pixel, row-major, top-left origin. */
   data: Uint8ClampedArray;
+}
+
+export interface PixelDimensions {
+  width: number;
+  height: number;
+}
+
+export interface PixelRegion extends PixelDimensions {
+  x: number;
+  y: number;
+}
+
+/** Tesseract pixel coordinates in the processed image. */
+export interface PixelBbox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** Tesseract baseline pixel coordinates in the processed image. */
+export interface PixelBaseline {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface NormalizedPoint {
+  x: number;
+  y: number;
+}
+
+export interface NormalizedBbox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface NormalizedBaseline {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** Geometry needed to invert processed OCR coordinates into the source frame. */
+export interface PreprocessTransform {
+  source: PixelDimensions;
+  crop: PixelRegion;
+  processed: PixelDimensions;
+}
+
+export interface PreprocessResult {
+  frame: RgbaFrame;
+  transform: PreprocessTransform;
+}
+
+export interface PreprocessedDataUrl {
+  dataUrl: string;
+  transform: PreprocessTransform;
 }
 
 /** Default fraction of the frame width to crop off the left (icon gutter). */
@@ -74,6 +136,23 @@ export function invert(frame: RgbaFrame): RgbaFrame {
     out[i + 3] = d[i + 3];
   }
   return { width: frame.width, height: frame.height, data: out };
+}
+
+/** Mean Rec. 709 luminance, used to infer the panel background polarity. */
+export function meanLuminance(frame: RgbaFrame): number {
+  assertFrame(frame);
+  let total = 0;
+  for (let i = 0; i < frame.data.length; i += 4) {
+    total +=
+      frame.data[i] * 0.2126 +
+      frame.data[i + 1] * 0.7152 +
+      frame.data[i + 2] * 0.0722;
+  }
+  return total / (frame.width * frame.height);
+}
+
+function copyFrame(frame: RgbaFrame): RgbaFrame {
+  return { ...frame, data: new Uint8ClampedArray(frame.data) };
 }
 
 /** Catmull-Rom (bicubic) kernel weight for a 1-D offset `t` and tap distance. */
@@ -142,6 +221,49 @@ export interface PreprocessOptions {
   iconCrop?: number;
   /** Upscale factor. */
   scale?: number;
+  /** Text/background polarity. Auto supports parchment and dark HUD panels. */
+  polarity?: "auto" | "dark-on-light" | "light-on-dark";
+  /** Trim bright parchment captures to their active vertical panel band. */
+  trimVertical?: boolean;
+}
+
+function clampNormalized(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function mapProcessedPoint(
+  x: number,
+  y: number,
+  transform: PreprocessTransform,
+): NormalizedPoint {
+  const sourceX =
+    transform.crop.x + (x / transform.processed.width) * transform.crop.width;
+  const sourceY =
+    transform.crop.y + (y / transform.processed.height) * transform.crop.height;
+  return {
+    x: clampNormalized(sourceX / transform.source.width),
+    y: clampNormalized(sourceY / transform.source.height),
+  };
+}
+
+/** Map a processed Tesseract bbox back to normalized full-source coordinates. */
+export function mapProcessedBboxToNormalizedSource(
+  bbox: PixelBbox,
+  transform: PreprocessTransform,
+): NormalizedBbox {
+  const start = mapProcessedPoint(bbox.x0, bbox.y0, transform);
+  const end = mapProcessedPoint(bbox.x1, bbox.y1, transform);
+  return { x0: start.x, y0: start.y, x1: end.x, y1: end.y };
+}
+
+/** Map a processed Tesseract baseline to normalized full-source coordinates. */
+export function mapProcessedBaselineToNormalizedSource(
+  baseline: PixelBaseline,
+  transform: PreprocessTransform,
+): NormalizedBaseline {
+  const start = mapProcessedPoint(baseline.x0, baseline.y0, transform);
+  const end = mapProcessedPoint(baseline.x1, baseline.y1, transform);
+  return { x0: start.x, y0: start.y, x1: end.x, y1: end.y };
 }
 
 /**
@@ -149,10 +271,36 @@ export interface PreprocessOptions {
  * Operates only on pixels — see {@link preprocessDataUrl} for the canvas-bound
  * entry point used by the overlay.
  */
-export function preprocessFrame(frame: RgbaFrame, opts: PreprocessOptions = {}): RgbaFrame {
+export function preprocessFrameWithTransform(
+  frame: RgbaFrame,
+  opts: PreprocessOptions = {},
+): PreprocessResult {
   const cropped = cropIconColumn(frame, opts.iconCrop ?? DEFAULT_ICON_CROP);
-  const inverted = invert(cropped);
-  return upscaleBicubic(inverted, opts.scale ?? DEFAULT_SCALE);
+  const polarity = opts.polarity ?? "auto";
+  const normalized =
+    polarity === "light-on-dark" ||
+    (polarity === "auto" && meanLuminance(cropped) < 128)
+      ? invert(cropped)
+      : copyFrame(cropped);
+  const processed = upscaleBicubic(normalized, opts.scale ?? DEFAULT_SCALE);
+  return {
+    frame: processed,
+    transform: {
+      source: { width: frame.width, height: frame.height },
+      crop: {
+        x: frame.width - cropped.width,
+        y: 0,
+        width: cropped.width,
+        height: cropped.height,
+      },
+      processed: { width: processed.width, height: processed.height },
+    },
+  };
+}
+
+/** Existing frame-only preprocessing API. */
+export function preprocessFrame(frame: RgbaFrame, opts: PreprocessOptions = {}): RgbaFrame {
+  return preprocessFrameWithTransform(frame, opts).frame;
 }
 
 /**
@@ -175,7 +323,19 @@ export async function preprocessDataUrl(
   adapter: CanvasAdapter,
   opts: PreprocessOptions = {},
 ): Promise<string> {
+  return (await preprocessDataUrlWithTransform(dataUrl, adapter, opts)).dataUrl;
+}
+
+/** Data-URL preprocessing with the inverse geometry transform retained. */
+export async function preprocessDataUrlWithTransform(
+  dataUrl: string,
+  adapter: CanvasAdapter,
+  opts: PreprocessOptions = {},
+): Promise<PreprocessedDataUrl> {
   const frame = await adapter.toFrame(dataUrl);
-  const processed = preprocessFrame(frame, opts);
-  return adapter.fromFrame(processed);
+  const processed = preprocessFrameWithTransform(frame, opts);
+  return {
+    dataUrl: await adapter.fromFrame(processed.frame),
+    transform: processed.transform,
+  };
 }

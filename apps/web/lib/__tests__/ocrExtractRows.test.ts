@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { extractRows, parseRow } from "../ocr/extractRows";
+import {
+  extractRows,
+  extractStructuredRows,
+  parseRow,
+} from "../ocr/extractRows";
+import type { PreprocessTransform } from "../ocr/preprocess";
+import type { StructuredRecognition } from "../ocr/tesseract";
 
 describe("parseRow — quantity multiplier", () => {
   test("trailing x-quantity: 'Chaos Orb x3'", () => {
@@ -100,5 +106,56 @@ describe("extractRows — full blob", () => {
   test("preserves top-to-bottom order (screen position)", () => {
     const rows = extractRows("Alpha Orb\nBeta Orb\nGamma Orb");
     expect(rows.map((r) => r.name)).toEqual(["Alpha Orb", "Beta Orb", "Gamma Orb"]);
+  });
+
+  test("parses the live Runesmap reward rows including a curly apostrophe", () => {
+    expect(extractRows("1x Uhtred’s Saga\n3x Greater Chaos Orb")).toEqual([
+      { name: "Uhtred’s Saga", quantity: 1 },
+      { name: "Greater Chaos Orb", quantity: 3 },
+    ]);
+  });
+});
+
+describe("extractStructuredRows", () => {
+  test("applies parseRow and retains confidence plus normalized source geometry", () => {
+    const transform: PreprocessTransform = {
+      source: { width: 100, height: 50 },
+      crop: { x: 30, y: 0, width: 70, height: 50 },
+      processed: { width: 210, height: 150 },
+    };
+    const recognition: StructuredRecognition = {
+      text: "noise\nDivine Orb x2",
+      lines: [
+        {
+          text: "---",
+          confidence: 10,
+          bbox: { x0: 0, y0: 0, x1: 30, y1: 15 },
+          baseline: { x0: 0, y0: 12, x1: 30, y1: 12 },
+        },
+        {
+          text: "Divine Orb x2",
+          confidence: 93.5,
+          bbox: { x0: 21, y0: 30, x1: 189, y1: 60 },
+          baseline: { x0: 21, y0: 54, x1: 189, y1: 54 },
+        },
+      ],
+    };
+
+    const rows = extractStructuredRows(recognition, transform);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      name: "Divine Orb",
+      quantity: 2,
+      confidence: 93.5,
+    });
+    expect(rows[0].geometry?.bbox).toEqual({
+      x0: 0.37,
+      y0: 0.2,
+      x1: 0.93,
+      y1: 0.4,
+    });
+    expect(rows[0].geometry?.center.x).toBeCloseTo(0.65);
+    expect(rows[0].geometry?.center.y).toBeCloseTo(0.3);
+    expect(rows[0].geometry?.baseline.y0).toBeCloseTo(0.36);
   });
 });

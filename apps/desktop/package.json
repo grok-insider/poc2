@@ -3,6 +3,11 @@
   "version": "1.1.0",
   "private": true,
   "description": "Path of Crafting 2 — desktop shell (Electron) around the apps/web static export. ADR-0010.",
+  "homepage": "https://github.com/grok-insider/poc2",
+  "author": {
+    "name": "grok-insider",
+    "email": "289870065+grok-insider@users.noreply.github.com"
+  },
   "main": "dist/main.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -10,8 +15,9 @@
     "dev": "bun run build && bun scripts/run-electron.mjs --dev",
     "start": "bun run build && bun scripts/run-electron.mjs",
     "test": "bun test",
+    "native:windows": "cargo build -p poc2-windows-ocr --release",
     "dist:linux": "bun run build && electron-builder --linux",
-    "dist:win": "bun run build && electron-builder --win"
+    "dist:win": "bun run native:windows && bun run build && electron-builder --win"
   },
   "trustedDependencies": ["electron"],
   "devDependencies": {

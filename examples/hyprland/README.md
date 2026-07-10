@@ -39,35 +39,48 @@ programs.ydotool.enable = true;   # uinput fallback injector
 # wl-clipboard + grim come from your Hyprland environment as usual.
 ```
 
-## Price overlay — DEGRADED mode on wlroots (ADR-0013)
+## In-game overlay — plugin mode on Hyprland (ADR-0013 + hyproverlay)
 
 The screen-region price overlay is **capability-gated**
 ([ADR-0013](../../docs/adr/0013-item-capture-ocr-overlay.md)):
 
 | Session | Overlay |
 |---|---|
-| win32 / Linux-X11 (incl. XWayland) | **full** — its own transparent click-through Electron window |
+| win32 / non-Hyprland Linux-X11 | **full** — its own transparent click-through Electron window |
 | GNOME/KDE Wayland that passes the runtime probe | **full** |
-| **Hyprland / wlroots Wayland** | **degraded** — no click-through window |
+| **Hyprland / wlroots with `hyproverlay` v4 loaded** | **hyprland-plugin** — compositor calibration, positioned icon/value rows, cards/menu |
+| wlroots without `hyproverlay` | **degraded** — in-app fallback panel |
 
-On Hyprland/wlroots the app runs the overlay in **degraded** mode: Electron's
-transparent click-through window is unreliable here and a real layer-shell
-surface stays deferred (ADR-0009). The price panel renders **inside the main
-window** instead. To get an overlay-like HUD anyway, the shipped
-`float`/`pin`/`move 100% 0` rules already make the main window hover over PoE2;
-the `windowrulev2 = float, …` line in `poc2-windowrules.conf` is the focused
-fallback for this mode.
+On Hyprland, load the generic `hyproverlay` plugin before starting PoC2. PoC2
+keeps capture/OCR/trade/regex logic in the desktop/web app and sends only small
+generic bounded payloads to the compositor. If the plugin is absent or fails,
+the app falls back to the existing degraded in-app panel.
 
-Scan / recalibrate binds (single OCR pass over the calibrated region) use the
+This remains true when Electron itself is forced through XWayland: PoC2 detects
+the Hyprland host independently, uses `hyproverlay` v4 for dimmed drag-confirm
+calibration, `grim` to capture silently, and positioned compositor rows to place
+currency icons and values at the matching reward-line centers. `slurp` remains
+the calibration fallback for an older plugin. Both `grim` and `slurp` should be
+on `PATH`.
+
+One-shot, watcher, and recalibrate binds use the
 same second-instance flag path as `--capture`:
 
 ```conf
-bind = CTRL SHIFT, S, exec, poc2-desktop --scan
-bind = CTRL SHIFT, C, exec, poc2-desktop --recalibrate
+bind = ALT, V, exec, poc2-desktop --scan
+bind = ALT SHIFT, V, exec, poc2-desktop --watch-rewards
+bind = ALT, L, exec, poc2-desktop --recalibrate
+bind = ALT, E, exec, poc2-desktop --price-check
+bind = ALT, F, exec, poc2-desktop --regex-open
+bind = ALT SHIFT, F, exec, poc2-desktop --regex-copy
+# Regex ↑↓/←→/Enter navigation binds are optional when hyproverlay reports
+# menu.interactive — the open menu accepts pointer + in-overlay keyboard.
 ```
 
-Recalibrate opens the full-screen calibrator; drag-select the price region and
-the rectangle is persisted (reused on every later scan).
+Recalibrate dims the desktop through `hyproverlay`: drag the complete reward-row
+body, release to retain the green draft, press Enter/Space to persist it, or drag
+again to redo. The Electron full-screen calibrator mirrors that confirmation flow
+outside Hyprland; `slurp` remains the plugin-compatibility fallback.
 
 ## Behaviour
 

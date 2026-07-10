@@ -38,11 +38,21 @@ export interface DesktopCapabilities {
     | "linux-x11"
     | "linux-wayland-wlroots"
     | "linux-wayland-other";
+  /** Region-selection surface selected by the desktop capability gate. */
+  regionPicker: "electron" | "slurp";
+  captureBackend: "electron" | "portal" | "grim";
+  hyprOverlay?: HyprOverlayStatus | null;
 }
 
 /** Raw cropped frame from a region capture; preprocessing is renderer-side. */
 export type CaptureRegionResult =
-  | { ok: true; dataUrl: string; width: number; height: number }
+  | {
+      ok: true;
+      dataUrl: string;
+      width: number;
+      height: number;
+      displayBounds?: CaptureRect;
+    }
   | {
       ok: false;
       reason: "invalid-rect" | "no-display" | "portal-denied" | "capture-failed";
@@ -56,24 +66,136 @@ export interface OverlayState {
   degraded: boolean;
   /** Active overlay transport, when supplied by newer desktop shells. */
   mode?: DesktopCapabilities["overlayMode"];
+  /** Command for the hidden overlay worker. */
+  action?:
+    | "reward-scan"
+    | "reward-watch-start"
+    | "reward-watch-stop"
+    | "price-check"
+    | "regex-open"
+    | "regex-next"
+    | "regex-prev"
+    | "regex-tab-next"
+    | "regex-tab-prev"
+    | "regex-toggle"
+    | "regex-copy"
+    | "regex-apply";
+  itemText?: string;
+  error?: string;
 }
 
 export interface HyprOverlayPayload {
+  mode?: "cards" | "menu" | "selection";
   visible?: boolean;
   rect: { x: number; y: number; w: number; h: number };
   ttlMs?: number;
-  rows: Array<{
-    label: string;
+  style?: {
+    font?: string;
+    fontSize?: number;
+    radius?: number;
+    padding?: number;
+    gap?: number;
+    background?: string;
+    border?: string;
+    text?: string;
+    muted?: string;
+    accent?: string;
+  };
+  rows?: Array<{
+    kind?: "text" | "header" | "separator" | "columns";
+    label?: string;
     value?: string;
     detail?: string;
     emphasis?: boolean;
+    color?: string;
+    valueColor?: string;
+    detailColor?: string;
+    bg?: string;
+    size?: number;
+    align?: "left" | "center" | "right";
+    top?: number;
+    height?: number;
+    iconId?: string;
+    iconSize?: number;
+    iconGap?: number;
+    cells?: Array<{
+      text: string;
+      color?: string;
+      bg?: string;
+      size?: number;
+      align?: "left" | "center" | "right";
+      weight?: number;
+    }>;
   }>;
+  menu?: {
+    title?: string;
+    subtitle?: string;
+    footer?: string;
+    preview?: string;
+    budget?: string;
+    activeTab?: string;
+    focusIndex?: number;
+    /** When true, plugin captures keyboard for the interactive menu. */
+    inputFocused?: boolean;
+    tabs?: Array<{ id: string; label: string }>;
+    controls?: Array<{
+      id: string;
+      tab?: string;
+      label: string;
+      value?: string;
+      detail?: string;
+      kind?: "toggle" | "cycle" | "action";
+      selected?: boolean;
+      disabled?: boolean;
+    }>;
+  };
+  interactive?: {
+    enabled?: boolean;
+    pointer?: boolean;
+    keyboard?: boolean;
+    text?: boolean;
+    passthroughOutside?: boolean;
+    dismissOnOutside?: boolean;
+    overlayId?: string;
+  };
+  selection?: {
+    draft?: { x: number; y: number; w: number; h: number };
+    border?: string;
+    borderWidth?: number;
+    hint?: string;
+    hintColor?: string;
+    hintSize?: number;
+  };
+}
+
+export interface HyprOverlayStatus {
+  loaded: boolean;
+  protocolVersion: number | null;
+  capabilities: string[];
+  limits: Record<string, number>;
+  images?: { count: number; bytes: number };
+}
+
+/** hyproverlay IPC event pushed from Electron main while an interactive menu is open. */
+export interface HyprOverlayEvent {
+  seq?: number;
+  type: string;
+  overlayId: string;
+  controlId?: string;
+  value?: string;
+  selected?: boolean;
+  selectedIds?: string[];
+  selectedIdsTruncated?: boolean;
+  activeTab?: string;
+  focusIndex?: number;
 }
 
 /** A single resolved unit price from the cache. */
 export interface PriceInfo {
   perUnit: number;
   unit: string;
+  perUnitDivine: number;
+  perUnitExalt: number | null;
 }
 
 /**
@@ -84,6 +206,7 @@ export interface PriceSnapshot {
   league: string;
   names: string[];
   byName: Record<string, PriceInfo>;
+  unitIcons: { div?: string; ex?: string };
   fetchedAt: string | null;
 }
 
@@ -95,6 +218,56 @@ export interface PriceStatus {
   lastError: string | null;
   refreshing: boolean;
   backend: string;
+}
+
+export interface OverlayMarketHistoryEntry {
+  id: string;
+  kind: "item-price" | "reward-scan";
+  createdAt: string;
+  title: string;
+  league?: string;
+  summary: string;
+  rows: Array<{ label: string; value?: string; detail?: string }>;
+}
+
+export interface ScanDiagnostics {
+  updatedAt: string;
+  transport: DesktopCapabilities["overlayMode"];
+  captureWidth?: number;
+  captureHeight?: number;
+  selectedCrop?: number;
+  selectedScale?: number;
+  ocrBackend?: "windows-media-ocr" | "tesseract-fast" | "tesseract-fallback";
+  captureMs?: number;
+  decodeMs?: number;
+  fastOcrMs?: number;
+  fallbackOcrMs?: number;
+  totalMs?: number;
+  rawText?: string;
+  rawRows?: string[];
+  resolvedRows?: string[];
+  lineRows?: string[];
+  pluginProtocol?: number;
+  pluginCapabilities?: string[];
+  renderOk?: boolean;
+  watcherEnabled?: boolean;
+  error?: string;
+}
+
+export interface NativeOcrResult {
+  text: string;
+  lines: Array<{
+    text: string;
+    confidence: number;
+    boundingBox: { x: number; y: number; width: number; height: number };
+  }>;
+}
+
+export interface NativeOcrStatus {
+  available: boolean;
+  backend: "windows-media-ocr";
+  helperPath: string | null;
+  lastError: string | null;
 }
 
 export interface Poc2DesktopBridge {
@@ -120,7 +293,9 @@ export interface Poc2DesktopBridge {
   /** Compositor capability gate; null only if the shell predates ADR-0013. */
   capabilities(): Promise<DesktopCapabilities | null>;
   /** Capture a screen rectangle; raw cropped frame (preprocess renderer-side). */
-  captureRegion(rect: CaptureRect): Promise<CaptureRegionResult>;
+  captureRegion(rect: CaptureRect, preserveCompositorOverlay?: boolean): Promise<CaptureRegionResult>;
+  /** Trigger one reward OCR scan. */
+  scanRewards(): Promise<boolean>;
   /** Show the active overlay path; returns the active overlay mode. */
   overlayShow(): Promise<DesktopCapabilities["overlayMode"]>;
   /** Hide the overlay window. */
@@ -139,6 +314,31 @@ export interface Poc2DesktopBridge {
   onOverlayState(cb: (state: OverlayState) => void): () => void;
   /** Send already-computed rows to the Hyprland compositor overlay plugin. */
   hyprOverlayRender(payload: HyprOverlayPayload): Promise<boolean>;
+  /** Fetch/register Divine and Exalted images from the active price snapshot. */
+  hyprOverlayPreparePriceIcons(): Promise<Record<string, string>>;
+  /**
+   * Subscribe to hyproverlay interaction events (regex menu, etc.).
+   * Returns an unsubscribe. Absent on shells that predate interactive menus.
+   */
+  onHyprOverlayEvent?(cb: (event: HyprOverlayEvent) => void): () => void;
+  /** Enable or disable continuous reward-panel monitoring. */
+  rewardWatcher(enabled: boolean): Promise<boolean>;
+  rewardWatcherStatus(): Promise<boolean>;
+  /** Write text through Electron main; used by hidden overlay workers. */
+  clipboardWrite(text: string): Promise<boolean>;
+  /** Persist a compact overlay market result for desktop history/review. */
+  marketHistoryAdd(
+    entry: Omit<OverlayMarketHistoryEntry, "id" | "createdAt">,
+  ): Promise<OverlayMarketHistoryEntry>;
+  /** Read persisted overlay market results. */
+  marketHistoryList(): Promise<OverlayMarketHistoryEntry[]>;
+  /** Last OCR scan details for local troubleshooting. */
+  scanDiagnostics(): Promise<ScanDiagnostics | null>;
+  /** Update local troubleshooting details from the hidden OCR worker. */
+  scanDiagnosticsSet(diagnostics: ScanDiagnostics): Promise<ScanDiagnostics | null>;
+  /** Windows.Media.Ocr fast path. Null means unavailable or failed; use Tesseract. */
+  nativeOcrRecognize?(dataUrl: string, language?: string): Promise<NativeOcrResult | null>;
+  nativeOcrStatus?(): Promise<NativeOcrStatus>;
 
   // --- poe2scout price cache (hourly poe2scout → node:sqlite) ---
 

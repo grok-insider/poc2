@@ -5,10 +5,10 @@
 /// desktop shell the query runs through the main-process proxy (rate-limited,
 /// no CORS); in a plain browser only the deep link works.
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, RefreshCw, Search } from "lucide-react";
 import { useCraft } from "@/lib/store";
-import { getDesktopBridge, isDesktop } from "@/lib/desktop";
+import { getDesktopBridge, isDesktop, type OverlayMarketHistoryEntry } from "@/lib/desktop";
 import {
   buildIndex,
   loadTradeStats,
@@ -85,6 +85,17 @@ function groupListings(listings: Listing[]): ListingGroup[] {
 function fmtPrice(l: Listing): string {
   if (l.amount === null) return "no price";
   return `${l.amount} ${l.currency ?? ""}`.trim();
+}
+
+function fmtHistoryTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /* ---------- stat rows + actions + results (state resets per import) ----- */
@@ -337,6 +348,91 @@ function SearchSection({
 
 /* ---------- panel shell -------------------------------------------------- */
 
+function OverlayHistorySection({ desktop }: { desktop: boolean }) {
+  const [entries, setEntries] = useState<OverlayMarketHistoryEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const bridge = getDesktopBridge();
+    if (!desktop || !bridge) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setEntries((await bridge.marketHistoryList()).slice(0, 20));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [desktop]);
+
+  useEffect(() => {
+    if (!desktop) return;
+    let alive = true;
+    queueMicrotask(() => {
+      if (alive) void load();
+    });
+    return () => {
+      alive = false;
+    };
+  }, [desktop, load]);
+
+  if (!desktop) return null;
+
+  return (
+    <section className={`card ${styles.section}`}>
+      <div className={styles.sectionHead}>
+        <span className="eyebrow">Overlay history</span>
+        <button
+          className="btn btn-ghost"
+          onClick={() => void load()}
+          disabled={loading}
+          title="Reload overlay market history"
+        >
+          <RefreshCw size={13} className={loading ? styles.spin : undefined} />
+          Refresh
+        </button>
+      </div>
+
+      {error && <div className={styles.error}>{error}</div>}
+      {!error && entries.length === 0 && (
+        <p className={`${styles.note} faint`}>
+          No overlay market checks yet. Use the in-game price-check or reward-scan hotkeys.
+        </p>
+      )}
+
+      {entries.length > 0 && (
+        <div className={styles.historyList}>
+          {entries.map((entry) => (
+            <div key={entry.id} className={styles.historyEntry}>
+              <div className={styles.historyHead}>
+                <span className={styles.historyTitle}>{entry.title}</span>
+                <span className="tag">
+                  {entry.kind === "item-price" ? "item" : "rewards"}
+                </span>
+              </div>
+              <div className={styles.historyMeta}>
+                <span>{fmtHistoryTime(entry.createdAt)}</span>
+                {entry.league && <span>{entry.league}</span>}
+                <span>{entry.summary}</span>
+              </div>
+              <div className={styles.historyRows}>
+                {entry.rows.slice(0, 4).map((row, i) => (
+                  <span key={`${entry.id}-${i}`} className={styles.historyRow}>
+                    <span>{row.label}</span>
+                    {row.value && <span className={styles.price}>{row.value}</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function PricePanel() {
   const item = useCraft((s) => s.item);
   const league = useCraft((s) => s.league);
@@ -446,6 +542,8 @@ export function PricePanel() {
               desktop={desktop}
             />
           )}
+
+          <OverlayHistorySection desktop={desktop} />
         </div>
       </div>
     </div>

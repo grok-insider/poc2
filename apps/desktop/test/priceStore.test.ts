@@ -7,6 +7,7 @@ import {
   priceBackend,
   priceCount,
   priceSnapshot,
+  latestPriceLeague,
   replaceLeaguePrices,
 } from "../src/prices/store";
 import type { PriceRow } from "../src/prices/types";
@@ -47,17 +48,33 @@ describe("price store", () => {
     const snap = priceSnapshot("L");
     expect(snap.names).toContain("Divine Orb");
     expect(snap.names).toContain("Mirror of Kalandra");
-    expect(snap.byName["divine orb"]).toEqual({ perUnit: 1, unit: "div" });
-    expect(snap.byName["mirror of kalandra"]).toEqual({ perUnit: 2500, unit: "div" });
+    expect(snap.byName["divine orb"]).toEqual({
+      perUnit: 1,
+      unit: "div",
+      perUnitDivine: 1,
+      perUnitExalt: 200,
+    });
+    expect(snap.byName["mirror of kalandra"]).toEqual({
+      perUnit: 2500,
+      unit: "div",
+      perUnitDivine: 2500,
+      perUnitExalt: 200,
+    });
     expect(snap.fetchedAt).toBe("2026-06-29T00:00:00Z");
+    expect(latestPriceLeague()).toBe("L");
   });
 
   test("replace is a full swap for the league (stale rows gone)", () => {
-    replaceLeaguePrices("L", [row({ apiId: "only", name: "Chaos Orb", normalizedName: "chaos orb", priceDivine: 0.05 })]);
+    replaceLeaguePrices("L", [row({ apiId: "only", name: "Chaos Orb", normalizedName: "chaos orb", priceExalt: 10, priceDivine: 0.05 })]);
     const snap = priceSnapshot("L");
     expect(priceCount("L")).toBe(1);
     expect(snap.byName["divine orb"]).toBeUndefined();
-    expect(snap.byName["chaos orb"]).toEqual({ perUnit: 0.05, unit: "div" });
+    expect(snap.byName["chaos orb"]).toEqual({
+      perUnit: 10,
+      unit: "ex",
+      perUnitDivine: 0.05,
+      perUnitExalt: 10,
+    });
   });
 
   test("null-priced rows appear in names but not byName", () => {
@@ -83,12 +100,35 @@ describe("price store", () => {
       row({ apiId: "rune", name: "Some Rune", normalizedName: "some rune", priceDivine: null }),
       // ninja fallback rows
       row({ category: "ninja", apiId: "ninja:divine orb", name: "Divine Orb", normalizedName: "divine orb", priceDivine: 999 }),
-      row({ category: "ninja", apiId: "ninja:some rune", name: "Some Rune", normalizedName: "some rune", priceDivine: 0.25 }),
+      row({ category: "ninja", apiId: "ninja:some rune", name: "Some Rune", normalizedName: "some rune", priceExalt: 50, priceDivine: 0.25 }),
     ]);
     const snap = priceSnapshot("L");
     // poe2scout's Divine wins over ninja's (first write wins).
-    expect(snap.byName["divine orb"]).toEqual({ perUnit: 1, unit: "div" });
+    expect(snap.byName["divine orb"]?.perUnitDivine).toBe(1);
     // ninja fills the rune poe2scout left null.
-    expect(snap.byName["some rune"]).toEqual({ perUnit: 0.25, unit: "div" });
+    expect(snap.byName["some rune"]).toEqual({
+      perUnit: 50,
+      unit: "ex",
+      perUnitDivine: 0.25,
+      perUnitExalt: 50,
+    });
+  });
+
+  test("exposes runtime unit icon URLs without embedding assets", () => {
+    replaceLeaguePrices("L", [
+      row({ iconUrl: "https://web.poecdn.com/divine.png" }),
+      row({
+        apiId: "exalted-orb",
+        name: "Exalted Orb",
+        normalizedName: "exalted orb",
+        priceExalt: 1,
+        priceDivine: 0.005,
+        iconUrl: "https://web.poecdn.com/exalted.png",
+      }),
+    ]);
+    expect(priceSnapshot("L").unitIcons).toEqual({
+      div: "https://web.poecdn.com/divine.png",
+      ex: "https://web.poecdn.com/exalted.png",
+    });
   });
 });

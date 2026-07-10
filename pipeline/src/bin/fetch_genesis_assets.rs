@@ -85,9 +85,22 @@ const POPUP_SPRITES: &[(&str, &str)] = &[
     ("item/popup2/header-magic-left.webp", "header-magic-left.webp"),
     ("item/popup2/header-magic-middle.webp", "header-magic-middle.webp"),
     ("item/popup2/header-magic-right.webp", "header-magic-right.webp"),
+    // Single-line rare still used as fallback; live rares prefer double-rare.
     ("item/popup2/header-rare-left.webp", "header-rare-left.webp"),
     ("item/popup2/header-rare-middle.webp", "header-rare-middle.webp"),
     ("item/popup2/header-rare-right.webp", "header-rare-right.webp"),
+    (
+        "item/popup2/header-double-rare-left.webp",
+        "header-double-rare-left.webp",
+    ),
+    (
+        "item/popup2/header-double-rare-middle.webp",
+        "header-double-rare-middle.webp",
+    ),
+    (
+        "item/popup2/header-double-rare-right.webp",
+        "header-double-rare-right.webp",
+    ),
     (
         "item/popup2/header-double-unique-left.webp",
         "header-double-unique-left.webp",
@@ -100,10 +113,20 @@ const POPUP_SPRITES: &[(&str, &str)] = &[
         "item/popup2/header-double-unique-right.webp",
         "header-double-unique-right.webp",
     ),
+    ("item/popup2/header-gem-left.webp", "header-gem-left.webp"),
+    ("item/popup2/header-gem-middle.webp", "header-gem-middle.webp"),
+    ("item/popup2/header-gem-right.webp", "header-gem-right.webp"),
+    // Full-width gem title strip (poe2db GemPopup doubleLine).
+    (
+        "art/textures/interface/2d/2dart/uiimages/ingame/smarthover/gemhovertitle.webp",
+        "header-gem-title.webp",
+    ),
     ("item/popup/seperator-normal.webp", "seperator-normal.webp"),
     ("item/popup/seperator-currency.webp", "seperator-currency.webp"),
     ("item/popup/seperator-magic.webp", "seperator-magic.webp"),
     ("item/popup/seperator-rare.webp", "seperator-rare.webp"),
+    ("item/popup/seperator-unique.webp", "seperator-unique.webp"),
+    ("item/popup/seperator-gem.webp", "seperator-gem.webp"),
     // The REAL in-game Genesis ("Brequel") tree node frames — referenced by
     // BrequelTree.json's `art` section. Small/notable × normal/can-allocate/
     // active, plus the womb inventory slot and the node glow.

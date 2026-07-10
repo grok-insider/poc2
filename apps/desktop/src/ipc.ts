@@ -2,15 +2,30 @@
 //
 // Channel names are the wire contract with apps/web/lib/desktop.ts —
 // change them in both places or not at all.
-import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { BrowserWindow, app, clipboard, ipcMain, screen, shell } from "electron";
 import { captureItemText, status as captureStatus } from "./capture";
 import type { Capabilities } from "./capture/capabilities";
 import { captureRegion, coerceRect, type CaptureRect } from "./capture/screen";
+import { captureRegionWithGrim } from "./capture/grim";
 import { isAllowlistedUrl } from "./fetchAllowlist";
 import { loadCaptureRegion } from "./windowState";
 import { getPriceSnapshot, getPriceStatus, refreshNow, setPriceLeague } from "./prices/scheduler";
 import { tradeFetch, tradeSearch } from "./trade/proxy";
-import { sendHyprOverlay } from "./capture/hyprOverlay";
+import {
+  fetchHyprOverlayMenuOutput,
+  focusHyprOverlay,
+  hideHyprOverlay,
+  isInteractiveRegexMenuPayload,
+  sendHyprOverlay,
+  startHyprOverlayEventSession,
+  type HyprOverlayEvent,
+  type HyprOverlayEventSession,
+  REGEX_OVERLAY_ID,
+} from "./capture/hyprOverlay";
+import { prepareHyprOverlayPriceIcons } from "./capture/hyprOverlayIcons";
+import { addMarketHistory, listMarketHistory } from "./marketHistory";
+import { getScanDiagnostics, setScanDiagnostics } from "./scanDiagnostics";
+import type { NativeOcrController } from "./ocr/windowsNative";
 
 // Re-export so callers/tests have one import site (impl is electron-free).
 export { isAllowlistedUrl } from "./fetchAllowlist";
@@ -27,6 +42,7 @@ export const CHANNELS = {
   // --- ADR-0013: region capture + price overlay / calibration ---
   capabilities: "poc2:capabilities", // renderer → main (invoke)
   captureRegion: "poc2:capture-region", // renderer → main (invoke)
+  scanRewards: "poc2:scan-rewards", // renderer → main (invoke)
   overlayShow: "poc2:overlay-show", // renderer → main (invoke)
   overlayHide: "poc2:overlay-hide", // renderer → main (invoke)
   overlaySetRegion: "poc2:overlay-set-region", // renderer → main (invoke)
@@ -35,6 +51,17 @@ export const CHANNELS = {
   regionCalibrated: "poc2:region-calibrated", // main → renderer (push)
   overlayState: "poc2:overlay-state", // main → renderer (push: show/hide/degraded)
   hyprOverlayRender: "poc2:hypr-overlay-render", // renderer → main (invoke)
+  hyprOverlayPreparePriceIcons: "poc2:hypr-overlay-prepare-price-icons",
+  hyprOverlayEvent: "poc2:hypr-overlay-event", // main → renderer (push)
+  rewardWatcher: "poc2:reward-watcher",
+  rewardWatcherStatus: "poc2:reward-watcher-status",
+  clipboardWrite: "poc2:clipboard-write", // renderer → main (invoke)
+  marketHistoryAdd: "poc2:market-history-add", // renderer → main (invoke)
+  marketHistoryList: "poc2:market-history-list", // renderer → main (invoke)
+  scanDiagnosticsGet: "poc2:scan-diagnostics-get", // renderer → main (invoke)
+  scanDiagnosticsSet: "poc2:scan-diagnostics-set", // renderer → main (invoke)
+  nativeOcrRecognize: "poc2:native-ocr-recognize", // renderer → main (invoke)
+  nativeOcrStatus: "poc2:native-ocr-status", // renderer → main (invoke)
   // --- poe2scout price cache (hourly poe2scout → node:sqlite) ---
   pricesSnapshot: "poc2:prices-snapshot", // renderer → main (invoke)
   pricesStatus: "poc2:prices-status", // renderer → main (invoke)
@@ -53,6 +80,10 @@ export interface OverlayController {
   capabilities(): Capabilities;
   /** Show the click-through overlay (full mode only; no-op when degraded). */
   showOverlay(): void;
+  /** Trigger one reward OCR scan through the active overlay transport. */
+  scanRewards(): void;
+  setRewardWatcher(enabled: boolean): void;
+  rewardWatcherEnabled(): boolean;
   /** Hide the overlay window. */
   hideOverlay(): void;
   /** Reposition the overlay over the given region. */
@@ -82,9 +113,75 @@ export async function runCapture(win: BrowserWindow, advanced: boolean): Promise
   return false;
 }
 
+let regexEventSession: HyprOverlayEventSession | null = null;
+let regexEventSessionStarting: Promise<void> | null = null;
+
+/** Stop the interactive Search Regex hyproverlay event subscription. */
+export function stopRegexOverlayEventSession(): void {
+  regexEventSession?.close();
+  regexEventSession = null;
+  regexEventSessionStarting = null;
+}
+
+function broadcastHyprOverlayEvent(event: HyprOverlayEvent): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      win.webContents.send(CHANNELS.hyprOverlayEvent, event);
+    } catch {
+      // window may be destroying
+    }
+  }
+}
+
+async function ensureRegexOverlayEventSession(overlay?: OverlayController): Promise<void> {
+  const caps = overlay?.capabilities().hyprOverlay;
+  if (!caps?.capabilities.includes("menu.interactive")) return;
+  if (regexEventSession) return;
+  if (regexEventSessionStarting) {
+    await regexEventSessionStarting;
+    return;
+  }
+
+  regexEventSessionStarting = (async () => {
+    try {
+      const session = await startHyprOverlayEventSession(REGEX_OVERLAY_ID, {
+        onEvent: (event) => {
+          void (async () => {
+            let enriched: HyprOverlayEvent = event;
+            // Hyprland truncates event JSON at 1024 bytes; recover full selection.
+            if (event.selectedIdsTruncated) {
+              const out = await fetchHyprOverlayMenuOutput();
+              if (out?.selected) {
+                enriched = {
+                  ...event,
+                  selectedIds: out.selected.map((row) => row.id),
+                  selectedIdsTruncated: false,
+                  ...(out.activeTab ? { activeTab: out.activeTab } : {}),
+                  ...(typeof out.focusIndex === "number"
+                    ? { focusIndex: out.focusIndex }
+                    : {}),
+                };
+              }
+            }
+            broadcastHyprOverlayEvent(enriched);
+          })();
+        },
+      });
+      regexEventSession = session;
+    } catch {
+      regexEventSession = null;
+    } finally {
+      regexEventSessionStarting = null;
+    }
+  })();
+
+  await regexEventSessionStarting;
+}
+
 export function registerIpc(
   getWindow: () => BrowserWindow | null,
   overlay?: OverlayController,
+  nativeOcr?: NativeOcrController,
 ): void {
   ipcMain.handle(CHANNELS.captureNow, async (_e, advanced: unknown) => {
     const win = getWindow();
@@ -97,19 +194,41 @@ export function registerIpc(
   // --- ADR-0013: capabilities + region capture + overlay/calibration ---
 
   ipcMain.handle(CHANNELS.capabilities, () => overlay?.capabilities() ?? null);
+  ipcMain.handle(CHANNELS.scanRewards, () => {
+    overlay?.scanRewards();
+    return true;
+  });
 
-  ipcMain.handle(CHANNELS.captureRegion, async (_e, rect: unknown) => {
-    if (!coerceRect(rect)) {
+  ipcMain.handle(CHANNELS.captureRegion, async (_e, rect: unknown, preserveOverlay: unknown) => {
+    const parsedRect = coerceRect(rect);
+    if (!parsedRect) {
       return { ok: false as const, reason: "invalid-rect" as const };
     }
-    const silent = overlay?.capabilities().silentRegionCapture ?? false;
+    const caps = overlay?.capabilities();
+    const silent = caps?.silentRegionCapture ?? false;
     // In full mode the overlay window sits AT the capture region, so it would
     // occlude / self-capture its own target. Hide it for the duration of the
     // grab, then restore it so it can render the resulting price plates.
     const wasVisible = overlay?.isOverlayVisible() ?? false;
     if (wasVisible) overlay?.setOverlayVisible(false);
+    if (caps?.overlayMode === "hyprland-plugin" && preserveOverlay !== true) {
+      await hideHyprOverlay();
+    }
     try {
-      return await captureRegion(rect, silent);
+      const result = caps?.captureBackend === "grim"
+        ? await captureRegionWithGrim(parsedRect)
+        : await captureRegion(parsedRect, silent);
+      if (!result.ok) return result;
+      const bounds = screen.getDisplayMatching(parsedRect).bounds;
+      return {
+        ...result,
+        displayBounds: {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+        },
+      };
     } finally {
       if (wasVisible) overlay?.setOverlayVisible(true);
     }
@@ -121,12 +240,71 @@ export function registerIpc(
   });
 
   ipcMain.handle(CHANNELS.overlayHide, () => {
+    stopRegexOverlayEventSession();
     overlay?.hideOverlay();
     return true;
   });
 
   ipcMain.handle(CHANNELS.hyprOverlayRender, async (_e, payload: unknown) => {
-    return sendHyprOverlay(payload as Parameters<typeof sendHyprOverlay>[0]);
+    const interactiveRegex = isInteractiveRegexMenuPayload(payload);
+    if (interactiveRegex) {
+      await ensureRegexOverlayEventSession(overlay);
+    } else {
+      // Cards / non-interactive menus end the regex interaction session.
+      stopRegexOverlayEventSession();
+    }
+    const ok = await sendHyprOverlay(payload as Parameters<typeof sendHyprOverlay>[0]);
+    if (ok && interactiveRegex) {
+      // Keyboard capture requires plugin menu focus (click also sets this).
+      void focusHyprOverlay();
+    }
+    return ok;
+  });
+  ipcMain.handle(CHANNELS.hyprOverlayPreparePriceIcons, async () => {
+    const caps = overlay?.capabilities().hyprOverlay;
+    if (!caps?.capabilities.includes("images.rgba")) return {};
+    return prepareHyprOverlayPriceIcons(getPriceSnapshot().unitIcons);
+  });
+  ipcMain.handle(CHANNELS.rewardWatcher, (_e, enabled: unknown) => {
+    overlay?.setRewardWatcher(enabled === true);
+    return overlay?.rewardWatcherEnabled() ?? false;
+  });
+  ipcMain.handle(CHANNELS.rewardWatcherStatus, () =>
+    overlay?.rewardWatcherEnabled() ?? false,
+  );
+
+  ipcMain.handle(CHANNELS.clipboardWrite, (_e, text: unknown) => {
+    if (typeof text !== "string") return false;
+    clipboard.writeText(text);
+    return true;
+  });
+
+  ipcMain.handle(CHANNELS.marketHistoryAdd, (_e, entry: unknown) => {
+    if (!entry || typeof entry !== "object") throw new Error("marketHistoryAdd: entry object required");
+    return addMarketHistory(entry as Parameters<typeof addMarketHistory>[0]);
+  });
+
+  ipcMain.handle(CHANNELS.marketHistoryList, () => listMarketHistory());
+  ipcMain.handle(CHANNELS.scanDiagnosticsGet, () => getScanDiagnostics());
+  ipcMain.handle(CHANNELS.scanDiagnosticsSet, (_e, diagnostics: unknown) =>
+    setScanDiagnostics(diagnostics),
+  );
+  ipcMain.handle(CHANNELS.nativeOcrRecognize, async (_e, dataUrl: unknown, language: unknown) => {
+    if (typeof dataUrl !== "string") throw new Error("nativeOcrRecognize: data URL required");
+    try {
+      return await nativeOcr?.recognize(
+        dataUrl,
+        typeof language === "string" ? language : undefined,
+      ) ?? null;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.handle(CHANNELS.nativeOcrStatus, () => nativeOcr?.status() ?? {
+    available: false,
+    backend: "windows-media-ocr",
+    helperPath: null,
+    lastError: null,
   });
 
   ipcMain.handle(CHANNELS.overlaySetRegion, (_e, rect: unknown) => {
@@ -195,7 +373,6 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.pricesRefresh, () => refreshNow());
   ipcMain.handle(CHANNELS.pricesSetLeague, (_e, league: unknown) => {
     if (typeof league !== "string" || !league) throw new Error("pricesSetLeague: league required");
-    setPriceLeague(league);
-    return true;
+    return setPriceLeague(league);
   });
 }

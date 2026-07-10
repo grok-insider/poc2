@@ -24,6 +24,18 @@ export interface Capabilities {
   overlayMode: OverlayMode;
   /** Classified session, for diagnostics + the renderer's fallback copy. */
   sessionKind: SessionKind;
+  /** Native selector when the host compositor can provide one. */
+  regionPicker: "electron" | "slurp";
+  /** Screen-grab implementation selected independently from overlay transport. */
+  captureBackend: "electron" | "portal" | "grim";
+  /** Negotiated compositor protocol details, when the plugin is active. */
+  hyprOverlay?: {
+    loaded: boolean;
+    protocolVersion: number | null;
+    capabilities: string[];
+    limits: Record<string, number>;
+    images?: { count: number; bytes: number };
+  } | null;
 }
 
 /** The subset of process.env we read. Injectable for tests. */
@@ -102,13 +114,33 @@ function defaultEnv(): CapabilityEnv {
   };
 }
 
+function isWlrootsHost(env: CapabilityEnv): boolean {
+  const desktop = (env.XDG_CURRENT_DESKTOP ?? "").toLowerCase();
+  return (
+    Boolean(env.HYPRLAND_INSTANCE_SIGNATURE) ||
+    desktop.includes("hyprland") ||
+    desktop.includes("wlroots") ||
+    desktop.includes("sway") ||
+    desktop.includes("river")
+  );
+}
+
+async function probeHyprPlugin(opts: DetectOptions): Promise<boolean> {
+  if (!opts.probeHyprOverlay) return false;
+  try {
+    return (await opts.probeHyprOverlay()) === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Decide capabilities for the current (or supplied) session.
  *
  * Decision table (ADR-0013):
  *   - win32                     → full,     silent capture
  *   - linux-x11 (incl XWayland) → full,     silent capture
- *   - linux-wayland-wlroots     → degraded, portal capture   (no probe)
+ *   - linux-wayland-wlroots     → plugin/degraded, grim capture
  *   - linux-wayland-other       → probe: full if it passes else degraded;
  *                                 capture goes through the xdg portal either way
  */
@@ -117,32 +149,50 @@ export async function detectCapabilities(
 ): Promise<Capabilities> {
   const env = opts.env ?? defaultEnv();
   const sessionKind = classifySession(env);
+  const wlrootsHost = env.platform === "linux" && isWlrootsHost(env);
 
   switch (sessionKind) {
     case "win32":
-    case "linux-x11":
       return {
         sessionKind,
         overlayMode: "full",
         silentRegionCapture: true,
+        regionPicker: "electron",
+        captureBackend: "electron",
       };
+    case "linux-x11": {
+      // Electron can intentionally run through XWayland inside Hyprland. Keep
+      // X11's silent desktopCapturer path, but route rendering/calibration by
+      // the host compositor instead of trusting XDG_SESSION_TYPE alone.
+      if (wlrootsHost) {
+        return {
+          sessionKind,
+          overlayMode: (await probeHyprPlugin(opts)) ? "hyprland-plugin" : "degraded",
+          silentRegionCapture: true,
+          regionPicker: "slurp",
+          captureBackend: "grim",
+        };
+      }
+      return {
+        sessionKind,
+        overlayMode: "full",
+        silentRegionCapture: true,
+        regionPicker: "electron",
+        captureBackend: "electron",
+      };
+    }
     case "linux-wayland-wlroots":
       // Hyprland/wlroots: prefer the compositor plugin when it is loaded.
       // Without it, layer-shell stays deferred and Electron's transparent
       // click-through window is unreliable, so we degrade conservatively.
       {
-        let pluginLoaded = false;
-        if (opts.probeHyprOverlay) {
-          try {
-            pluginLoaded = (await opts.probeHyprOverlay()) === true;
-          } catch {
-            pluginLoaded = false;
-          }
-        }
+        const pluginLoaded = await probeHyprPlugin(opts);
         return {
           sessionKind,
           overlayMode: pluginLoaded ? "hyprland-plugin" : "degraded",
-          silentRegionCapture: false,
+          silentRegionCapture: true,
+          regionPicker: "slurp",
+          captureBackend: "grim",
         };
       }
     case "linux-wayland-other": {
@@ -160,6 +210,8 @@ export async function detectCapabilities(
         // Wayland always needs the xdg-desktop-portal for screen capture; the
         // first grant prompts, then the token is reused — not "silent".
         silentRegionCapture: false,
+        regionPicker: "electron",
+        captureBackend: "portal",
       };
     }
   }

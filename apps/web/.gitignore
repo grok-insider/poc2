@@ -14,6 +14,8 @@ out/
 
 # scraped per-base icons (regenerate with `cargo run -p poc2-pipeline --bin fetch-base-icons`)
 /public/base-icons/
+# scraped unique icons (regenerate with `cargo run -p poc2-pipeline --bin fetch-unique-icons`)
+/public/unique-icons/
 # Genesis Tree art (regenerate with `cargo run -p poc2-pipeline --bin fetch-genesis-assets`)
 /public/genesis-icons/
 # mod → trade-API stat-id table (regenerate with `cargo run -p poc2-pipeline --bin fetch-trade-stats`)

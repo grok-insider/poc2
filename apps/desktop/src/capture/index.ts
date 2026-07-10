@@ -57,12 +57,16 @@ export async function captureItemText(
     // Clear so stale item text from an earlier copy can't satisfy the poll.
     clipboard.writeText("");
 
+    if (timings.preInjectDelayMs > 0) {
+      await sleep(timings.preInjectDelayMs);
+    }
+
     const tool = await injectCopy(advanced);
     if (!tool) {
       clipboard.writeText(previous);
       status.lastError =
         process.platform === "linux"
-          ? "no injection tool worked (tried hyprctl, ydotool, wtype)"
+          ? "no injection tool worked (tried ydotool, hyprctl, wtype)"
           : "uiohook-napi unavailable";
       return { ok: false, reason: "inject-failed" };
     }

@@ -461,7 +461,20 @@ export interface ResolveNameArgs {
   locale?: "de" | "fr" | "pt" | "ru" | "sp";
 }
 
-/// Result returned by the engine's `resolveName`.
+/// Arguments for the engine's batched `resolveNames` fuzzy matcher.
+export interface ResolveNamesArgs {
+  /** Noisy / OCR-supplied names, resolved in this order. */
+  raws: string[];
+  /**
+   * Optional shared candidate keys. The engine builds one index for the full
+   * batch. When omitted, each name uses the valuator's currency fallback.
+   */
+  candidates?: string[];
+  /** Optional bundled client locale applied to every name in the batch. */
+  locale?: "de" | "fr" | "pt" | "ru" | "sp";
+}
+
+/// Result returned by the engine's `resolveName` / `resolveNames`.
 export interface ResolveView {
   /** The matched canonical key, or `null` when nothing resolved. */
   key: string | null;

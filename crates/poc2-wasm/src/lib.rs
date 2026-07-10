@@ -628,16 +628,7 @@ impl Engine {
     /// `ResolveView` (`{ key, score, method }`).
     #[wasm_bindgen(js_name = resolveName)]
     pub fn resolve_name(&self, args_json: &str) -> Result<String, JsError> {
-        #[derive(serde::Deserialize)]
-        struct ResolveNameArgs {
-            raw: String,
-            #[serde(default)]
-            candidates: Option<Vec<String>>,
-            #[serde(default)]
-            locale: Option<String>,
-        }
-
-        let args: ResolveNameArgs = serde_json::from_str(args_json)
+        let args: commands::resolve::ResolveNameArgs = serde_json::from_str(args_json)
             .map_err(|e| JsError::new(&format!("bad resolve args json: {e}")))?;
         let view = commands::resolve::resolve_name(
             &self.state.valuator,
@@ -646,6 +637,24 @@ impl Engine {
             args.locale.as_deref(),
         );
         serde_json::to_string(&view).map_err(|e| JsError::new(&format!("serialize failed: {e}")))
+    }
+
+    /// Fuzzy-resolve multiple noisy item/currency names in input order.
+    /// `args_json` is JSON of `{ raws, candidates?, locale? }`. A supplied
+    /// candidate list is indexed once for the whole batch; without candidates,
+    /// each name uses the same valuator currency fallback as `resolveName`.
+    /// Returns JSON of `ResolveView[]`.
+    #[wasm_bindgen(js_name = resolveNames)]
+    pub fn resolve_names(&self, args_json: &str) -> Result<String, JsError> {
+        let args: commands::resolve::ResolveNamesArgs = serde_json::from_str(args_json)
+            .map_err(|e| JsError::new(&format!("bad resolve args json: {e}")))?;
+        let views = commands::resolve::resolve_names(
+            &self.state.valuator,
+            &args.raws,
+            args.candidates,
+            args.locale.as_deref(),
+        );
+        serde_json::to_string(&views).map_err(|e| JsError::new(&format!("serialize failed: {e}")))
     }
 
     // ===== database =====

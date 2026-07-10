@@ -2,8 +2,7 @@
 
 // Calibration window route (ADR-0013). Loaded full-screen + transparent by the
 // Electron shell at /calibrate. The user drag-selects the in-game price region;
-// on mouse-up we post the rectangle back to main via the desktop bridge
-// (calibrateRegion), which persists it and repositions the overlay.
+// mouse-up retains a draft; Enter/Space confirms it through calibrateRegion.
 //
 // Minimal but real: this is the drag-select surface, not a downstream worker.
 // Export-safe (origin-relative assets only); in a plain browser it's an inert
@@ -34,17 +33,29 @@ export default function CalibratePage() {
   const dragging = useRef(false);
 
   useEffect(() => {
-    setHasBridge(getDesktopBridge() !== null);
-    // Esc cancels an in-progress selection (main also hides the window on Esc).
+    queueMicrotask(() => setHasBridge(getDesktopBridge() !== null));
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         dragging.current = false;
         setDrag(null);
+        return;
+      }
+      if ((e.key === "Enter" || e.key === " ") && drag) {
+        const local = rectOf(drag);
+        if (local.width >= 1 && local.height >= 1) {
+          e.preventDefault();
+          void getDesktopBridge()?.calibrateRegion({
+            x: window.screenX + local.x,
+            y: window.screenY + local.y,
+            width: local.width,
+            height: local.height,
+          });
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [drag]);
 
   const onDown = useCallback((e: React.MouseEvent) => {
     dragging.current = true;
@@ -58,15 +69,6 @@ export default function CalibratePage() {
 
   const onUp = useCallback(() => {
     dragging.current = false;
-    setDrag((d) => {
-      if (d) {
-        const rect = rectOf(d);
-        if (rect.width >= 1 && rect.height >= 1) {
-          getDesktopBridge()?.calibrateRegion(rect);
-        }
-      }
-      return d;
-    });
   }, []);
 
   const sel = drag ? rectOf(drag) : null;
@@ -81,7 +83,7 @@ export default function CalibratePage() {
         height: "100vh",
         width: "100vw",
         cursor: "crosshair",
-        background: "rgba(10, 9, 7, 0.35)",
+        background: "rgba(0, 0, 0, 0.4)",
         color: "#e8d9b5",
         fontFamily: "system-ui, sans-serif",
         userSelect: "none",
@@ -91,7 +93,7 @@ export default function CalibratePage() {
     >
       <div style={{ position: "absolute", top: 16, left: 16, fontSize: 14 }}>
         <strong>calibrate</strong>
-        {hasBridge ? " · drag to select the price region (Esc cancels)" : " · (no desktop bridge)"}
+        {hasBridge ? " · drag to select the complete reward rows" : " · (no desktop bridge)"}
       </div>
       {sel && (
         <div
@@ -101,11 +103,25 @@ export default function CalibratePage() {
             top: sel.y,
             width: sel.width,
             height: sel.height,
-            border: "2px solid #c9a227",
-            background: "rgba(201, 162, 39, 0.15)",
+            border: "3px solid #50d06d",
+            background: "rgba(80, 208, 109, 0.06)",
             pointerEvents: "none",
           }}
-        />
+        >
+          <span
+            style={{
+              position: "absolute",
+              left: 0,
+              top: "calc(100% + 10px)",
+              whiteSpace: "nowrap",
+              color: "#f4f0e6",
+              fontSize: 14,
+              textShadow: "0 1px 3px #000",
+            }}
+          >
+            Press ENTER to confirm, drag to redo · ESC cancels
+          </span>
+        </div>
       )}
     </main>
   );

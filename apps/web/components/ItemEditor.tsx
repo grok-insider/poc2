@@ -1,11 +1,20 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ImageUp, ScanText } from "lucide-react";
 import { useCraft } from "@/lib/store";
-import { affixCounts, humanizeId, humanizeModId, modValue } from "@/lib/format";
-import { BaseIcon } from "@/components/BaseIcon";
-import type { Item, ModRoll, Rarity } from "@/lib/types";
+import { affixCounts, humanizeId } from "@/lib/format";
+import { ItemPopup } from "@/components/ItemPopup";
+import {
+  loadUniqueIconManifest,
+  type UniqueIconManifest,
+} from "@/lib/itemArt";
+import {
+  buildItemView,
+  loadUniqueCatalog,
+  type UniqueCatalog,
+} from "@/lib/itemView";
+import type { Item, Rarity } from "@/lib/types";
 import styles from "./ItemEditor.module.css";
 
 const RARITIES: Rarity[] = ["normal", "magic", "rare", "unique"];
@@ -37,21 +46,6 @@ function clampInt(raw: string, min: number, max: number, fallback: number): numb
   return Math.min(max, Math.max(min, n));
 }
 
-/** One blue mod line in the parse preview. */
-function PreviewMod({ m, side }: { m: ModRoll; side?: "P" | "S" }) {
-  const v = modValue(m);
-  return (
-    <div className={styles.previewMod}>
-      {side && <span className={styles.previewSide}>{side}</span>}
-      <span className={m.kind === "crafted" ? "r-crafted" : "poe-pop-mod"}>
-        {humanizeModId(m.mod_id)}
-        {v && <span className="num"> {v}</span>}
-      </span>
-      {m.is_fractured && <span className="r-fractured"> (fractured)</span>}
-    </div>
-  );
-}
-
 export function ItemEditor() {
   const item = useCraft((s) => s.item);
   const setItem = useCraft((s) => s.setItem);
@@ -60,6 +54,7 @@ export function ItemEditor() {
   const goal = useCraft((s) => s.goal);
   const setSection = useCraft((s) => s.setSection);
   const lastParse = useCraft((s) => s.lastParse);
+  const lastItemText = useCraft((s) => s.lastItemText);
   const iconManifest = useCraft((s) => s.iconManifest);
   // Store-held so captured imports (desktop bridge) surface them too.
   const unresolved = useCraft((s) => s.lastUnresolved);
@@ -70,10 +65,26 @@ export function ItemEditor() {
   const [importError, setImportError] = useState<string | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrNote, setOcrNote] = useState<string[]>([]);
+  const [uniqueManifest, setUniqueManifest] = useState<UniqueIconManifest | null>(null);
+  const [uniqueCatalog, setUniqueCatalog] = useState<UniqueCatalog | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   // The parse preview renders for any import — pasted here or captured.
   const imported = lastParse !== null;
+
+  useEffect(() => {
+    void loadUniqueIconManifest().then(setUniqueManifest);
+    void loadUniqueCatalog().then(setUniqueCatalog);
+  }, []);
+
+  const previewView = useMemo(() => {
+    if (!imported || !lastParse || !lastItemText) return null;
+    return buildItemView(lastItemText, {
+      baseManifest: iconManifest,
+      uniqueManifest,
+      uniqueCatalog,
+    });
+  }, [imported, lastParse, lastItemText, iconManifest, uniqueManifest, uniqueCatalog]);
 
   const counts = affixCounts(item);
 
@@ -236,100 +247,26 @@ export function ItemEditor() {
               </div>
             ))}
 
-            {/* ---- Full parse preview: the whole item, PoE2-style ------- */}
-            {imported && lastParse && (
-              <div
-                className={`poe-pop ${item.rarity === "rare" ? "poe-pop--rare" : item.rarity === "magic" ? "poe-pop--magic" : ""} ${styles.preview}`}
-              >
-                <div className="poe-pop-header">
-                  <span>{item.base_display_name ?? humanizeId(item.base)}</span>
-                </div>
-                <div className="poe-pop-content">
-                  <div className={styles.previewBaseRow}>
-                    <BaseIcon
-                      baseId={item.base_type_id ?? item.base}
-                      name={item.base_display_name ?? humanizeId(item.base)}
-                      size={40}
-                    />
-                    <div>
-                      {lastParse.itemClassId
-                        ? humanizeId(lastParse.itemClassId)
-                        : humanizeId(item.base)}
-                      <span className="faint"> · </span>
-                      <span className={`r-${item.rarity}`}>{item.rarity}</span>
-                      <div>
-                        Item Level: <span className={styles.previewValue}>{item.ilvl}</span>
-                        {item.quality > 0 && (
-                          <>
-                            <span className="faint"> · </span>Quality:{" "}
-                            <span className="poe-pop-mod">+{item.quality}%</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
+            {/* ---- Full parse preview: poe2db-style item popup + art ---- */}
+            {imported && lastParse && previewView && (
+              <div className={styles.preview}>
+                <ItemPopup model={previewView.model} artUrl={previewView.artUrl} />
+                {previewView.uniqueMatched && (
+                  <div className={styles.previewMeta}>
+                    Unique matched from catalog
+                    {previewView.uniqueKey ? ` · ${previewView.uniqueKey}` : ""}
                   </div>
-
-                  {item.implicits.length > 0 && (
-                    <>
-                      <div className="poe-pop-sep" />
-                      {item.implicits.map((m, i) => (
-                        <PreviewMod key={`i${i}`} m={m} />
-                      ))}
-                    </>
-                  )}
-
-                  <div className="poe-pop-sep" />
-                  {item.prefixes.length === 0 && item.suffixes.length === 0 ? (
-                    <div className="poe-pop-note">No explicit modifiers.</div>
-                  ) : (
-                    <>
-                      {item.prefixes.map((m, i) => (
-                        <PreviewMod key={`p${i}`} m={m} side="P" />
-                      ))}
-                      {item.suffixes.map((m, i) => (
-                        <PreviewMod key={`s${i}`} m={m} side="S" />
-                      ))}
-                    </>
-                  )}
-
-                  {unresolved.length > 0 && (
-                    <>
-                      <div className="poe-pop-sep" />
-                      <div className={styles.previewUnresolvedHead}>
-                        {unresolved.length} line{unresolved.length === 1 ? "" : "s"} not
-                        recognised as modifiers:
-                      </div>
-                      {unresolved.map((line, i) => (
-                        <div key={i} className={styles.previewUnresolved} title={line}>
-                          {line}
-                        </div>
-                      ))}
-                    </>
-                  )}
-
-                  {(item.corrupted || item.sanctified || item.mirrored) && (
-                    <>
-                      <div className="poe-pop-sep" />
-                      {item.corrupted && <div className="r-corrupted">Corrupted</div>}
-                      {item.sanctified && <div className="r-desecrated">Sanctified</div>}
-                      {item.mirrored && <div className="poe-pop-note">Mirrored</div>}
-                    </>
-                  )}
-
-                  {!lastParse.baseResolved && (
-                    <>
-                      <div className="poe-pop-sep" />
-                      <div className={styles.previewUnresolved}>
-                        Base not resolved — the modifier pool is approximate.
-                      </div>
-                    </>
-                  )}
-                  {lastParse.warnings.map((w, i) => (
-                    <div key={`w${i}`} className={styles.previewUnresolved} title={w}>
-                      {w}
-                    </div>
-                  ))}
-                </div>
+                )}
+                {!lastParse.baseResolved && (
+                  <div className={styles.previewUnresolved}>
+                    Base not resolved — the modifier pool is approximate.
+                  </div>
+                )}
+                {lastParse.warnings.map((w, i) => (
+                  <div key={`w${i}`} className={styles.previewUnresolved} title={w}>
+                    {w}
+                  </div>
+                ))}
               </div>
             )}
           </section>

@@ -7,10 +7,9 @@
   [ADR-0011](0011-browser-capture-daemon.md) (clipboard item capture).
 - **Honors / does not reopen:**
   [ADR-0009](0009-defer-wayland-layer-shell-to-v1-1.md) — a real Wayland
-  layer-shell overlay surface stays **deferred**; this overlay is a plain
-  Electron window. ADR-0010 — the app is a **window, not an overlay**; the
-  price overlay is an *opt-in, hotkey-triggered* auxiliary window, not the
-  primary UI.
+  layer-shell application surface stays **deferred**. ADR-0010's primary app
+  remains a normal window; the Hyprland follow-up uses a bounded generic
+  compositor plugin only for opt-in auxiliary annotations and calibration.
 
 ## Context
 
@@ -104,3 +103,38 @@ overlay is **capability-gated** per session.
   **blocked upstream**: Electron's `desktopCapturer` does not expose the
   ScreenCast portal's restore token; the persisted `portalToken` field
   stays reserved until it does.
+
+## Hyprland native follow-up (2026-07)
+
+Runtime testing showed that Electron can report `XDG_SESSION_TYPE=x11` while
+running as an XWayland client inside Hyprland, and that its `desktopCapturer`
+may return a correctly sized but black frame there. The implementation now
+separates host-compositor detection from Electron's rendering backend:
+
+- a Hyprland instance signature wins for overlay routing even when Electron is
+  XWayland;
+- `hyproverlay` protocol v4 provides a dimmed drag selector with retained green
+  draft, Enter/Space confirmation, Escape cancellation, and global logical
+  coordinates; `slurp` remains the fallback for older/absent plugins;
+- `grim -g` captures the region through the compositor (the Wayland socket is
+  recovered from `hyprctl instances` when the XWayland launcher omits
+  `WAYLAND_DISPLAY`);
+- Windows packages a bounded, persistent `Windows.Media.Ocr` helper and uses its
+  line boxes first. Missing/failed/incomplete native reads fall back to the same
+  portable Tesseract path used by Linux and the browser;
+- OCR line boxes survive preprocessing transforms and are row-locked by nearest
+  screen Y rather than array index;
+- `hyproverlay` v4 draws a currency icon + total at each OCR line center just
+  outside the selected region. Icons are runtime-fetched from the price source,
+  converted to bounded RGBA in Electron, and registered in compositor memory;
+  the plugin performs no file/network/PNG work;
+- `Alt+V` remains a one-shot pass. `Alt+Shift+V` adds an opt-in watcher with
+  open/close hysteresis, 500 ms presence sampling independent from OCR,
+  latest-frame-wins two-second OCR admission, and stale-scan cancellation;
+- portable watcher OCR reuses one warm Tesseract worker. A native-canvas 1.25x
+  text-column pass uses the fast model with sparse-text segmentation; fewer than
+  four catalogue matches pay for the 2x and alternate-crop fallbacks. All OCR
+  candidates resolve in one batched WASM call and matched display names replace
+  noisy OCR labels;
+- OCR runs before any result surface is shown and automatically handles both
+  dark HUD panels and dark text on light parchment.

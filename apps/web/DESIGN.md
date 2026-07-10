@@ -117,6 +117,34 @@ title, body in FontinRegular `--fg-muted`, underlined keywords (dotted,
 same color). Max width ~340px.
 
 ### Item popup (poe2db 1:1) — class family `.poe-pop*`
+
+Shared component: `components/ItemPopup.tsx` + `lib/itemPopup/*`.
+Black body; header = 3-layer sprite background (or gem title strip).
+
+| Kind | Header | Height | Title color | Separator |
+|---|---|---|---|---|
+| normal | `header-normal-*` | 34 | `#d6d6d6` | `seperator-normal` |
+| magic | `header-magic-*` | 34 | `#8888ff` | `seperator-magic` |
+| rare | `header-double-rare-*` | 54 | `#ffff77` | `seperator-rare` |
+| unique | `header-double-unique-*` | 54 | `#ef6916` | `seperator-unique` |
+| currency | `header-currency-*` | 34 | `#aa9e82` | `seperator-currency` |
+| gem | `header-gem-title` (or `header-gem-*`) | 54 | `#1ba29b` | `seperator-gem` |
+
+Body: properties/requirements grey (`#7f7f7f`) with white values; mods
+`#8888ff` with white rolls; flavour italic `#af6025`; gem secDescr `#baad85`.
+Sprites via `fetch-genesis-assets` → `public/genesis-icons/ui/`.
+Item art under the popup: bases from `fetch-base-icons`, uniques from
+`fetch-unique-icons` (`public/unique-icons/`), resolved by `lib/itemArt.ts`.
+
+**Core presentation API:** `lib/itemView/buildItemView` — used by Item editor
+and price overlay.
+
+- **Unique / named fixed items:** match `unique-icons/catalog.json` by name;
+  catalog supplies base type, unique mod templates, art; capture only overlays
+  quality/defences, sockets, runes, corruption, rolled values, flags.
+- **Magic / rare / normal:** full clipboard parse (including advanced
+  `{ Prefix Modifier (Tier: N) }` headers → PREFIX/SUFFIX rails + Tn labels).
+
 Black body; header = 3-layer sprite background
 (`ui/header-<rarity>-{left,middle,right}.webp`, `contain`, left/right caps +
 repeat-x middle), height 34px (54px doubleLine), name 19px centered, padding

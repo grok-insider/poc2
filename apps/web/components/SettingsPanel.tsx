@@ -4,12 +4,17 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, RotateCcw, Trash2, Database, Cpu, Puzzle } from "lucide-react";
 import { useCraft } from "@/lib/store";
 import { addStoredPlugin, removeStoredPlugin } from "@/lib/plugins/store";
-import { getDesktopBridge, type PriceStatus as CacheStatus } from "@/lib/desktop";
+import {
+  getDesktopBridge,
+  type CaptureRect,
+  type DesktopCapabilities,
+  type PriceStatus as CacheStatus,
+  type ScanDiagnostics,
+} from "@/lib/desktop";
 import { engine } from "@/lib/engine/client";
 import type { PoeScoutCurrencyEntry, PoeScoutSnapshot } from "@/lib/types";
+import { MARKET_LEAGUE_PRESETS } from "@/lib/marketLeagues";
 import styles from "./SettingsPanel.module.css";
-
-const LEAGUE_PRESETS = ["Runes of Aldur", "Standard", "Hardcore"];
 
 type PriceStatus = { kind: "ok"; note: string } | { kind: "err" } | null;
 
@@ -112,6 +117,10 @@ export function SettingsPanel() {
   // Only present in the Electron shell; a plain browser leaves this null.
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
+  const [desktopCaps, setDesktopCaps] = useState<DesktopCapabilities | null>(null);
+  const [captureRegion, setCaptureRegion] = useState<CaptureRect | null>(null);
+  const [scanDiagnostics, setScanDiagnostics] = useState<ScanDiagnostics | null>(null);
+  const [watcherEnabled, setWatcherEnabled] = useState(false);
 
   const loadCacheStatus = useCallback(async () => {
     const bridge = getDesktopBridge();
@@ -121,6 +130,21 @@ export function SettingsPanel() {
     } catch {
       /* leave previous status */
     }
+  }, []);
+
+  const loadOverlayDiagnostics = useCallback(async () => {
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    const [caps, region, scan, watcher] = await Promise.all([
+      bridge.capabilities().catch(() => null),
+      bridge.getCaptureRegion?.().catch(() => null) ?? Promise.resolve(null),
+      bridge.scanDiagnostics().catch(() => null),
+      bridge.rewardWatcherStatus().catch(() => false),
+    ]);
+    setDesktopCaps(caps);
+    setCaptureRegion(region);
+    setScanDiagnostics(scan);
+    setWatcherEnabled(watcher);
   }, []);
 
   useEffect(() => {
@@ -133,10 +157,11 @@ export function SettingsPanel() {
         if (alive) setCacheStatus(s);
       })
       .catch(() => {});
+    queueMicrotask(() => void loadOverlayDiagnostics());
     return () => {
       alive = false;
     };
-  }, [league]);
+  }, [league, loadOverlayDiagnostics]);
 
   async function refreshCache() {
     const bridge = getDesktopBridge();
@@ -150,6 +175,20 @@ export function SettingsPanel() {
       await loadCacheStatus();
       setCacheBusy(false);
     }
+  }
+
+  async function scanRewardsNow() {
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    await bridge.scanRewards();
+    window.setTimeout(() => void loadOverlayDiagnostics(), 1_500);
+  }
+
+  async function toggleRewardWatcher() {
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    setWatcherEnabled(await bridge.rewardWatcher(!watcherEnabled));
+    window.setTimeout(() => void loadOverlayDiagnostics(), 500);
   }
 
   async function refreshPrices() {
@@ -178,7 +217,7 @@ export function SettingsPanel() {
     }
   }
 
-  const isPreset = LEAGUE_PRESETS.includes(league);
+  const isPreset = MARKET_LEAGUE_PRESETS.some((preset) => preset.value === league);
 
   return (
     <div className="pane">
@@ -209,13 +248,13 @@ export function SettingsPanel() {
               </label>
               <div className={styles.leagueRow}>
                 <div className="seg">
-                  {LEAGUE_PRESETS.map((p) => (
+                  {MARKET_LEAGUE_PRESETS.map((preset) => (
                     <button
-                      key={p}
-                      className={league === p ? "on" : ""}
-                      onClick={() => setLeague(p)}
+                      key={preset.value}
+                      className={league === preset.value ? "on" : ""}
+                      onClick={() => setLeague(preset.value)}
                     >
-                      {p}
+                      {preset.label}
                     </button>
                   ))}
                 </div>
@@ -280,10 +319,108 @@ export function SettingsPanel() {
                   <p className={`${styles.note} danger`}>{cacheStatus.lastError}</p>
                 )}
                 <p className={`${styles.note} faint`}>
-                  The screenshot-OCR overlay (<span className="num">CTRL+SHIFT+S</span>) prices
+                  The screenshot-OCR overlay (<span className="num">ALT+V</span>) prices
                   currency, runes, idols and omens from this cache. It refreshes hourly and
                   follows the league above.
                 </p>
+              </div>
+            )}
+
+            {desktopCaps && (
+              <div className={styles.cacheBox}>
+                <div className={styles.sectionHead}>
+                  <span className="eyebrow">OCR diagnostics</span>
+                  <div className={styles.actionRow}>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => void getDesktopBridge()?.calibrateRegion()}
+                    >
+                      Calibrate
+                    </button>
+                    <button className="btn" onClick={() => void scanRewardsNow()}>
+                      Scan now
+                    </button>
+                    <button
+                      className={watcherEnabled ? "btn" : "btn btn-ghost"}
+                      onClick={() => void toggleRewardWatcher()}
+                    >
+                      {watcherEnabled ? "Stop watcher" : "Start watcher"}
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => void loadOverlayDiagnostics()}
+                    >
+                      <RefreshCw size={13} />
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+                <div className={styles.dataGrid}>
+                  <span className="faint">Overlay</span>
+                  <span className="num">{desktopCaps.overlayMode}</span>
+                  <span className="faint">Session</span>
+                  <span className="num">{desktopCaps.sessionKind}</span>
+                  <span className="faint">Capture</span>
+                  <span className="num">{desktopCaps.captureBackend}</span>
+                  <span className="faint">Region picker</span>
+                  <span className="num">{desktopCaps.regionPicker}</span>
+                  <span className="faint">Plugin protocol</span>
+                  <span className="num">
+                    {desktopCaps.hyprOverlay?.protocolVersion ?? "—"}
+                  </span>
+                  <span className="faint">Watcher</span>
+                  <span className="num">{watcherEnabled ? "active" : "off"}</span>
+                  <span className="faint">Region</span>
+                  <span className="num">
+                    {captureRegion
+                      ? `${captureRegion.x},${captureRegion.y} ${captureRegion.width}×${captureRegion.height}`
+                      : "—"}
+                  </span>
+                  <span className="faint">Last scan</span>
+                  <span className="num">
+                    {scanDiagnostics?.updatedAt
+                      ? new Date(scanDiagnostics.updatedAt).toLocaleTimeString()
+                      : "—"}
+                  </span>
+                  <span className="faint">OCR crop</span>
+                  <span className="num">
+                    {scanDiagnostics?.selectedCrop !== undefined
+                      ? `${Math.round(scanDiagnostics.selectedCrop * 100)}% · ${scanDiagnostics.selectedScale ?? "?"}×`
+                      : "—"}
+                  </span>
+                  <span className="faint">OCR engine</span>
+                  <span className="num">{scanDiagnostics?.ocrBackend ?? "—"}</span>
+                  <span className="faint">Scan latency</span>
+                  <span className="num">
+                    {scanDiagnostics?.totalMs !== undefined
+                      ? `${(scanDiagnostics.totalMs / 1000).toFixed(1)}s total · ${((scanDiagnostics.fastOcrMs ?? 0) / 1000).toFixed(1)}s fast`
+                      : "—"}
+                  </span>
+                </div>
+                {scanDiagnostics?.resolvedRows?.length ? (
+                  <p className={`${styles.note} success`}>
+                    Resolved: {scanDiagnostics.resolvedRows.join(" · ")}
+                  </p>
+                ) : null}
+                {scanDiagnostics?.error && (
+                  <p className={`${styles.note} danger`}>{scanDiagnostics.error}</p>
+                )}
+                {scanDiagnostics?.rawText && (
+                  <details className={styles.note}>
+                    <summary>Raw OCR text</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", margin: "8px 0 0" }}>
+                      {scanDiagnostics.rawText}
+                    </pre>
+                  </details>
+                )}
+                {scanDiagnostics?.lineRows?.length ? (
+                  <details className={styles.note}>
+                    <summary>Row alignment</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", margin: "8px 0 0" }}>
+                      {scanDiagnostics.lineRows.join("\n")}
+                    </pre>
+                  </details>
+                ) : null}
               </div>
             )}
           </section>

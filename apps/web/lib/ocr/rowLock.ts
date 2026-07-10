@@ -14,6 +14,8 @@
 ///
 /// Pure + unit-tested: `applyScan(state, reads) -> { state, rows }`. No DOM.
 
+import type { OcrLineGeometry } from "./extractRows";
+
 /** How a read's name resolved (mirrors the engine `ResolveView.method`). */
 export type ResolveMethod =
   | "exact"
@@ -28,7 +30,7 @@ const EXACT_METHODS: ReadonlySet<ResolveMethod> = new Set(["exact", "currency"])
 
 /** One resolved read from a single scan, for one screen-position slot. */
 export interface SlotRead {
-  /** Stable screen-position key (e.g. the row's index in the scan). */
+  /** Stable screen-position key (normalized Y bucket, or text-row index). */
   slot: string;
   /** Resolved canonical key, or null when unresolved. */
   key: string | null;
@@ -40,6 +42,10 @@ export interface SlotRead {
   method: ResolveMethod;
   /** Resolver confidence in [0,1]. */
   score: number;
+  /** Tesseract line confidence, when available. */
+  ocrConfidence?: number;
+  /** Source-normalized line geometry, when available. */
+  geometry?: OcrLineGeometry;
 }
 
 /** Per-slot lock state retained between scans. */
@@ -49,6 +55,9 @@ export interface SlotState {
   quantity: number;
   method: ResolveMethod;
   score: number;
+  ocrConfidence?: number;
+  /** Latest bbox/baseline with a center smoothed across observed frames. */
+  geometry?: OcrLineGeometry;
   /** True once the slot has met its confirmation threshold. */
   locked: boolean;
   /** Consecutive confirming reads of the current `key` (for fuzzy/prefix). */
@@ -68,10 +77,16 @@ export interface LockedRow {
   quantity: number;
   method: ResolveMethod;
   score: number;
+  ocrConfidence?: number;
+  geometry?: OcrLineGeometry;
 }
 
 /** Scans a slot may be missing before it is dropped (1 dropped-frame grace). */
 const MAX_MISSING = 1;
+
+/** Equal previous/current weighting damps OCR bbox jitter without lagging much. */
+const CENTER_SMOOTHING = 0.5;
+const SPATIAL_MATCH_TOLERANCE = 0.035;
 
 export function emptyRowLock(): RowLockState {
   return {};
@@ -85,6 +100,37 @@ function lockedRowOf(slot: string, s: SlotState): LockedRow {
     quantity: s.quantity,
     method: s.method,
     score: s.score,
+    ocrConfidence: s.ocrConfidence,
+    geometry: s.geometry,
+  };
+}
+
+function nextGeometry(
+  before: OcrLineGeometry | undefined,
+  current: OcrLineGeometry | undefined,
+): OcrLineGeometry | undefined {
+  if (!current) {
+    return before
+      ? {
+          bbox: { ...before.bbox },
+          baseline: { ...before.baseline },
+          center: { ...before.center },
+        }
+      : undefined;
+  }
+  return {
+    bbox: { ...current.bbox },
+    baseline: { ...current.baseline },
+    center: before
+      ? {
+          x:
+            before.center.x * CENTER_SMOOTHING +
+            current.center.x * (1 - CENTER_SMOOTHING),
+          y:
+            before.center.y * CENTER_SMOOTHING +
+            current.center.y * (1 - CENTER_SMOOTHING),
+        }
+      : { ...current.center },
   };
 }
 
@@ -98,9 +144,10 @@ export function applyScan(
 ): { state: RowLockState; rows: LockedRow[] } {
   const next: RowLockState = {};
   const seen = new Set<string>();
+  const associatedReads = associateSpatialReads(prev, reads);
 
   // 1) Advance every slot that appeared in this scan.
-  for (const r of reads) {
+  for (const r of associatedReads) {
     seen.add(r.slot);
     const before = prev[r.slot];
     const isExact = EXACT_METHODS.has(r.method) && r.key !== null;
@@ -117,6 +164,8 @@ export function applyScan(
       quantity: r.quantity,
       method: r.method,
       score: r.score,
+      ocrConfidence: r.ocrConfidence,
+      geometry: nextGeometry(before?.geometry, r.geometry),
       locked,
       confirms,
       missing: 0,
@@ -133,14 +182,52 @@ export function applyScan(
     // else: dropped — omit from `next`.
   }
 
-  // 3) Emit locked rows in stable slot order (numeric when the slot is an
-  //    index, else lexicographic).
+  // 3) Emit locked rows by geometry, with legacy slot ordering as fallback.
   const rows = Object.keys(next)
     .filter((slot) => next[slot].locked)
-    .sort(compareSlots)
+    .sort((a, b) => compareSlotStates(a, next[a], b, next[b]))
     .map((slot) => lockedRowOf(slot, next[slot]));
 
   return { state: next, rows };
+}
+
+function associateSpatialReads(
+  previous: RowLockState,
+  reads: SlotRead[],
+): SlotRead[] {
+  const used = new Set<string>();
+  return reads.map((read) => {
+    const y = read.geometry?.center.y;
+    if (y === undefined) return read;
+    let bestSlot: string | null = null;
+    let bestDistance = Infinity;
+    for (const [slot, state] of Object.entries(previous)) {
+      if (used.has(slot) || state.geometry?.center.y === undefined) continue;
+      const distance = Math.abs(state.geometry.center.y - y);
+      if (distance > SPATIAL_MATCH_TOLERANCE) continue;
+      const keyPenalty =
+        read.key !== null && state.key !== null && read.key !== state.key ? 0.02 : 0;
+      if (distance + keyPenalty < bestDistance) {
+        bestDistance = distance + keyPenalty;
+        bestSlot = slot;
+      }
+    }
+    if (!bestSlot) return read;
+    used.add(bestSlot);
+    return { ...read, slot: bestSlot };
+  });
+}
+
+function compareSlotStates(
+  a: string,
+  aState: SlotState,
+  b: string,
+  bState: SlotState,
+): number {
+  const ay = aState.geometry?.center.y;
+  const by = bState.geometry?.center.y;
+  if (ay !== undefined && by !== undefined && ay !== by) return ay - by;
+  return compareSlots(a, b);
 }
 
 function compareSlots(a: string, b: string): number {

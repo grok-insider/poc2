@@ -23,6 +23,8 @@ export function isPoeItemText(text: string): boolean {
 }
 
 export interface CaptureTimings {
+  /** Delay before injecting copy so compositor hotkey modifiers can release. */
+  preInjectDelayMs: number;
   /** Poll interval while waiting for the game to write the clipboard. */
   pollMs: number;
   /** Give up after this long. */
@@ -31,9 +33,10 @@ export interface CaptureTimings {
   restoreAfterMs: number;
 }
 
-/** APT-derived defaults (48ms poll / 500ms budget / 120ms restore). */
+/** APT-derived polling, with extra settle time for Hyprland + Proton/XWayland. */
 export const DEFAULT_TIMINGS: CaptureTimings = {
+  preInjectDelayMs: 450,
   pollMs: 48,
-  timeoutMs: 500,
+  timeoutMs: 1800,
   restoreAfterMs: 120,
 };

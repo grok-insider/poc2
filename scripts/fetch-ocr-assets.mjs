@@ -10,7 +10,8 @@
 //   - tesseract-core-simd-lstm.wasm.js  ← SIMD + lstmOnly variant
 //   - tesseract-core.wasm.js            ← non-SIMD fallback
 //   - tesseract-core-lstm.wasm.js       ← non-SIMD + lstmOnly fallback
-//   - eng.traineddata.gz                ← English model (the large blob, ~12 MB)
+//   - best/eng.traineddata.gz           ← accurate English model (~12 MB)
+//   - fast/eng.traineddata.gz           ← reward-overlay fast model (~2 MB)
 //
 // The core `*.wasm.js` files embed the WASM binary (Emscripten single-file
 // build), so there is no separate `.wasm` to fetch at runtime — one less
@@ -35,9 +36,12 @@ const outDir = path.join(webRoot, "public", "ocr");
 // Bun installs it into apps/web/node_modules (symlinked into the hoist store).
 const require = createRequire(path.join(webRoot, "package.json"));
 
-const TESSDATA_URL =
+const TESSDATA_BEST_URL =
   process.env.OCR_TESSDATA_URL ??
   "https://tessdata.projectnaptha.com/4.0.0_best/eng.traineddata.gz";
+const TESSDATA_FAST_URL =
+  process.env.OCR_TESSDATA_FAST_URL ??
+  "https://tessdata.projectnaptha.com/4.0.0_fast/eng.traineddata.gz";
 
 function copyInto(srcAbs, name) {
   const dest = path.join(outDir, name);
@@ -77,15 +81,22 @@ async function main() {
     copyInto(path.join(coreDir, f), f);
   }
 
-  // --- eng.traineddata.gz (large; fetched, not vendored from npm) ----------
-  const dataDest = path.join(outDir, "eng.traineddata.gz");
-  if (existsSync(dataDest) && statSync(dataDest).size > 1_000_000) {
-    console.log("▸ eng.traineddata.gz (already present, skipping fetch)");
-  } else {
-    console.log(`▸ eng.traineddata.gz ← ${TESSDATA_URL}`);
-    const res = await fetch(TESSDATA_URL);
+  // --- traineddata models (fetched, not vendored from npm) -----------------
+  for (const [model, url] of [
+    ["best", TESSDATA_BEST_URL],
+    ["fast", TESSDATA_FAST_URL],
+  ]) {
+    const modelDir = path.join(outDir, model);
+    mkdirSync(modelDir, { recursive: true });
+    const dataDest = path.join(modelDir, "eng.traineddata.gz");
+    if (existsSync(dataDest) && statSync(dataDest).size > 1_000_000) {
+      console.log(`▸ ${model}/eng.traineddata.gz (already present, skipping fetch)`);
+      continue;
+    }
+    console.log(`▸ ${model}/eng.traineddata.gz ← ${url}`);
+    const res = await fetch(url);
     if (!res.ok) {
-      console.error(`error: traineddata fetch failed (HTTP ${res.status})`);
+      console.error(`error: ${model} traineddata fetch failed (HTTP ${res.status})`);
       process.exit(1);
     }
     const buf = Buffer.from(await res.arrayBuffer());
@@ -94,7 +105,7 @@ async function main() {
       process.exit(1);
     }
     writeFileSync(dataDest, buf);
-    console.log(`  ✓ eng.traineddata.gz (${(buf.length / 1024 / 1024).toFixed(1)} MB)`);
+    console.log(`  ✓ ${model}/eng.traineddata.gz (${(buf.length / 1024 / 1024).toFixed(1)} MB)`);
   }
 
   console.log(`\nOCR assets ready in ${path.relative(repoRoot, outDir)}/ (served as /ocr/...)`);

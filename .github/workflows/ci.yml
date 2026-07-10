@@ -176,6 +176,7 @@ jobs:
       - name: Package desktop (NSIS)
         working-directory: apps/desktop
         run: |
+          cargo build -p poc2-windows-ocr --release
           bun run build
           bun x electron-builder --win --publish never
 

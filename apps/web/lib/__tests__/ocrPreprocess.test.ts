@@ -2,12 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   cropIconColumn,
   invert,
+  meanLuminance,
   upscaleBicubic,
   preprocessFrame,
+  preprocessFrameWithTransform,
   preprocessDataUrl,
+  mapProcessedBaselineToNormalizedSource,
+  mapProcessedBboxToNormalizedSource,
   type CanvasAdapter,
   type RgbaFrame,
 } from "../ocr/preprocess";
+import { detectBrightVerticalRegion } from "../ocr/canvas";
 
 /** Build a solid-color frame for assertions. */
 function solid(w: number, h: number, r: number, g: number, b: number, a = 255): RgbaFrame {
@@ -86,6 +91,13 @@ describe("invert", () => {
   });
 });
 
+describe("meanLuminance", () => {
+  test("distinguishes parchment from a dark HUD panel", () => {
+    expect(meanLuminance(solid(2, 2, 220, 205, 170))).toBeGreaterThan(128);
+    expect(meanLuminance(solid(2, 2, 20, 18, 15))).toBeLessThan(128);
+  });
+});
+
 describe("upscaleBicubic", () => {
   test("scales dimensions by the factor", () => {
     const f = solid(4, 5, 100, 100, 100);
@@ -124,12 +136,89 @@ describe("upscaleBicubic", () => {
 describe("preprocessFrame", () => {
   test("composes crop → invert → upscale with the expected output size", () => {
     const f = solid(10, 4, 220, 220, 220);
-    const out = preprocessFrame(f, { iconCrop: 0.3, scale: 3 });
+    const out = preprocessFrame(f, {
+      iconCrop: 0.3,
+      scale: 3,
+      polarity: "light-on-dark",
+    });
     // width: (10 - floor(10*0.3)=3) = 7, ×3 = 21; height 4×3 = 12.
     expect(out.width).toBe(21);
     expect(out.height).toBe(12);
     // light (220) → inverted to 35, and a flat region stays flat through upscale.
     expect(out.data[0]).toBe(35);
+  });
+
+  test("auto keeps dark text on a light parchment background uninverted", () => {
+    const f = solid(4, 2, 220, 205, 170);
+    const out = preprocessFrame(f, { iconCrop: 0, scale: 1, polarity: "auto" });
+    expect(out.data[0]).toBe(220);
+    expect(out.data[1]).toBe(205);
+  });
+
+  test("auto inverts a dark HUD background", () => {
+    const f = solid(4, 2, 20, 20, 20);
+    const out = preprocessFrame(f, { iconCrop: 0, scale: 1, polarity: "auto" });
+    expect(out.data[0]).toBe(235);
+  });
+
+  test("records crop/source/processed dimensions and inverts OCR geometry", () => {
+    const result = preprocessFrameWithTransform(solid(10, 4, 20, 20, 20), {
+      iconCrop: 0.3,
+      scale: 3,
+    });
+    expect(result.transform).toEqual({
+      source: { width: 10, height: 4 },
+      crop: { x: 3, y: 0, width: 7, height: 4 },
+      processed: { width: 21, height: 12 },
+    });
+
+    const bbox = mapProcessedBboxToNormalizedSource(
+      { x0: 0, y0: 3, x1: 21, y1: 9 },
+      result.transform,
+    );
+    expect(bbox.x0).toBeCloseTo(0.3);
+    expect(bbox.y0).toBeCloseTo(0.25);
+    expect(bbox.x1).toBeCloseTo(1);
+    expect(bbox.y1).toBeCloseTo(0.75);
+
+    const baseline = mapProcessedBaselineToNormalizedSource(
+      { x0: 0, y0: 6, x1: 21, y1: 6 },
+      result.transform,
+    );
+    expect(baseline).toEqual({ x0: 0.3, y0: 0.5, x1: 1, y1: 0.5 });
+  });
+
+  test("uses actual rounded output dimensions for fractional-scale inversion", () => {
+    const result = preprocessFrameWithTransform(solid(9, 5, 20, 20, 20), {
+      iconCrop: 0,
+      scale: 1.5,
+    });
+    expect(result.transform.processed).toEqual({ width: 14, height: 8 });
+    expect(
+      mapProcessedBboxToNormalizedSource(
+        { x0: 0, y0: 0, x1: 14, y1: 8 },
+        result.transform,
+      ),
+    ).toEqual({ x0: 0, y0: 0, x1: 1, y1: 1 });
+  });
+});
+
+describe("native vertical trim", () => {
+  test("finds a bright parchment band and ignores dark surrounding rows", () => {
+    const frame = solid(100, 200, 20, 20, 20);
+    for (let y = 50; y < 140; y++) {
+      for (let x = 45; x < 92; x++) {
+        const i = (y * frame.width + x) * 4;
+        frame.data[i] = 190;
+        frame.data[i + 1] = 180;
+        frame.data[i + 2] = 150;
+      }
+    }
+    expect(detectBrightVerticalRegion(frame, 40)).toEqual({ y: 26, height: 138 });
+  });
+
+  test("falls back when no substantial bright panel exists", () => {
+    expect(detectBrightVerticalRegion(solid(100, 200, 20, 20, 20), 40)).toBeNull();
   });
 });
 
@@ -149,6 +238,7 @@ describe("preprocessDataUrl (with a fake CanvasAdapter)", () => {
     const out = await preprocessDataUrl("data:image/png;base64,IN", fake, {
       iconCrop: 0.3,
       scale: 3,
+      polarity: "light-on-dark",
     });
     expect(out).toBe("data:image/png;base64,FAKE");
     expect(encoded).not.toBeNull();
