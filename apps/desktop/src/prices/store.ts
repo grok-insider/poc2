@@ -18,6 +18,7 @@ interface Db {
   replaceLeague(league: string, rows: PriceRow[]): void;
   snapshot(league: string): PriceSnapshot;
   count(league: string): number;
+  latestLeague(): string | null;
 }
 
 // ─────────────────────────── sqlite backend ───────────────────────────
@@ -76,23 +77,33 @@ function trySqlite(file: string): Db | null {
       },
       snapshot(league) {
         const rows = db
-          .prepare("SELECT name, normalized_name, price_divine, fetched_at FROM prices WHERE league = ?")
+          .prepare("SELECT name, normalized_name, price_exalt, price_divine, icon_url, fetched_at FROM prices WHERE league = ?")
           .all(league) as Array<{
             name: string;
             normalized_name: string;
+            price_exalt: number | null;
             price_divine: number | null;
+            icon_url: string | null;
             fetched_at: string;
           }>;
         return rowsToSnapshot(league, rows.map((r) => ({
           name: r.name,
           normalizedName: r.normalized_name,
+          priceExalt: r.price_exalt,
           priceDivine: r.price_divine,
+          iconUrl: r.icon_url,
           fetchedAt: r.fetched_at,
         })));
       },
       count(league) {
         const r = db.prepare("SELECT COUNT(*) AS n FROM prices WHERE league = ?").get(league) as { n: number };
         return r?.n ?? 0;
+      },
+      latestLeague() {
+        const row = db
+          .prepare("SELECT league FROM prices ORDER BY fetched_at DESC LIMIT 1")
+          .get() as { league?: unknown } | undefined;
+        return typeof row?.league === "string" && row.league ? row.league : null;
       },
     };
   } catch {
@@ -140,6 +151,17 @@ function jsonBackend(file: string): Db {
     count(league) {
       return (get()[league] ?? []).length;
     },
+    latestLeague() {
+      let latest: { league: string; fetchedAt: string } | null = null;
+      for (const [league, rows] of Object.entries(get())) {
+        for (const row of rows) {
+          if (!latest || row.fetchedAt > latest.fetchedAt) {
+            latest = { league, fetchedAt: row.fetchedAt };
+          }
+        }
+      }
+      return latest?.league ?? null;
+    },
   };
 }
 
@@ -147,21 +169,30 @@ function jsonBackend(file: string): Db {
 
 function rowsToSnapshot(
   league: string,
-  rows: Array<Pick<PriceRow, "name" | "normalizedName" | "priceDivine" | "fetchedAt">>,
+  rows: Array<Pick<PriceRow, "name" | "normalizedName" | "priceExalt" | "priceDivine" | "iconUrl" | "fetchedAt">>,
 ): PriceSnapshot {
   const names: string[] = [];
   const byName: Record<string, PriceInfo> = {};
+  const unitIcons: PriceSnapshot["unitIcons"] = {};
   let fetchedAt: string | null = null;
   for (const r of rows) {
     names.push(r.name);
     if (typeof r.priceDivine === "number" && Number.isFinite(r.priceDivine)) {
       // First write wins on duplicate normalized names (poe2scout ids are unique
       // but two display names can normalize equal — keep the first deterministic).
-      byName[r.normalizedName] ??= { perUnit: r.priceDivine, unit: "div" };
+      const useDivine = r.priceDivine >= 1 || r.priceExalt === null;
+      byName[r.normalizedName] ??= {
+        perUnit: useDivine ? r.priceDivine : r.priceExalt!,
+        unit: useDivine ? "div" : "ex",
+        perUnitDivine: r.priceDivine,
+        perUnitExalt: r.priceExalt,
+      };
     }
+    if (r.iconUrl && r.normalizedName === "divine orb") unitIcons.div ??= r.iconUrl;
+    if (r.iconUrl && r.normalizedName === "exalted orb") unitIcons.ex ??= r.iconUrl;
     if (!fetchedAt || (r.fetchedAt && r.fetchedAt > fetchedAt)) fetchedAt = r.fetchedAt;
   }
-  return { league, names, byName, fetchedAt };
+  return { league, names, byName, unitIcons, fetchedAt };
 }
 
 // ───────────────────────────── public API ─────────────────────────────
@@ -187,9 +218,32 @@ export function replaceLeaguePrices(league: string, rows: PriceRow[]): void {
 
 /** Flattened snapshot for the renderer (names + normalized→price). */
 export function priceSnapshot(league: string): PriceSnapshot {
-  return db?.snapshot(league) ?? { league, names: [], byName: {}, fetchedAt: null };
+  const safeLeague = typeof league === "string" ? league : "";
+  try {
+    return db?.snapshot(safeLeague) ?? {
+      league: safeLeague,
+      names: [],
+      byName: {},
+      unitIcons: {},
+      fetchedAt: null,
+    };
+  } catch {
+    return { league: safeLeague, names: [], byName: {}, unitIcons: {}, fetchedAt: null };
+  }
 }
 
 export function priceCount(league: string): number {
-  return db?.count(league) ?? 0;
+  try {
+    return db?.count(typeof league === "string" ? league : "") ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function latestPriceLeague(): string | null {
+  try {
+    return db?.latestLeague() ?? null;
+  } catch {
+    return null;
+  }
 }

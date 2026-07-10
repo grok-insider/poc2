@@ -220,6 +220,10 @@ jobs:
           bun run wasm
           bun run build
 
+      - name: Build Windows OCR helper
+        if: runner.os == 'Windows'
+        run: cargo build -p poc2-windows-ocr --release
+
       - name: Package desktop (${{ matrix.name }})
         working-directory: apps/desktop
         run: |

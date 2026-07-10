@@ -22,7 +22,9 @@ browser can't do:
 - **A poe2scout price cache** (hourly refresh, poe.ninja fallback) and a
   capability-gated **screen-region OCR price overlay**
   ([ADR-0013](docs/adr/0013-item-capture-ocr-overlay.md)) with a
-  one-time calibration flow.
+  one-time calibration flow. On Hyprland this is compositor-native:
+  drag-confirm selection and row-aligned icon/value annotations through
+  `hyproverlay`, with `grim` capture. One-shot and optional watcher modes ship.
 
 Targets: Linux, NixOS, and Windows 11 (macOS out of scope).
 
@@ -44,7 +46,7 @@ Targets: Linux, NixOS, and Windows 11 (macOS out of scope).
 - **Import an in-game item** by copying it in-game and pasting into the
   Item panel (`navigator.clipboard` → Rust parser → engine state), or
   build it manually in the UI. In the desktop app, press the **capture
-  hotkey** (`Ctrl+Shift+D`) while hovering an item in PoE2 and it imports
+  hotkey** (`Alt+C`) while hovering an item in PoE2 and it imports
   itself.
 - **Price-check it**: the Price Check panel matches the item's mod lines
   to official trade-API stat ids (1,932-entry pipeline-generated table),

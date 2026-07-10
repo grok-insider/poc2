@@ -1,10 +1,10 @@
 // Linux (Wayland/Hyprland-first) Ctrl+C injection.
 //
 // No native Node modules on Linux: we spawn compositor/uinput tools.
-// Order of preference (ADR-0010):
-//   1. hyprctl dispatch sendshortcut  — zero-setup on Hyprland
-//   2. ydotool                        — uinput, compositor-agnostic,
-//                                       needs ydotoold + /dev/uinput access
+// Order of preference:
+//   1. ydotool                        — uinput, works with Proton/XWayland
+//                                       where Hyprland sendshortcut can no-op
+//   2. hyprctl dispatch sendshortcut  — zero-setup on Hyprland
 //   3. wtype                          — virtual-keyboard protocol
 import { spawn } from "node:child_process";
 
@@ -24,11 +24,11 @@ export function injectionCandidates(advanced: boolean): InjectAttempt[] {
     ? ["-M", "ctrl", "-M", "alt", "c", "-m", "alt", "-m", "ctrl"]
     : ["-M", "ctrl", "c", "-m", "ctrl"];
   return [
+    { cmd: "ydotool", args: ["key", ...ydoKeys] },
     {
       cmd: "hyprctl",
       args: ["dispatch", "sendshortcut", `${mods}, C, activewindow`],
     },
-    { cmd: "ydotool", args: ["key", ...ydoKeys] },
     { cmd: "wtype", args: wtypeArgs },
   ];
 }

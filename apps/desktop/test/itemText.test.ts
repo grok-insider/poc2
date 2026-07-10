@@ -19,7 +19,8 @@ describe("isPoeItemText", () => {
 });
 
 test("APT-derived default timings", () => {
+  expect(DEFAULT_TIMINGS.preInjectDelayMs).toBe(450);
   expect(DEFAULT_TIMINGS.pollMs).toBe(48);
-  expect(DEFAULT_TIMINGS.timeoutMs).toBe(500);
+  expect(DEFAULT_TIMINGS.timeoutMs).toBe(1800);
   expect(DEFAULT_TIMINGS.restoreAfterMs).toBe(120);
 });

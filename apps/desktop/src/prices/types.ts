@@ -31,6 +31,10 @@ export interface PriceInfo {
   perUnit: number;
   /** Unit label (e.g. "div" | "ex"). */
   unit: string;
+  /** Canonical Divine value used to compare rows rendered in mixed units. */
+  perUnitDivine: number;
+  /** Exalted value retained so inexpensive rows can use a readable unit. */
+  perUnitExalt: number | null;
 }
 
 /**
@@ -43,6 +47,8 @@ export interface PriceSnapshot {
   names: string[];
   /** `normalizedName` → price info. */
   byName: Record<string, PriceInfo>;
+  /** Runtime-fetched display-currency icons; never committed as game assets. */
+  unitIcons: { div?: string; ex?: string };
   /** ISO-8601 time of the snapshot's underlying fetch, or null if never. */
   fetchedAt: string | null;
 }

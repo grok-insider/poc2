@@ -13,12 +13,17 @@
 /// the overlay calls {@link lookupPrice} per resolved key. No price data here,
 /// no import of the price module — purely a lookup adapter with a null floor.
 
+import type { OcrLineGeometry } from "./extractRows";
+
 /** A unit price for one resolved currency/item key. */
 export interface PriceInfo {
   /** Price per unit, in the source's display unit (e.g. divine or exalt). */
   perUnit: number;
   /** Currency/unit label, when known (e.g. "div", "ex", "c"). */
   unit?: string | null;
+  /** Canonical Divine value used to compare mixed display units. */
+  perUnitDivine?: number | null;
+  perUnitExalt?: number | null;
 }
 
 /** A resolved row decorated with its (best-effort) price. */
@@ -30,9 +35,12 @@ export interface PricedRow {
   perUnit: number | null;
   /** quantity × perUnit, or null. */
   total: number | null;
+  totalDivine: number | null;
   unit: string | null;
   method: string;
   score: number;
+  ocrConfidence?: number;
+  geometry?: OcrLineGeometry;
 }
 
 type PriceSourceFn = (key: string) => PriceInfo | null | undefined;
@@ -69,9 +77,23 @@ export function priceRow(input: {
   quantity: number;
   method: string;
   score: number;
+  ocrConfidence?: number;
+  geometry?: OcrLineGeometry;
 }): PricedRow {
   const info = lookupPrice(input.key);
-  const perUnit = info ? info.perUnit : null;
+  const totalDivine =
+    typeof info?.perUnitDivine === "number"
+      ? info.perUnitDivine * input.quantity
+      : info?.unit === "div" && typeof info.perUnit === "number"
+        ? info.perUnit * input.quantity
+        : null;
+  const useDivine = totalDivine !== null && totalDivine >= 1;
+  const selectedPerUnit = useDivine
+    ? info?.perUnitDivine
+    : typeof info?.perUnitExalt === "number"
+      ? info.perUnitExalt
+      : info?.perUnit;
+  const perUnit = typeof selectedPerUnit === "number" ? selectedPerUnit : null;
   const total = perUnit !== null ? perUnit * input.quantity : null;
   return {
     key: input.key,
@@ -79,9 +101,18 @@ export function priceRow(input: {
     quantity: input.quantity,
     perUnit,
     total,
-    unit: info?.unit ?? null,
+    totalDivine,
+    unit: info
+      ? useDivine
+        ? "div"
+        : typeof info.perUnitExalt === "number"
+          ? "ex"
+          : info.unit ?? null
+      : null,
     method: input.method,
     score: input.score,
+    ocrConfidence: input.ocrConfidence,
+    geometry: input.geometry,
   };
 }
 
@@ -90,8 +121,9 @@ export function highestValueIndex(rows: PricedRow[]): number {
   let best = -1;
   let bestVal = -Infinity;
   rows.forEach((r, i) => {
-    if (r.total !== null && r.total > bestVal) {
-      bestVal = r.total;
+    const comparable = r.totalDivine ?? r.total;
+    if (comparable !== null && comparable > bestVal) {
+      bestVal = comparable;
       best = i;
     }
   });

@@ -13,6 +13,7 @@ members = [
     "crates/plugin-sdk",
     "crates/poc2-wasm",
     "crates/capture",
+    "apps/desktop/native/windows-ocr",
     "pipeline",
 ]
 default-members = [
@@ -43,6 +44,15 @@ readme = "README.md"
 # Core
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+base64 = "0.22"
+windows = { version = "0.61", features = [
+    "Foundation",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
+    "Win32_System_WinRT",
+] }
 toml = "0.8"
 thiserror = "1.0"
 anyhow = "1.0"

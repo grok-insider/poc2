@@ -97,6 +97,8 @@ describe("detectCapabilities", () => {
       sessionKind: "win32",
       overlayMode: "full",
       silentRegionCapture: true,
+      regionPicker: "electron",
+      captureBackend: "electron",
     });
   });
 
@@ -108,7 +110,7 @@ describe("detectCapabilities", () => {
     expect(caps.silentRegionCapture).toBe(true);
   });
 
-  test("wlroots without hypr-overlay → degraded, portal capture, NO Electron overlay probe", async () => {
+  test("wlroots without hypr-overlay → degraded, grim capture, NO Electron overlay probe", async () => {
     let probed = false;
     const caps = await detectCapabilities({
       env: env({
@@ -121,7 +123,8 @@ describe("detectCapabilities", () => {
       },
     });
     expect(caps.overlayMode).toBe("degraded");
-    expect(caps.silentRegionCapture).toBe(false);
+    expect(caps.silentRegionCapture).toBe(true);
+    expect(caps.captureBackend).toBe("grim");
     expect(probed).toBe(false);
   });
 
@@ -134,7 +137,27 @@ describe("detectCapabilities", () => {
       probeHyprOverlay: () => true,
     });
     expect(caps.overlayMode).toBe("hyprland-plugin");
-    expect(caps.silentRegionCapture).toBe(false);
+    expect(caps.silentRegionCapture).toBe(true);
+    expect(caps.regionPicker).toBe("slurp");
+    expect(caps.captureBackend).toBe("grim");
+  });
+
+  test("XWayland Electron on a Hyprland host keeps silent capture and uses the plugin", async () => {
+    const caps = await detectCapabilities({
+      env: env({
+        XDG_SESSION_TYPE: "x11",
+        XDG_CURRENT_DESKTOP: "Hyprland",
+        HYPRLAND_INSTANCE_SIGNATURE: "instance",
+      }),
+      probeHyprOverlay: () => true,
+    });
+    expect(caps).toEqual({
+      sessionKind: "linux-x11",
+      overlayMode: "hyprland-plugin",
+      silentRegionCapture: true,
+      regionPicker: "slurp",
+      captureBackend: "grim",
+    });
   });
 
   test("wayland-other with passing probe → full overlay, portal capture", async () => {

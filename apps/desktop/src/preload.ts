@@ -14,6 +14,7 @@ const CHANNELS = {
   // --- ADR-0013: region capture + price overlay / calibration ---
   capabilities: "poc2:capabilities",
   captureRegion: "poc2:capture-region",
+  scanRewards: "poc2:scan-rewards",
   overlayShow: "poc2:overlay-show",
   overlayHide: "poc2:overlay-hide",
   overlaySetRegion: "poc2:overlay-set-region",
@@ -22,6 +23,16 @@ const CHANNELS = {
   regionCalibrated: "poc2:region-calibrated",
   overlayState: "poc2:overlay-state",
   hyprOverlayRender: "poc2:hypr-overlay-render",
+  hyprOverlayPreparePriceIcons: "poc2:hypr-overlay-prepare-price-icons",
+  rewardWatcher: "poc2:reward-watcher",
+  rewardWatcherStatus: "poc2:reward-watcher-status",
+  clipboardWrite: "poc2:clipboard-write",
+  marketHistoryAdd: "poc2:market-history-add",
+  marketHistoryList: "poc2:market-history-list",
+  scanDiagnosticsGet: "poc2:scan-diagnostics-get",
+  scanDiagnosticsSet: "poc2:scan-diagnostics-set",
+  nativeOcrRecognize: "poc2:native-ocr-recognize",
+  nativeOcrStatus: "poc2:native-ocr-status",
   // --- poe2scout price cache ---
   pricesSnapshot: "poc2:prices-snapshot",
   pricesStatus: "poc2:prices-status",
@@ -68,8 +79,11 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   capabilities(): Promise<unknown> {
     return ipcRenderer.invoke(CHANNELS.capabilities);
   },
-  captureRegion(rect: CaptureRect): Promise<unknown> {
-    return ipcRenderer.invoke(CHANNELS.captureRegion, rect);
+  captureRegion(rect: CaptureRect, preserveCompositorOverlay = false): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.captureRegion, rect, preserveCompositorOverlay);
+  },
+  scanRewards(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.scanRewards);
   },
   overlayShow(): Promise<unknown> {
     return ipcRenderer.invoke(CHANNELS.overlayShow);
@@ -103,6 +117,36 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   },
   hyprOverlayRender(payload: unknown): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.hyprOverlayRender, payload);
+  },
+  hyprOverlayPreparePriceIcons(): Promise<Record<string, string>> {
+    return ipcRenderer.invoke(CHANNELS.hyprOverlayPreparePriceIcons);
+  },
+  rewardWatcher(enabled: boolean): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.rewardWatcher, enabled);
+  },
+  rewardWatcherStatus(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.rewardWatcherStatus);
+  },
+  clipboardWrite(text: string): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.clipboardWrite, text);
+  },
+  marketHistoryAdd(entry: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.marketHistoryAdd, entry);
+  },
+  marketHistoryList(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.marketHistoryList);
+  },
+  scanDiagnostics(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.scanDiagnosticsGet);
+  },
+  scanDiagnosticsSet(diagnostics: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.scanDiagnosticsSet, diagnostics);
+  },
+  nativeOcrRecognize(dataUrl: string, language?: string): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.nativeOcrRecognize, dataUrl, language);
+  },
+  nativeOcrStatus(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.nativeOcrStatus);
   },
 
   // --- poe2scout price cache ---

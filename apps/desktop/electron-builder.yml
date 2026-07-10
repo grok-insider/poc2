@@ -24,6 +24,9 @@ win:
   target:
     - nsis
   icon: build/icon.ico
+  extraResources:
+    - from: ../../target/release/poc2-windows-ocr.exe
+      to: windows-ocr/poc2-windows-ocr.exe
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

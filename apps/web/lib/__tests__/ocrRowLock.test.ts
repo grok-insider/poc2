@@ -5,6 +5,16 @@ import {
   type SlotRead,
   type RowLockState,
 } from "../ocr/rowLock";
+import { spatialSlotKey } from "../ocr/scan";
+import type { OcrLineGeometry } from "../ocr/extractRows";
+
+function geometry(centerY: number): OcrLineGeometry {
+  return {
+    bbox: { x0: 0.2, y0: centerY - 0.02, x1: 0.8, y1: centerY + 0.02 },
+    baseline: { x0: 0.2, y0: centerY + 0.01, x1: 0.8, y1: centerY + 0.01 },
+    center: { x: 0.5, y: centerY },
+  };
+}
 
 function read(
   slot: string,
@@ -13,8 +23,9 @@ function read(
   quantity = 1,
   name = key ?? "?",
   score = key ? 0.9 : 0,
+  rowGeometry?: OcrLineGeometry,
 ): SlotRead {
-  return { slot, key, name, quantity, method, score };
+  return { slot, key, name, quantity, method, score, geometry: rowGeometry };
 }
 
 describe("rowLock — locking thresholds", () => {
@@ -111,6 +122,14 @@ describe("rowLock — multiple slots + ordering", () => {
     expect(rows.map((r) => r.key)).toEqual(["alpha", "beta", "gamma"]);
   });
 
+  test("sorts positioned rows top-to-bottom instead of by slot text", () => {
+    const { rows } = applyScan(emptyRowLock(), [
+      read("0", "bottom", "exact", 1, "bottom", 1, geometry(0.8)),
+      read("1", "top", "exact", 1, "top", 1, geometry(0.2)),
+    ]);
+    expect(rows.map((row) => row.key)).toEqual(["top", "bottom"]);
+  });
+
   test("unlocked (fuzzy, single-read) slots are excluded from rows", () => {
     const { rows } = applyScan(emptyRowLock(), [
       read("0", "alpha", "exact"),
@@ -126,5 +145,81 @@ describe("rowLock — multiple slots + ordering", () => {
     const r = applyScan(s, [read("0", "vaal", "fuzzy", 3)]);
     expect(r.state["0"].locked).toBe(true);
     expect(r.rows[0].quantity).toBe(3);
+  });
+});
+
+describe("rowLock — spatial slots", () => {
+  test("a missing middle line does not shift lower rows and keeps its geometry", () => {
+    let s = applyScan(emptyRowLock(), [
+      read(spatialSlotKey(0.2), "top", "exact", 1, "top", 1, geometry(0.2)),
+      read(spatialSlotKey(0.4), "middle", "exact", 2, "middle", 1, geometry(0.4)),
+      read(spatialSlotKey(0.6), "bottom", "exact", 3, "bottom", 1, geometry(0.6)),
+    ]).state;
+
+    const next = applyScan(s, [
+      read(spatialSlotKey(0.204), "top", "exact", 1, "top", 1, geometry(0.204)),
+      read(
+        spatialSlotKey(0.604),
+        "bottom",
+        "exact",
+        4,
+        "bottom",
+        1,
+        geometry(0.604),
+      ),
+    ]);
+    s = next.state;
+
+    expect(next.rows.map((row) => row.key)).toEqual(["top", "middle", "bottom"]);
+    expect(s[spatialSlotKey(0.4)].missing).toBe(1);
+    expect(s[spatialSlotKey(0.4)].geometry?.center.y).toBe(0.4);
+    expect(s[spatialSlotKey(0.6)].quantity).toBe(4);
+  });
+
+  test("keeps the latest bbox while smoothing center jitter", () => {
+    const slot = spatialSlotKey(0.2);
+    let s = applyScan(emptyRowLock(), [
+      read(slot, "chaos", "exact", 1, "chaos", 1, geometry(0.2)),
+    ]).state;
+    s = applyScan(s, [
+      read(slot, "chaos", "exact", 1, "chaos", 1, geometry(0.204)),
+    ]).state;
+
+    expect(s[slot].geometry?.bbox.y0).toBeCloseTo(0.184);
+    expect(s[slot].geometry?.center.y).toBeCloseTo(0.202);
+    const dropped = applyScan(s, []);
+    expect(dropped.rows[0].geometry?.center.y).toBeCloseTo(0.202);
+  });
+
+  test("reuses the prior spatial slot across a quantization boundary", () => {
+    const geometry = (y: number) => ({
+      bbox: { x0: 0.2, y0: y - 0.01, x1: 0.8, y1: y + 0.01 },
+      baseline: { x0: 0.2, y0: y, x1: 0.8, y1: y },
+      center: { x: 0.5, y },
+    });
+    const first = applyScan(emptyRowLock(), [
+      {
+        slot: "y:010",
+        key: "same",
+        name: "Same Rune",
+        quantity: 1,
+        method: "exact",
+        score: 1,
+        geometry: geometry(0.209),
+      },
+    ]);
+    const second = applyScan(first.state, [
+      {
+        slot: "y:011",
+        key: "same",
+        name: "Same Rune",
+        quantity: 1,
+        method: "exact",
+        score: 1,
+        geometry: geometry(0.211),
+      },
+    ]);
+    expect(Object.keys(second.state)).toEqual(["y:010"]);
+    expect(second.rows).toHaveLength(1);
   });
 });

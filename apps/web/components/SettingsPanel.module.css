@@ -18,6 +18,12 @@
   gap: 12px;
 }
 
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* --- Market --- */
 .leagueRow {
   display: flex;

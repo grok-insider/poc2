@@ -37,7 +37,7 @@ Rail sections → panels (one component per workflow):
 | Regex | `RegexPanel` | in-game search-string generator: Goal (craft target → stash-search), Item mods / Waystone / Tablet (pool selection + roll floors + `!`unwanted), Vendor (shopping filters); 250-char budget meter, copy/auto-copy |
 | Genesis Tree | `GenesisPanel` | full-bleed 0.5 Breach tree with real art + curated goal presets (engine `genesisTree`) |
 | Tools | `ToolsPanel` | simulation runner (`runNTrials`) + recipe library (IndexedDB) |
-| Settings | `SettingsPanel` | market league + price refresh, engine League ruleset, desktop price-cache status, capture diagnostics, plugins (add/remove `.wasm`), notes, data/reset |
+| Settings | `SettingsPanel` | market league + price refresh, engine League ruleset, desktop price-cache status, OCR transport/capture/region diagnostics + direct calibrate/scan controls, capture diagnostics, plugins (add/remove `.wasm`), notes, data/reset |
 
 `OutcomeDialog` (modal) records what actually happened in game:
 add/remove/reroll mod, rarity changes — validated by the engine
@@ -48,8 +48,8 @@ Extra routes for the desktop shell (inert stubs in a plain browser):
 - `/overlay` — the ADR-0013 price overlay surface (click-through plates
   in full mode, in-app panel in degraded mode; OCR + price resolution run
   here).
-- `/calibrate` — full-screen drag-select to calibrate the screen region
-  the overlay scans.
+- `/calibrate` — full-screen Electron fallback for region calibration;
+  Hyprland/wlroots uses the native `slurp` selector instead.
 
 ## State (`lib/store.ts` — Zustand)
 
@@ -104,9 +104,9 @@ neither). The web app **never imports Electron**; every feature detects
 the bridge and no-ops in a plain browser. Surface: capture
 (`onItemText`, `captureNow`, `captureStatus`), trade proxy
 (`tradeSearch`, `tradeFetch`), allowlisted `fetchJson`, overlay/region
-(`capabilities`, `captureRegion`, `overlayShow/Hide/SetRegion`,
-`calibrateRegion`, `onRegionCalibrated`, `onOverlayState`), and the price
-cache (`pricesSnapshot/Status/Refresh/SetLeague`).
+(`capabilities`, `captureRegion`, `scanRewards`, `overlayShow/Hide/SetRegion`,
+`calibrateRegion`, `onRegionCalibrated`, `onOverlayState`, scan diagnostics),
+and the price cache (`pricesSnapshot/Status/Refresh/SetLeague`).
 
 ## Key flows
 
@@ -154,14 +154,37 @@ Settings; `setLeague` (and boot) point it at the active league.
 
 ### OCR price overlay (desktop, ADR-0013)
 
-Scan hotkey (`Ctrl+Shift+S` / `poc2-desktop --scan`) → main positions the
-overlay (full mode) or signals the in-app panel (degraded) → `/overlay`
-runs ONE pass: `captureRegion` → preprocess (icon-crop, invert, upscale)
-→ tesseract (vendored `/ocr/` runtime) → `extractRows` → `resolveName`
-against the price-cache candidates → row-locked price plates.
-Portal-denied capture falls back to the clipboard item path. Calibration:
-`Ctrl+Shift+C` / `--recalibrate` → `/calibrate` drag-select → persisted
-region.
+Reward scan hotkey (`Alt+V` / `poc2-desktop --scan`) runs one pass. The optional
+watcher (`Alt+Shift+V` / `--watch-rewards`) uses brightness/contrast hysteresis,
+frame fingerprints, 500 ms presence sampling, latest-frame-wins serialized OCR,
+and a generation guard so closed panels hide without waiting for OCR and stopped
+scans cannot repaint. A warm worker starts at most once every two seconds.
+`/overlay` runs: `captureRegion` → native canvas 2x crop/polarity fast path (3x
+and alternate-crop fallback unless catalogue matches are complete and exact) → structured Tesseract lines →
+`resolveName` against price-cache candidates → nearest-Y row locking → mixed-unit
+price selection. Tesseract boxes are inverse-mapped to source-normalized row
+centers. `hyproverlay` v4 renders one runtime-registered currency icon and stack
+value at each corresponding screen Y, immediately outside the selected region;
+v3/degraded paths retain compact cards. Portal-denied capture falls back to the
+clipboard item path. Calibration: `Alt+L` / `--recalibrate` → compositor-dimmed
+drag selection → Enter/Space confirm (or drag to redo) → persisted global rect.
+Settings diagnostics records capture, decode, fast OCR, fallback OCR, and total
+latency for the last completed scan.
+
+Item market check (`Alt+E` / `--price-check`) captures the hovered item
+with the same APT-style Ctrl+C path, then `/overlay` builds smart trade2 filters
+from `trade-stats.json` using the Price panel's 90% min / 110% max bounds. The
+desktop trade proxy searches/fetches listings; the overlay shows cheapest,
+median, result count, matched-stat count, and grouped top listings, and the
+summary is persisted to market history.
+
+Search Regex overlay (`Alt+F` / `--regex-open` plus regex navigation
+flags) keeps PoC2 regex generation in the web app and sends only a generic menu
+payload to `hyproverlay`. On open it hydrates the current item pool plus
+waystone/tablet pools from the WASM engine where the bundle has data, then
+renders a capped quick-pick menu alongside the vendor/property presets. Copy/apply
+writes through Electron main so hidden workers do not depend on browser clipboard
+permissions; non-plugin sessions get a compact Electron/degraded fallback card.
 
 ## Bundle loading
 

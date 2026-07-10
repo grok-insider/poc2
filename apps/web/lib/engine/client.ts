@@ -31,6 +31,7 @@ import type {
   RecoveryStepView,
   RerollableModsResponse,
   ResolveNameArgs,
+  ResolveNamesArgs,
   ResolveView,
   TrialDistribution,
 } from "../types";
@@ -159,6 +160,8 @@ export const engine = {
   // ---- resolve -----------------------------------------------------------
   /** Fuzzy-resolve a noisy item/currency name onto a canonical key. */
   resolveName: (args: ResolveNameArgs) => call<ResolveView>("resolveName", [args]),
+  /** Resolve multiple names in order against one shared candidate index. */
+  resolveNames: (args: ResolveNamesArgs) => call<ResolveView[]>("resolveNames", [args]),
 
   // ---- plugins (ADR-0014) -------------------------------------------------
   /** Install plugin-emitted strategy/rule TOMLs (set semantics: registries

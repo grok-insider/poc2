@@ -13,6 +13,11 @@ import { seedSpecsFromItem } from "./concepts";
 import { validateArchetype, type Archetype } from "./archetypes";
 import { loadBaseIconManifest } from "./baseIcons";
 import type { PluginInfoView } from "./plugins/load";
+import {
+  DEFAULT_MARKET_LEAGUE,
+  MARKET_LEAGUE_VERSION,
+  migrateMarketLeague,
+} from "./marketLeagues";
 import type {
   AdvisorAction,
   BaseIconManifest,
@@ -159,7 +164,18 @@ function nowIso(): string {
 /** The persistable slice of the store (the shape `loadCraft` restores). */
 function persistedSlice(s: CraftState): PersistedCraft {
   const { item, goal, risk, depth, history, league, engineLeague, notes, lastItemText } = s;
-  return { item, goal, risk, depth, history, league, engineLeague, notes, lastItemText };
+  return {
+    item,
+    goal,
+    risk,
+    depth,
+    history,
+    league,
+    marketLeagueVersion: MARKET_LEAGUE_VERSION,
+    engineLeague,
+    notes,
+    lastItemText,
+  };
 }
 
 export const useCraft = create<CraftState>((set, get) => ({
@@ -194,7 +210,7 @@ export const useCraft = create<CraftState>((set, get) => ({
   lastUnresolved: [],
   iconManifest: null,
 
-  league: "Runes of Aldur",
+  league: DEFAULT_MARKET_LEAGUE,
   engineLeague: "challenge",
   notes: "",
   hydrated: false,
@@ -373,7 +389,7 @@ export const useCraft = create<CraftState>((set, get) => ({
           risk: saved.risk ?? 0.5,
           depth: saved.depth ?? 4,
           history: saved.history ?? [],
-          league: saved.league ?? "Runes of Aldur",
+          league: migrateMarketLeague(saved.league, saved.marketLeagueVersion),
           engineLeague: saved.engineLeague === "standard" ? "standard" : "challenge",
           notes: saved.notes ?? "",
           lastItemText: saved.lastItemText ?? null,

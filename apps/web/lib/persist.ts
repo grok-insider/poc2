@@ -19,6 +19,8 @@ export interface PersistedCraft {
   depth: number;
   history: HistoryEntry[];
   league: string;
+  /** One-time migration version for the market-league default. */
+  marketLeagueVersion?: number;
   /** Engine League ruleset ("standard" | "challenge"); distinct from the
    * free-text price-API `league` above. */
   engineLeague?: string;

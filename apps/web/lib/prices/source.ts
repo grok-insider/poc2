@@ -32,7 +32,14 @@ export async function loadPriceSource(): Promise<PriceSnapshot | null> {
   if (typeof window !== "undefined") {
     window.poc2PriceSource = (key: string) => {
       const info = snap.byName[normalizeName(key)];
-      return info ?? null;
+      return info
+        ? {
+            perUnit: info.perUnit,
+            unit: info.unit,
+            perUnitDivine: info.perUnitDivine,
+            perUnitExalt: info.perUnitExalt,
+          }
+        : null;
     };
   }
   return snap;

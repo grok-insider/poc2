@@ -129,6 +129,64 @@
   border-bottom: none;
 }
 
+/* --- overlay market history --- */
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.historyEntry {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(178, 145, 85, 0.1);
+}
+.historyEntry:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.historyHead,
+.historyMeta,
+.historyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.historyHead {
+  justify-content: space-between;
+}
+.historyTitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.historyMeta {
+  flex-wrap: wrap;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+.historyRows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 4px 10px;
+}
+.historyRow {
+  justify-content: space-between;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.historyRow span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --- empty / hint states --- */
 .note {
   font-size: 12px;
