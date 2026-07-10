@@ -73,6 +73,8 @@ bind = ALT, L, exec, poc2-desktop --recalibrate
 bind = ALT, E, exec, poc2-desktop --price-check
 bind = ALT, F, exec, poc2-desktop --regex-open
 bind = ALT SHIFT, F, exec, poc2-desktop --regex-copy
+# Regex ↑↓/←→/Enter navigation binds are optional when hyproverlay reports
+# menu.interactive — the open menu accepts pointer + in-overlay keyboard.
 ```
 
 Recalibrate dims the desktop through `hyproverlay`: drag the complete reward-row

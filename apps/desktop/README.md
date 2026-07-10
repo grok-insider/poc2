@@ -73,6 +73,12 @@ npm-downloaded binary → `electron` on PATH (the Nix devshell provides it).
 | Regex copy | `Alt+Shift+F` | `POC2_REGEX_COPY_HOTKEY` | `poc2-desktop --regex-copy` |
 | Hide overlay | `Esc` (only while visible) | — | — |
 
+**Search Regex navigation on Hyprland (hypr-overlay):** when the plugin reports
+`menu.interactive`, the open menu is **pointer/keyboard interactive** (click
+toggles, ↑↓/←→/Enter after focus, on-menu Copy actions). Compositor binds for
+`--regex-next` / `--regex-tab-*` / `--regex-toggle` are optional legacy fallbacks
+for display-only sessions. Open + copy still need a hotkey (or tray).
+
 - Windows / X11: registered natively via `globalShortcut`.
 - Wayland: needs the GlobalShortcuts portal
   (`--enable-features=GlobalShortcutsPortal --ozone-platform=wayland`) —
@@ -89,6 +95,12 @@ bind = ALT SHIFT, V, exec, poc2-desktop --watch-rewards
 bind = ALT, L, exec, poc2-desktop --recalibrate
 bind = ALT, F, exec, poc2-desktop --regex-open
 bind = ALT SHIFT, F, exec, poc2-desktop --regex-copy
+# Optional (legacy): regex nav when menu.interactive is unavailable
+# bind = CTRL SHIFT, left, exec, poc2-desktop --regex-tab-prev
+# bind = CTRL SHIFT, right, exec, poc2-desktop --regex-tab-next
+# bind = CTRL SHIFT, up, exec, poc2-desktop --regex-prev
+# bind = CTRL SHIFT, down, exec, poc2-desktop --regex-next
+# bind = CTRL SHIFT, RETURN, exec, poc2-desktop --regex-toggle
 ```
 
 Linux injection prefers `hyprctl dispatch sendshortcut`, then `ydotool`

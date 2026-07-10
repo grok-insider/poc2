@@ -275,18 +275,196 @@ export function regexClipboardResult(
   };
 }
 
+/** Stable id for the interactive hypr-overlay Search Regex session. */
+export const REGEX_OVERLAY_ID = "poc2-regex";
+
+export interface RegexMenuPayloadOptions {
+  /** Opt into hypr-overlay pointer/keyboard interaction (`menu.interactive`). */
+  interactive?: boolean;
+}
+
+/** Generic event shape from hyproverlay IPC (subset PoC2 cares about). */
+export interface RegexOverlayEvent {
+  type: string;
+  overlayId: string;
+  controlId?: string;
+  selected?: boolean;
+  selectedIds?: string[];
+  selectedIdsTruncated?: boolean;
+  /** Optional enrichment from `menu-output` when ids were truncated. */
+  activeTab?: string;
+  focusIndex?: number;
+}
+
+export type RegexEventResult =
+  | { kind: "state"; state: RegexOverlayState; refresh: boolean }
+  | { kind: "action"; action: "copy" | "apply" | "dismiss" }
+  | { kind: "noop" };
+
+const ACTION_COPY = "action:copy";
+const ACTION_APPLY = "action:apply";
+
+/**
+ * Apply a hyproverlay menu event to local regex state.
+ * - `change` → sync selection from selectedIds (or toggle controlId)
+ * - `focus` / `hover` → move focus to controlId without forcing a re-render
+ * - `activate` on action controls → copy/apply
+ * - `dismiss` → hide
+ */
+export function applyRegexOverlayEvent(
+  state: RegexOverlayState,
+  event: RegexOverlayEvent,
+  data?: RegexOverlayData,
+): RegexEventResult {
+  if (event.type === "dismiss") return { kind: "action", action: "dismiss" };
+
+  if (event.type === "activate") {
+    if (event.controlId === ACTION_COPY) return { kind: "action", action: "copy" };
+    if (event.controlId === ACTION_APPLY) return { kind: "action", action: "apply" };
+    return { kind: "noop" };
+  }
+
+  if (event.type === "submit") {
+    // Enter on a focused toggle already emits change; submit is reserved for
+    // selection mode. Ignore if it arrives on the regex overlay.
+    return { kind: "noop" };
+  }
+
+  const controls = controlsForData(data);
+  let next = normalizedState(state, data);
+  let changed = false;
+
+  if (event.type === "change") {
+    if (event.selectedIds) {
+      const allowed = new Set(controls.filter((c) => !c.disabled).map((c) => c.id));
+      next = {
+        ...next,
+        selected: event.selectedIds.filter(
+          (id) => allowed.has(id) && id !== ACTION_COPY && id !== ACTION_APPLY,
+        ),
+      };
+      changed = true;
+    } else if (
+      event.controlId &&
+      event.controlId !== ACTION_COPY &&
+      event.controlId !== ACTION_APPLY
+    ) {
+      const control = controls.find((c) => c.id === event.controlId);
+      if (control && !control.disabled) {
+        let selected: string[];
+        if (typeof event.selected === "boolean") {
+          selected = event.selected
+            ? next.selected.includes(control.id)
+              ? next.selected
+              : [...next.selected, control.id]
+            : next.selected.filter((id) => id !== control.id);
+        } else {
+          selected = next.selected.includes(control.id)
+            ? next.selected.filter((id) => id !== control.id)
+            : [...next.selected, control.id];
+        }
+        next = { ...next, selected };
+        changed = true;
+      }
+    }
+  }
+
+  if (
+    (event.type === "focus" || event.type === "hover" || event.type === "change") &&
+    event.controlId
+  ) {
+    const idx = controls.findIndex((c) => c.id === event.controlId);
+    if (idx >= 0) {
+      const control = controls[idx];
+      if (control.tab && control.tab !== next.activeTab) {
+        next = { ...next, activeTab: control.tab, focusIndex: idx };
+        changed = true;
+      } else if (next.focusIndex !== idx) {
+        next = { ...next, focusIndex: idx };
+        changed = true;
+      }
+    }
+  }
+
+  if (typeof event.activeTab === "string" && TABS.some((t) => t.id === event.activeTab)) {
+    if (event.activeTab !== next.activeTab) {
+      next = { ...next, activeTab: event.activeTab };
+      changed = true;
+    }
+  }
+  if (typeof event.focusIndex === "number" && Number.isSafeInteger(event.focusIndex)) {
+    if (event.focusIndex !== next.focusIndex) {
+      next = { ...next, focusIndex: event.focusIndex };
+      changed = true;
+    }
+  }
+
+  if (!changed) return { kind: "noop" };
+  next = normalizedState(next, data);
+  // Preview must re-render after selection changes; focus-only can stay local.
+  const refresh = event.type === "change";
+  return { kind: "state", state: next, refresh };
+}
+
 export function regexMenuPayload(
   state: RegexOverlayState,
   rect: { x: number; y: number; width: number; height: number },
   data?: RegexOverlayData,
+  options: RegexMenuPayloadOptions = {},
 ): HyprOverlayPayload {
   const s = normalizedState(state, data);
   const controls = controlsForData(data);
   const assembled = regexForState(s, data);
+  const interactive = options.interactive === true;
+
+  const menuControls: NonNullable<HyprOverlayPayload["menu"]>["controls"] = controls.map(
+    (control) => ({
+      id: control.id,
+      tab: control.tab,
+      label: control.label,
+      value: termForControl(control, data)?.pattern,
+      detail: control.detail,
+      kind: "toggle" as const,
+      selected: s.selected.includes(control.id),
+      disabled: control.disabled,
+    }),
+  );
+
+  if (interactive) {
+    // Empty tab ⇒ visible on every tab (plugin layout rule).
+    menuControls.push(
+      {
+        id: ACTION_COPY,
+        tab: "",
+        label: "Copy to clipboard",
+        kind: "action",
+        detail: "hotkey still works",
+      },
+      {
+        id: ACTION_APPLY,
+        tab: "",
+        label: "Copy for paste",
+        kind: "action",
+      },
+    );
+  }
+
   return {
     mode: "menu",
     visible: true,
     rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+    ...(interactive
+      ? {
+          interactive: {
+            enabled: true,
+            pointer: true,
+            keyboard: true,
+            passthroughOutside: true,
+            dismissOnOutside: false,
+            overlayId: REGEX_OVERLAY_ID,
+          },
+        }
+      : {}),
     menu: {
       title: "Search Regex",
       subtitle: "Items, mods, maps, tablets",
@@ -295,17 +473,12 @@ export function regexMenuPayload(
       tabs: [...TABS],
       preview: assembled.value || "select filters",
       budget: `${assembled.length} / ${MAX_SEARCH_LENGTH}`,
-      footer: "Up/Down move - Left/Right tab - Enter toggle - Copy writes clipboard",
-      controls: controls.map((control) => ({
-        id: control.id,
-        tab: control.tab,
-        label: control.label,
-        value: termForControl(control, data)?.pattern,
-        detail: control.detail,
-        kind: "toggle" as const,
-        selected: s.selected.includes(control.id),
-        disabled: control.disabled,
-      })),
+      footer: interactive
+        ? "Click or ↑↓/←→ move · Tab tabs · Enter toggle · Copy action or hotkey"
+        : "Up/Down move - Left/Right tab - Enter toggle - Copy writes clipboard",
+      // Keep keyboard capture after re-push when interactive.
+      ...(interactive ? { inputFocused: true } : {}),
+      controls: menuControls,
     },
   };
 }

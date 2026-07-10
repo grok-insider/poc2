@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyRegexOverlayEvent,
   emptyRegexOverlayState,
   moveRegexFocus,
   moveRegexTab,
+  REGEX_OVERLAY_ID,
   regexClipboardResult,
   type RegexOverlayData,
   regexForState,
@@ -143,5 +145,84 @@ describe("overlay regex menu", () => {
       expect(copied.text).toContain("y: r");
       expect(copied.length).toBe(copied.text.length);
     }
+  });
+
+  test("interactive payload opts into hyproverlay menu interaction", () => {
+    const plain = regexMenuPayload(emptyRegexOverlayState(), {
+      x: 1,
+      y: 2,
+      width: 500,
+      height: 300,
+    });
+    expect(plain.interactive).toBeUndefined();
+    expect(plain.menu?.controls?.some((c) => c.kind === "action")).toBe(false);
+
+    const interactive = regexMenuPayload(
+      emptyRegexOverlayState(),
+      { x: 1, y: 2, width: 500, height: 300 },
+      undefined,
+      { interactive: true },
+    );
+    expect(interactive.interactive).toEqual({
+      enabled: true,
+      pointer: true,
+      keyboard: true,
+      passthroughOutside: true,
+      dismissOnOutside: false,
+      overlayId: REGEX_OVERLAY_ID,
+    });
+    expect(interactive.menu?.inputFocused).toBe(true);
+    expect(interactive.menu?.footer).toContain("Click");
+    expect(interactive.menu?.footer).toContain("Tab tabs");
+    expect(interactive.menu?.controls?.some((c) => c.id === "action:copy")).toBe(true);
+    expect(interactive.menu?.controls?.some((c) => c.id === "action:apply")).toBe(true);
+  });
+
+  test("applyRegexOverlayEvent syncs selection and maps actions", () => {
+    const base = emptyRegexOverlayState();
+    const changed = applyRegexOverlayEvent(base, {
+      type: "change",
+      overlayId: REGEX_OVERLAY_ID,
+      controlId: "rare",
+      selected: true,
+      selectedIds: ["rare", "magic"],
+    });
+    expect(changed).toEqual({
+      kind: "state",
+      refresh: true,
+      state: expect.objectContaining({
+        selected: ["rare", "magic"],
+      }),
+    });
+
+    const focused = applyRegexOverlayEvent(
+      { activeTab: "items", focusIndex: 0, selected: ["rare"] },
+      {
+        type: "focus",
+        overlayId: REGEX_OVERLAY_ID,
+        controlId: "move30",
+      },
+    );
+    expect(focused.kind).toBe("state");
+    if (focused.kind === "state") {
+      expect(focused.refresh).toBe(false);
+      expect(focused.state.activeTab).toBe("props");
+      expect(focused.state.focusIndex).toBeGreaterThan(0);
+    }
+
+    expect(
+      applyRegexOverlayEvent(base, {
+        type: "activate",
+        overlayId: REGEX_OVERLAY_ID,
+        controlId: "action:copy",
+      }),
+    ).toEqual({ kind: "action", action: "copy" });
+
+    expect(
+      applyRegexOverlayEvent(base, {
+        type: "dismiss",
+        overlayId: REGEX_OVERLAY_ID,
+      }),
+    ).toEqual({ kind: "action", action: "dismiss" });
   });
 });

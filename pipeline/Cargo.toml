@@ -18,6 +18,10 @@ name = "fetch-base-icons"
 path = "src/bin/fetch_base_icons.rs"
 
 [[bin]]
+name = "fetch-unique-icons"
+path = "src/bin/fetch_unique_icons.rs"
+
+[[bin]]
 name = "regen-poe2db-fixtures"
 path = "src/bin/regen_poe2db_fixtures.rs"
 

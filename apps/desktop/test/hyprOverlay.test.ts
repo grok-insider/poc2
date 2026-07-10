@@ -7,15 +7,18 @@ import {
   getHyprOverlayStatus,
   hideHyprOverlay,
   hyprlandSocket2Path,
+  isInteractiveRegexMenuPayload,
   isValidHyprOverlayImageInput,
   parseHyprlandInstanceSignatures,
   parseHyprlandMonitorBounds,
   parseHyprOverlayEventLine,
   parseHyprOverlayStatus,
+  REGEX_OVERLAY_ID,
   registerHyprOverlayImage,
   resolveHyprlandSocket2Path,
   sendHyprOverlay,
   sendHyprOverlaySelection,
+  startHyprOverlayEventSession,
   startHyprOverlaySelectionListener,
   virtualDesktopBounds,
   waitForHyprOverlaySelection,
@@ -398,5 +401,108 @@ describe("hypr-overlay hyprctl transport", () => {
       ["hyproverlay\0hide"]: "ok\n",
     });
     expect(await hideHyprOverlay(runner)).toBe(true);
+  });
+
+  test("parses selectedIdsTruncated on hyproverlay events", () => {
+    const event = parseHyprOverlayEventLine(
+      `hyproverlay>>${JSON.stringify({
+        type: "change",
+        overlayId: REGEX_OVERLAY_ID,
+        controlId: "rare",
+        selected: true,
+        selectedIds: ["rare"],
+        selectedIdsTruncated: true,
+      })}`,
+    );
+    expect(event?.selectedIdsTruncated).toBe(true);
+    expect(event?.selectedIds).toEqual(["rare"]);
+  });
+
+  test("isInteractiveRegexMenuPayload requires enabled overlayId", () => {
+    expect(
+      isInteractiveRegexMenuPayload({
+        mode: "menu",
+        visible: true,
+        interactive: { enabled: true, overlayId: REGEX_OVERLAY_ID },
+        rect: { x: 0, y: 0, w: 1, h: 1 },
+      }),
+    ).toBe(true);
+    expect(
+      isInteractiveRegexMenuPayload({
+        mode: "menu",
+        interactive: { enabled: true, overlayId: "other" },
+        rect: { x: 0, y: 0, w: 1, h: 1 },
+      }),
+    ).toBe(false);
+    expect(
+      isInteractiveRegexMenuPayload({
+        mode: "cards",
+        interactive: { enabled: true, overlayId: REGEX_OVERLAY_ID },
+        rect: { x: 0, y: 0, w: 1, h: 1 },
+      }),
+    ).toBe(false);
+  });
+
+  test("event session delivers matching events and ignores others until closed", async () => {
+    const socket = new FakeSocket();
+    const seen: string[] = [];
+    const session = await startHyprOverlayEventSession(REGEX_OVERLAY_ID, {
+      env: {
+        XDG_RUNTIME_DIR: "/run/user/1000",
+        HYPRLAND_INSTANCE_SIGNATURE: "test-instance",
+      },
+      socketFactory: () => {
+        queueMicrotask(() => socket.emit("connect"));
+        return socket.asSocket();
+      },
+      onEvent: (event) => {
+        seen.push(`${event.type}:${event.controlId ?? ""}`);
+      },
+    });
+
+    socket.emit(
+      "data",
+      Buffer.from(
+        [
+          `hyproverlay>>${JSON.stringify({
+            type: "change",
+            overlayId: "other",
+            controlId: "x",
+          })}`,
+          `hyproverlay>>${JSON.stringify({
+            type: "change",
+            overlayId: REGEX_OVERLAY_ID,
+            controlId: "rare",
+            selectedIds: ["rare"],
+          })}`,
+          `hyproverlay>>${JSON.stringify({
+            type: "focus",
+            overlayId: REGEX_OVERLAY_ID,
+            controlId: "magic",
+          })}`,
+          "",
+        ].join("\n"),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen).toEqual(["change:rare", "focus:magic"]);
+
+    session.close();
+    expect(socket.destroyed).toBe(true);
+
+    // Further data after close is ignored.
+    socket.emit(
+      "data",
+      Buffer.from(
+        `hyproverlay>>${JSON.stringify({
+          type: "change",
+          overlayId: REGEX_OVERLAY_ID,
+          controlId: "normal",
+        })}\n`,
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen).toEqual(["change:rare", "focus:magic"]);
   });
 });

@@ -169,11 +169,12 @@ const POE_STYLE: NonNullable<HyprOverlayPayload["style"]> = {
 type Row = NonNullable<HyprOverlayPayload["rows"]>[number];
 
 const RARITY_HEX: Record<string, string> = {
-  normal: COL.fg,
+  normal: "#d6d6d6ff",
   magic: COL.magic,
   rare: COL.rare,
   unique: "#ef6916ff",
   currency: "#aa9e82ff",
+  gem: "#1ba29bff",
 };
 
 function rarityColor(rarity: string): string {
@@ -255,10 +256,40 @@ function richPricePayload(
   const info = parseItemInfo(itemText);
   const mods = evaluateMods(itemText, statLines).slice(0, 12);
 
-  const rows: NonNullable<HyprOverlayPayload["rows"]> = [
-    { kind: "header", label: title, color: rarityColor(info.rarity), bg: COL.headerBg, size: 16 },
-    infoRow("Item Rarity", titleCase(info.rarity), rarityColor(info.rarity)),
-  ];
+  // Item chrome: double-line for rare/unique (name + base) when extractable.
+  const extracted = extractItemLines(itemText);
+  const rarity = info.rarity;
+  const titleColor = rarityColor(rarity);
+  const doubleLine = rarity === "rare" || rarity === "unique";
+  const rows: NonNullable<HyprOverlayPayload["rows"]> = [];
+  if (doubleLine && extracted.name && extracted.baseName) {
+    rows.push({
+      kind: "header",
+      label: extracted.name,
+      color: titleColor,
+      bg: COL.headerBg,
+      size: 16,
+      align: "center",
+    });
+    rows.push({
+      kind: "header",
+      label: extracted.baseName,
+      color: titleColor,
+      bg: COL.headerBg,
+      size: 14,
+      align: "center",
+    });
+  } else {
+    rows.push({
+      kind: "header",
+      label: title,
+      color: titleColor,
+      bg: COL.headerBg,
+      size: 16,
+      align: "center",
+    });
+  }
+  rows.push(infoRow("Item Rarity", titleCase(rarity), titleColor));
   if (info.ilvl !== null) rows.push(infoRow("Item Level", String(info.ilvl)));
   if (info.requiresLevel !== null) rows.push(infoRow("Requires Level", String(info.requiresLevel)));
 

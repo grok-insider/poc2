@@ -2,7 +2,10 @@ import { execFile } from "node:child_process";
 import type { Socket } from "node:net";
 import { join } from "node:path";
 
-import { startHyprOverlaySelectionSocket } from "./hyprOverlaySelection";
+import {
+  startHyprOverlayEventSocket,
+  startHyprOverlaySelectionSocket,
+} from "./hyprOverlaySelection";
 
 export { parseHyprOverlayEventLine } from "./hyprOverlaySelection";
 
@@ -195,7 +198,35 @@ export interface HyprOverlayEvent {
   value?: string;
   selected?: boolean;
   selectedIds?: string[];
+  selectedIdsTruncated?: boolean;
+  /** Enriched from menu-output when the event envelope omits them. */
+  activeTab?: string;
+  focusIndex?: number;
   rect?: HyprOverlayRect;
+}
+
+/** Stable overlay id for the Search Regex interactive menu. */
+export const REGEX_OVERLAY_ID = "poc2-regex";
+
+export interface HyprOverlayEventSessionOptions {
+  signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
+  runner?: HyprctlRunner;
+  socketFactory?: HyprOverlaySocketFactory;
+  onEvent: (event: HyprOverlayEvent) => void;
+}
+
+export interface HyprOverlayEventSession {
+  close(): void;
+}
+
+export interface HyprOverlayMenuOutput {
+  mode?: string;
+  overlayId?: string;
+  activeTab?: string;
+  focusIndex?: number;
+  inputFocused?: boolean;
+  selected?: Array<{ id: string; selected?: boolean }>;
 }
 
 function defaultRunner(args: string[]): Promise<HyprctlResult> {
@@ -585,6 +616,82 @@ export async function startHyprOverlaySelectionListener(
   );
   if (!socketPath) throw new Error("Hyprland socket2 path is unavailable");
   return startHyprOverlaySelectionSocket(socketPath, overlayId, options);
+}
+
+/**
+ * Long-lived socket2 session for interactive menu events (regex, etc.).
+ * Does not auto-close on submit — caller closes when the menu is dismissed.
+ */
+export async function startHyprOverlayEventSession(
+  overlayId: string,
+  options: HyprOverlayEventSessionOptions,
+): Promise<HyprOverlayEventSession> {
+  const socketPath = await resolveHyprlandSocket2Path(
+    options.env,
+    options.runner ?? defaultRunner,
+  );
+  if (!socketPath) throw new Error("Hyprland socket2 path is unavailable");
+  return startHyprOverlayEventSocket(socketPath, overlayId, {
+    onEvent: options.onEvent,
+    signal: options.signal,
+    socketFactory: options.socketFactory,
+  });
+}
+
+/** Opt a visible interactive menu into keyboard capture (plugin menu focus). */
+export async function focusHyprOverlay(
+  runner: HyprctlRunner = defaultRunner,
+): Promise<boolean> {
+  try {
+    const res = await runner(["hyproverlay", "focus"]);
+    return res.stdout.trim() === "ok";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Full menu selection/focus snapshot. Use when event `selectedIds` were truncated
+ * (Hyprland caps event JSON at 1024 bytes).
+ */
+export async function fetchHyprOverlayMenuOutput(
+  runner: HyprctlRunner = defaultRunner,
+): Promise<HyprOverlayMenuOutput | null> {
+  try {
+    // Plugin always returns JSON for menu-output (no hyprctl -j needed).
+    const res = await runner(["hyproverlay", "menu-output"]);
+    const parsed: unknown = JSON.parse(res.stdout);
+    if (!isRecord(parsed)) return null;
+    const selected = Array.isArray(parsed.selected)
+      ? parsed.selected.flatMap((row) => {
+          if (!isRecord(row) || typeof row.id !== "string") return [];
+          return [{ id: row.id, selected: row.selected === true }];
+        })
+      : undefined;
+    return {
+      ...(typeof parsed.mode === "string" ? { mode: parsed.mode } : {}),
+      ...(typeof parsed.overlayId === "string" ? { overlayId: parsed.overlayId } : {}),
+      ...(typeof parsed.activeTab === "string" ? { activeTab: parsed.activeTab } : {}),
+      ...(nonNegativeInteger(parsed.focusIndex) !== undefined
+        ? { focusIndex: nonNegativeInteger(parsed.focusIndex) }
+        : {}),
+      ...(typeof parsed.inputFocused === "boolean"
+        ? { inputFocused: parsed.inputFocused }
+        : {}),
+      ...(selected ? { selected } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** True when a payload is the interactive Search Regex menu we own. */
+export function isInteractiveRegexMenuPayload(payload: unknown): boolean {
+  if (!isRecord(payload)) return false;
+  if (payload.mode !== "menu" || payload.visible === false) return false;
+  const interactive = payload.interactive;
+  if (!isRecord(interactive) || interactive.enabled !== true) return false;
+  return interactive.overlayId === REGEX_OVERLAY_ID;
 }
 
 export async function waitForHyprOverlaySelection(

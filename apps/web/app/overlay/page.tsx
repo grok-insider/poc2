@@ -68,6 +68,7 @@ import {
   rewardOverlayPayload,
 } from "@/lib/overlay/rewards";
 import {
+  applyRegexOverlayEvent,
   emptyRegexOverlayState,
   moveRegexFocus,
   moveRegexTab,
@@ -78,7 +79,16 @@ import {
   type RegexOverlayData,
   type RegexOverlayState,
 } from "@/lib/overlay/regexMenu";
-import type { Item } from "@/lib/types";
+import type { ItemPopupModel } from "@/lib/itemPopup";
+import { loadUniqueIconManifest, type UniqueIconManifest } from "@/lib/itemArt";
+import { loadBaseIconManifest } from "@/lib/baseIcons";
+import {
+  buildItemView,
+  loadUniqueCatalog,
+  type UniqueCatalog,
+} from "@/lib/itemView";
+import { ItemPopup } from "@/components/ItemPopup";
+import type { BaseIconManifest, Item } from "@/lib/types";
 import styles from "./overlay.module.css";
 
 type Status = "idle" | "scanning" | "ready" | "empty" | "no-region" | "clipboard";
@@ -214,7 +224,12 @@ export default function OverlayPage() {
   const [status, setStatus] = useState<Status>("idle");
   const [rows, setRows] = useState<PricedRow[]>([]);
   const [cardRows, setCardRows] = useState<OverlayRows | null>(null);
+  const [itemPopup, setItemPopup] = useState<ItemPopupModel | null>(null);
+  const [itemArtUrl, setItemArtUrl] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const baseManifestRef = useRef<BaseIconManifest | null>(null);
+  const uniqueManifestRef = useRef<UniqueIconManifest | null>(null);
+  const uniqueCatalogRef = useRef<UniqueCatalog | null>(null);
   // Adaptive placement: plates flip to the left edge when the region sits on
   // the right half of the screen (avoids running off-screen).
   const [placeLeft, setPlaceLeft] = useState(false);
@@ -792,6 +807,12 @@ export default function OverlayPage() {
     }
   }, []);
 
+  const regexInteractive = useCallback((): boolean => {
+    if (overlayModeRef.current !== "hyprland-plugin") return false;
+    const caps = hyprStatusRef.current?.capabilities ?? [];
+    return caps.includes("menu.interactive");
+  }, []);
+
   const sendRegexMenu = useCallback(async () => {
     const bridge = getDesktopBridge();
     if (!bridge) return;
@@ -803,8 +824,12 @@ export default function OverlayPage() {
       width,
       height,
     };
-    await showPayload(regexMenuPayload(regexRef.current, rect, regexDataRef.current));
-  }, [showPayload]);
+    await showPayload(
+      regexMenuPayload(regexRef.current, rect, regexDataRef.current, {
+        interactive: regexInteractive(),
+      }),
+    );
+  }, [regexInteractive, showPayload]);
 
   const copyRegex = useCallback(async (apply: boolean) => {
     const bridge = getDesktopBridge();
@@ -834,9 +859,27 @@ export default function OverlayPage() {
     const bridge = getDesktopBridge();
     if (!bridge) return;
     if (error || !itemText) {
+      setItemPopup(null);
+      setItemArtUrl(null);
       await showPayload(errorPayload("Item Price", error || "no item captured"));
       return;
     }
+    if (!baseManifestRef.current) {
+      baseManifestRef.current = await loadBaseIconManifest();
+    }
+    if (!uniqueManifestRef.current) {
+      uniqueManifestRef.current = await loadUniqueIconManifest();
+    }
+    if (!uniqueCatalogRef.current) {
+      uniqueCatalogRef.current = await loadUniqueCatalog();
+    }
+    const view = buildItemView(itemText, {
+      baseManifest: baseManifestRef.current,
+      uniqueManifest: uniqueManifestRef.current,
+      uniqueCatalog: uniqueCatalogRef.current,
+    });
+    setItemPopup(view.model);
+    setItemArtUrl(view.artUrl);
     await showPayload(cardPayload([{ label: "Searching trade2", value: "..." }], { title: "Item Price", ttlMs: 5_000 }));
     try {
       const result = await priceCheckItemOverlay(bridge, itemText, useCraft.getState().league);
@@ -950,6 +993,29 @@ export default function OverlayPage() {
       overlayModeRef.current = caps?.overlayMode ?? null;
       hyprStatusRef.current = caps?.hyprOverlay ?? null;
     }).catch(() => {});
+
+    // Interactive hypr-overlay menu events (click / in-overlay keys).
+    const unsubHyprEvent = bridge.onHyprOverlayEvent?.((event) => {
+      void (async () => {
+        const result = applyRegexOverlayEvent(
+          regexRef.current,
+          event,
+          regexDataRef.current,
+        );
+        if (result.kind === "noop") return;
+        if (result.kind === "action") {
+          if (result.action === "dismiss") {
+            await bridge.overlayHide();
+            return;
+          }
+          await copyRegex(result.action === "apply");
+          return;
+        }
+        regexRef.current = result.state;
+        if (result.refresh) await sendRegexMenu();
+      })();
+    });
+
     void bridge.rewardWatcherStatus().then((enabled) => {
       if (enabled) {
         void handleAction({
@@ -995,8 +1061,9 @@ export default function OverlayPage() {
       void session?.terminate();
       offRegion();
       offState();
+      unsubHyprEvent?.();
     };
-  }, [handleAction]);
+  }, [copyRegex, handleAction, sendRegexMenu]);
 
   // ---- plain browser: inert stub --------------------------------------
   if (!hasBridge) {
@@ -1060,6 +1127,12 @@ export default function OverlayPage() {
           );
         })}
 
+        {itemPopup && (
+          <div className={styles.itemPopupWrap}>
+            <ItemPopup model={itemPopup} artUrl={itemArtUrl} />
+          </div>
+        )}
+
         {cardRows?.map((r, i) => (
           <div
             key={`card-${r.label ?? "row"}-${i}`}
@@ -1073,7 +1146,7 @@ export default function OverlayPage() {
           </div>
         ))}
 
-        {note && rows.length === 0 && !cardRows && (
+        {note && rows.length === 0 && !cardRows && !itemPopup && (
           <div className={styles.plate}>
             <span className={styles.muted}>{note}</span>
           </div>

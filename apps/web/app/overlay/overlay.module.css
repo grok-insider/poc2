@@ -35,6 +35,18 @@
   padding: 10px;
 }
 
+.itemPopupWrap {
+  pointer-events: none;
+  max-width: min(420px, 100%);
+  margin-bottom: 6px;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.65));
+}
+
+.root[data-degraded="true"] .itemPopupWrap {
+  pointer-events: auto;
+  max-width: 100%;
+}
+
 .stack {
   display: flex;
   flex-direction: column;

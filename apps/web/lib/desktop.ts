@@ -135,6 +135,8 @@ export interface HyprOverlayPayload {
     budget?: string;
     activeTab?: string;
     focusIndex?: number;
+    /** When true, plugin captures keyboard for the interactive menu. */
+    inputFocused?: boolean;
     tabs?: Array<{ id: string; label: string }>;
     controls?: Array<{
       id: string;
@@ -172,6 +174,20 @@ export interface HyprOverlayStatus {
   capabilities: string[];
   limits: Record<string, number>;
   images?: { count: number; bytes: number };
+}
+
+/** hyproverlay IPC event pushed from Electron main while an interactive menu is open. */
+export interface HyprOverlayEvent {
+  seq?: number;
+  type: string;
+  overlayId: string;
+  controlId?: string;
+  value?: string;
+  selected?: boolean;
+  selectedIds?: string[];
+  selectedIdsTruncated?: boolean;
+  activeTab?: string;
+  focusIndex?: number;
 }
 
 /** A single resolved unit price from the cache. */
@@ -300,6 +316,11 @@ export interface Poc2DesktopBridge {
   hyprOverlayRender(payload: HyprOverlayPayload): Promise<boolean>;
   /** Fetch/register Divine and Exalted images from the active price snapshot. */
   hyprOverlayPreparePriceIcons(): Promise<Record<string, string>>;
+  /**
+   * Subscribe to hyproverlay interaction events (regex menu, etc.).
+   * Returns an unsubscribe. Absent on shells that predate interactive menus.
+   */
+  onHyprOverlayEvent?(cb: (event: HyprOverlayEvent) => void): () => void;
   /** Enable or disable continuous reward-panel monitoring. */
   rewardWatcher(enabled: boolean): Promise<boolean>;
   rewardWatcherStatus(): Promise<boolean>;

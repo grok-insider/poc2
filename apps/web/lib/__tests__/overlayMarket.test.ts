@@ -88,13 +88,14 @@ describe("overlay market payload", () => {
     expect(result.payload.style?.font).toBe("Fontin");
     const rows = result.payload.rows ?? [];
 
-    // Rarity-colored item header leads the card.
+    // Rare/unique: double-line headers (name + base) then info rows.
     expect(rows[0]).toMatchObject({ kind: "header", label: "Corruption Carapace" });
+    expect(rows[1]).toMatchObject({ kind: "header", label: "Sacrificial Mantle" });
 
     // Item info block: rarity / item level / required level.
-    expect(rows[1]).toMatchObject({ kind: "columns", cells: [{ text: "Item Rarity" }, { text: "Rare" }] });
-    expect(rows[2]).toMatchObject({ kind: "columns", cells: [{ text: "Item Level" }, { text: "81" }] });
-    expect(rows[3]).toMatchObject({ kind: "columns", cells: [{ text: "Requires Level" }, { text: "68" }] });
+    expect(rows[2]).toMatchObject({ kind: "columns", cells: [{ text: "Item Rarity" }, { text: "Rare" }] });
+    expect(rows[3]).toMatchObject({ kind: "columns", cells: [{ text: "Item Level" }, { text: "81" }] });
+    expect(rows[4]).toMatchObject({ kind: "columns", cells: [{ text: "Requires Level" }, { text: "68" }] });
 
     // Mod lines (basic format: no badge, no roll%). "Requires Level" is NOT a mod.
     const modCells = rows

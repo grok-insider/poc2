@@ -24,6 +24,7 @@ const CHANNELS = {
   overlayState: "poc2:overlay-state",
   hyprOverlayRender: "poc2:hypr-overlay-render",
   hyprOverlayPreparePriceIcons: "poc2:hypr-overlay-prepare-price-icons",
+  hyprOverlayEvent: "poc2:hypr-overlay-event",
   rewardWatcher: "poc2:reward-watcher",
   rewardWatcherStatus: "poc2:reward-watcher-status",
   clipboardWrite: "poc2:clipboard-write",
@@ -120,6 +121,11 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   },
   hyprOverlayPreparePriceIcons(): Promise<Record<string, string>> {
     return ipcRenderer.invoke(CHANNELS.hyprOverlayPreparePriceIcons);
+  },
+  onHyprOverlayEvent(cb: (event: unknown) => void): () => void {
+    const listener = (_e: unknown, event: unknown) => cb(event);
+    ipcRenderer.on(CHANNELS.hyprOverlayEvent, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.hyprOverlayEvent, listener);
   },
   rewardWatcher(enabled: boolean): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.rewardWatcher, enabled);

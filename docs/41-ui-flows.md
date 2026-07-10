@@ -178,13 +178,18 @@ desktop trade proxy searches/fetches listings; the overlay shows cheapest,
 median, result count, matched-stat count, and grouped top listings, and the
 summary is persisted to market history.
 
-Search Regex overlay (`Alt+F` / `--regex-open` plus regex navigation
-flags) keeps PoC2 regex generation in the web app and sends only a generic menu
-payload to `hyproverlay`. On open it hydrates the current item pool plus
-waystone/tablet pools from the WASM engine where the bundle has data, then
-renders a capped quick-pick menu alongside the vendor/property presets. Copy/apply
-writes through Electron main so hidden workers do not depend on browser clipboard
-permissions; non-plugin sessions get a compact Electron/degraded fallback card.
+Search Regex overlay (`Alt+F` / `--regex-open`) keeps PoC2 regex generation in
+the web app and sends a generic menu payload to `hyproverlay`. When the plugin
+reports `menu.interactive`, the menu is opt-in interactive (`overlayId:
+poc2-regex`): pointer toggles and in-overlay keyboard navigation emit
+`hyproverlay` IPC events that Electron main forwards to `/overlay`, which
+updates selection/preview and re-pushes the menu. External `--regex-next` /
+tab/toggle second-instance flags remain as a display-only fallback. On open it
+hydrates the current item pool plus waystone/tablet pools from the WASM engine
+where the bundle has data, then renders a capped quick-pick menu alongside the
+vendor/property presets. Copy/apply writes through Electron main (hotkey or
+on-menu action controls); non-plugin sessions get a compact Electron/degraded
+fallback card.
 
 ## Bundle loading
 

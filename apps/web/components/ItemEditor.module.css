@@ -58,19 +58,13 @@
   border: 1px solid #000;
   outline: 1px solid var(--line);
   font-size: 13px;
+  max-width: 480px;
 }
-.preview :global(.poe-pop-content) {
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.previewBaseRow {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  color: var(--fg-muted);
-  font-size: 12px;
+.previewMeta {
+  font-size: 11px;
+  color: var(--fg-faint);
+  padding: 4px 8px 6px;
+  text-align: center;
 }
 .previewValue {
   color: var(--fg);

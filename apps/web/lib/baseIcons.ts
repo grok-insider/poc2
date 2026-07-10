@@ -41,3 +41,28 @@ export function baseIconUrl(
   const entry = manifest.entries[baseId];
   return entry ? `/base-icons/${entry.rel}` : null;
 }
+
+/** Case-insensitive name → first matching entry (built lazily per manifest object). */
+const nameIndexCache = new WeakMap<BaseIconManifest, Map<string, string>>();
+
+function nameIndex(manifest: BaseIconManifest): Map<string, string> {
+  let idx = nameIndexCache.get(manifest);
+  if (idx) return idx;
+  idx = new Map();
+  for (const entry of Object.values(manifest.entries)) {
+    const key = entry.name.trim().toLowerCase();
+    if (key && !idx.has(key)) idx.set(key, entry.rel);
+  }
+  nameIndexCache.set(manifest, idx);
+  return idx;
+}
+
+/** Resolve art by base display name (e.g. "Stocky Mitts"), or null. */
+export function baseIconUrlByName(
+  manifest: BaseIconManifest | null,
+  name: string | null | undefined,
+): string | null {
+  if (!manifest || !name) return null;
+  const rel = nameIndex(manifest).get(name.trim().toLowerCase());
+  return rel ? `/base-icons/${rel}` : null;
+}

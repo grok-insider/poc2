@@ -11,7 +11,17 @@ import { isAllowlistedUrl } from "./fetchAllowlist";
 import { loadCaptureRegion } from "./windowState";
 import { getPriceSnapshot, getPriceStatus, refreshNow, setPriceLeague } from "./prices/scheduler";
 import { tradeFetch, tradeSearch } from "./trade/proxy";
-import { hideHyprOverlay, sendHyprOverlay } from "./capture/hyprOverlay";
+import {
+  fetchHyprOverlayMenuOutput,
+  focusHyprOverlay,
+  hideHyprOverlay,
+  isInteractiveRegexMenuPayload,
+  sendHyprOverlay,
+  startHyprOverlayEventSession,
+  type HyprOverlayEvent,
+  type HyprOverlayEventSession,
+  REGEX_OVERLAY_ID,
+} from "./capture/hyprOverlay";
 import { prepareHyprOverlayPriceIcons } from "./capture/hyprOverlayIcons";
 import { addMarketHistory, listMarketHistory } from "./marketHistory";
 import { getScanDiagnostics, setScanDiagnostics } from "./scanDiagnostics";
@@ -42,6 +52,7 @@ export const CHANNELS = {
   overlayState: "poc2:overlay-state", // main → renderer (push: show/hide/degraded)
   hyprOverlayRender: "poc2:hypr-overlay-render", // renderer → main (invoke)
   hyprOverlayPreparePriceIcons: "poc2:hypr-overlay-prepare-price-icons",
+  hyprOverlayEvent: "poc2:hypr-overlay-event", // main → renderer (push)
   rewardWatcher: "poc2:reward-watcher",
   rewardWatcherStatus: "poc2:reward-watcher-status",
   clipboardWrite: "poc2:clipboard-write", // renderer → main (invoke)
@@ -100,6 +111,71 @@ export async function runCapture(win: BrowserWindow, advanced: boolean): Promise
     return true;
   }
   return false;
+}
+
+let regexEventSession: HyprOverlayEventSession | null = null;
+let regexEventSessionStarting: Promise<void> | null = null;
+
+/** Stop the interactive Search Regex hyproverlay event subscription. */
+export function stopRegexOverlayEventSession(): void {
+  regexEventSession?.close();
+  regexEventSession = null;
+  regexEventSessionStarting = null;
+}
+
+function broadcastHyprOverlayEvent(event: HyprOverlayEvent): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      win.webContents.send(CHANNELS.hyprOverlayEvent, event);
+    } catch {
+      // window may be destroying
+    }
+  }
+}
+
+async function ensureRegexOverlayEventSession(overlay?: OverlayController): Promise<void> {
+  const caps = overlay?.capabilities().hyprOverlay;
+  if (!caps?.capabilities.includes("menu.interactive")) return;
+  if (regexEventSession) return;
+  if (regexEventSessionStarting) {
+    await regexEventSessionStarting;
+    return;
+  }
+
+  regexEventSessionStarting = (async () => {
+    try {
+      const session = await startHyprOverlayEventSession(REGEX_OVERLAY_ID, {
+        onEvent: (event) => {
+          void (async () => {
+            let enriched: HyprOverlayEvent = event;
+            // Hyprland truncates event JSON at 1024 bytes; recover full selection.
+            if (event.selectedIdsTruncated) {
+              const out = await fetchHyprOverlayMenuOutput();
+              if (out?.selected) {
+                enriched = {
+                  ...event,
+                  selectedIds: out.selected.map((row) => row.id),
+                  selectedIdsTruncated: false,
+                  ...(out.activeTab ? { activeTab: out.activeTab } : {}),
+                  ...(typeof out.focusIndex === "number"
+                    ? { focusIndex: out.focusIndex }
+                    : {}),
+                };
+              }
+            }
+            broadcastHyprOverlayEvent(enriched);
+          })();
+        },
+      });
+      regexEventSession = session;
+    } catch {
+      regexEventSession = null;
+    } finally {
+      regexEventSessionStarting = null;
+    }
+  })();
+
+  await regexEventSessionStarting;
 }
 
 export function registerIpc(
@@ -164,12 +240,25 @@ export function registerIpc(
   });
 
   ipcMain.handle(CHANNELS.overlayHide, () => {
+    stopRegexOverlayEventSession();
     overlay?.hideOverlay();
     return true;
   });
 
   ipcMain.handle(CHANNELS.hyprOverlayRender, async (_e, payload: unknown) => {
-    return sendHyprOverlay(payload as Parameters<typeof sendHyprOverlay>[0]);
+    const interactiveRegex = isInteractiveRegexMenuPayload(payload);
+    if (interactiveRegex) {
+      await ensureRegexOverlayEventSession(overlay);
+    } else {
+      // Cards / non-interactive menus end the regex interaction session.
+      stopRegexOverlayEventSession();
+    }
+    const ok = await sendHyprOverlay(payload as Parameters<typeof sendHyprOverlay>[0]);
+    if (ok && interactiveRegex) {
+      // Keyboard capture requires plugin menu focus (click also sets this).
+      void focusHyprOverlay();
+    }
+    return ok;
   });
   ipcMain.handle(CHANNELS.hyprOverlayPreparePriceIcons, async () => {
     const caps = overlay?.capabilities().hyprOverlay;

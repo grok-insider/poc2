@@ -37,7 +37,13 @@ import {
   type OverlayCommandAction,
 } from "./capture/overlayPolicy";
 import type { CaptureRect } from "./capture/screen";
-import { CHANNELS, type OverlayController, registerIpc, runCapture } from "./ipc";
+import {
+  CHANNELS,
+  type OverlayController,
+  registerIpc,
+  runCapture,
+  stopRegexOverlayEventSession,
+} from "./ipc";
 import {
   createWindowsOcrController,
   type NativeOcrController,
@@ -526,6 +532,7 @@ const overlayController: OverlayController = {
     pushOverlayState(true, false);
   },
   hideOverlay(): void {
+    stopRegexOverlayEventSession();
     if (this.capabilities().overlayMode === "hyprland-plugin") {
       void hideHyprOverlay();
     }

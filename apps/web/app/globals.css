@@ -515,88 +515,249 @@ input[type="radio"] {
 
 /* ============================================================================
    PoE2 item popup (1:1, poe2db metrics) — `.poe-pop` family.
-   Header sprites + separators are fetched assets under
-   /genesis-icons/ui/ (graceful plain fallback when absent).
+   Header sprites + separators under /genesis-icons/ui/ (regenerable via
+   fetch-genesis-assets). Graceful plain fallback when assets are absent.
+   Kinds: normal · magic · rare · unique · currency · gem
    ========================================================================== */
 
 .poe-pop {
-  background: rgba(0, 0, 0, 0.92);
+  background: #000;
   color: var(--default-color);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.3;
   text-align: center;
   border-radius: 0;
+  max-width: 660px;
 }
 .poe-pop-header {
   position: relative;
   height: 34px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   font-size: 19px;
   line-height: 1em;
-  color: var(--r-normal);
-  background:
-    url("/genesis-icons/ui/header-normal-left.webp") top left / contain no-repeat,
-    url("/genesis-icons/ui/header-normal-right.webp") top right / contain no-repeat,
-    url("/genesis-icons/ui/header-normal-middle.webp") top center / contain repeat-x;
+  color: #d6d6d6;
+  background-image:
+    url("/genesis-icons/ui/header-normal-left.webp"),
+    url("/genesis-icons/ui/header-normal-right.webp"),
+    url("/genesis-icons/ui/header-normal-middle.webp");
+  background-position: left top, right top, center top;
+  background-size: contain, contain, contain;
+  background-repeat: no-repeat, no-repeat, repeat-x;
 }
+.poe-pop-header--double {
+  height: 54px;
+  justify-content: center;
+}
+.poe-pop-lc,
 .poe-pop-header > span {
-  padding: 0 30px;
+  padding: 0 45px;
   text-shadow: 0 1px 2px #000;
 }
-.poe-pop--currency .poe-pop-header {
-  color: var(--r-currency);
-  background-image: url("/genesis-icons/ui/header-currency-left.webp"),
-    url("/genesis-icons/ui/header-currency-right.webp"),
-    url("/genesis-icons/ui/header-currency-middle.webp");
+.poe-pop-name {
+  width: 100%;
+  color: inherit;
+  line-height: 19px;
 }
+.poe-pop-name .poe-pop-lc {
+  display: inline-block;
+  padding: 5px 45px 2px;
+}
+.poe-pop-typeLine .poe-pop-lc {
+  padding: 2px 45px 5px;
+}
+
+/* --- rarity / kind headers ------------------------------------------------ */
 .poe-pop--magic .poe-pop-header {
   color: var(--r-magic);
-  background-image: url("/genesis-icons/ui/header-magic-left.webp"),
+  background-image:
+    url("/genesis-icons/ui/header-magic-left.webp"),
     url("/genesis-icons/ui/header-magic-right.webp"),
     url("/genesis-icons/ui/header-magic-middle.webp");
+  background-position: left top, right top, center top;
+  background-size: contain, contain, contain;
+  background-repeat: no-repeat, no-repeat, repeat-x;
 }
 .poe-pop--rare .poe-pop-header {
   color: var(--r-rare);
-  background-image: url("/genesis-icons/ui/header-rare-left.webp"),
+  background-image:
+    url("/genesis-icons/ui/header-rare-left.webp"),
     url("/genesis-icons/ui/header-rare-right.webp"),
     url("/genesis-icons/ui/header-rare-middle.webp");
+  background-position: left top, right top, center top;
+  background-size: contain, contain, contain;
+  background-repeat: no-repeat, no-repeat, repeat-x;
 }
+.poe-pop--rare.poe-pop--double .poe-pop-header,
+.poe-pop--rare .poe-pop-header--double {
+  color: var(--r-rare);
+  background-image:
+    url("/genesis-icons/ui/header-double-rare-left.webp"),
+    url("/genesis-icons/ui/header-double-rare-right.webp"),
+    url("/genesis-icons/ui/header-double-rare-middle.webp");
+  background-position: left top, right top, center top;
+  background-size: contain, contain, contain;
+  background-repeat: no-repeat, no-repeat, repeat-x;
+}
+.poe-pop--unique .poe-pop-header,
+.poe-pop--unique.poe-pop--double .poe-pop-header,
+.poe-pop--unique .poe-pop-header--double {
+  color: var(--r-unique);
+  background-image:
+    url("/genesis-icons/ui/header-double-unique-left.webp"),
+    url("/genesis-icons/ui/header-double-unique-right.webp"),
+    url("/genesis-icons/ui/header-double-unique-middle.webp");
+  background-position: left top, right top, center top;
+  background-size: contain, contain, contain;
+  background-repeat: no-repeat, no-repeat, repeat-x;
+}
+.poe-pop--currency .poe-pop-header {
+  color: var(--r-currency);
+  background-image:
+    url("/genesis-icons/ui/header-currency-left.webp"),
+    url("/genesis-icons/ui/header-currency-right.webp"),
+    url("/genesis-icons/ui/header-currency-middle.webp");
+  background-position: left top, right top, center top;
+  background-size: contain, contain, contain;
+  background-repeat: no-repeat, no-repeat, repeat-x;
+}
+.poe-pop--gem .poe-pop-header,
+.poe-pop--gem.poe-pop--double .poe-pop-header,
+.poe-pop--gem .poe-pop-header--double {
+  color: #1ba29b;
+  background-image: url("/genesis-icons/ui/header-gem-title.webp");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
 .poe-pop-content {
   padding: 0.4em 1em 0.5em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
+
+.poe-pop-art {
+  display: flex;
+  justify-content: center;
+  padding: 10px 12px 14px;
+}
+.poe-pop-art img {
+  width: auto;
+  height: auto;
+  max-width: min(212px, 90%);
+  max-height: 212px;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
 .poe-pop-sep {
   height: 8px;
+  width: 100%;
   margin: 1px 0;
   background: url("/genesis-icons/ui/seperator-normal.webp") center no-repeat;
-  background-size: auto 8px;
-}
-.poe-pop--currency .poe-pop-sep {
-  background-image: url("/genesis-icons/ui/seperator-currency.webp");
+  background-size: min(100%, 221px) 8px;
 }
 .poe-pop--magic .poe-pop-sep {
   background-image: url("/genesis-icons/ui/seperator-magic.webp");
+  background-size: min(100%, 221px) 8px;
 }
 .poe-pop--rare .poe-pop-sep {
   background-image: url("/genesis-icons/ui/seperator-rare.webp");
+  background-size: min(100%, 221px) 8px;
 }
+.poe-pop--unique .poe-pop-sep {
+  background-image: url("/genesis-icons/ui/seperator-unique.webp");
+  background-size: min(100%, 221px) 8px;
+}
+.poe-pop--currency .poe-pop-sep {
+  background-image: url("/genesis-icons/ui/seperator-currency.webp");
+  background-size: min(100%, 221px) 8px;
+}
+.poe-pop--gem .poe-pop-sep {
+  background-image: url("/genesis-icons/ui/seperator-gem.webp");
+  background-size: min(100%, 221px) 8px;
+}
+
+.poe-pop-property,
+.poe-pop-requirements {
+  color: var(--default-color);
+  width: 100%;
+}
+.poe-pop-value {
+  color: #fff;
+}
+.poe-pop--gem .poe-pop-property {
+  color: var(--default-color);
+}
+
 .poe-pop-mod {
   color: var(--r-magic);
+  width: 100%;
+}
+.poe-pop-mod--odd {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0.125),
+    rgba(255, 255, 255, 0)
+  );
+}
+.poe-pop-mod-value {
+  color: #fff;
+}
+/* Advanced in-game layout: side rail | mod | tier */
+.poe-pop-mod-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 28px;
+  gap: 6px;
+  align-items: start;
+  width: 100%;
+  text-align: center;
+}
+.poe-pop-mod-side {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint, #6f6354);
+  text-align: right;
+  padding-top: 2px;
+}
+.poe-pop-mod-body {
+  text-align: center;
+}
+.poe-pop-mod-tier {
+  font-size: 11px;
+  color: var(--fg-muted, #a89a85);
+  text-align: left;
+  padding-top: 1px;
+}
+.poe-pop-mod-row--corruption .poe-pop-mod-body {
+  /* corruption enhancements sit above unique body mods */
 }
 .poe-pop-crafted {
   color: var(--r-crafted);
 }
+/* poe2db flavour is #af6025 — warmer/darker than header unique orange */
 .poe-pop-flavour {
-  font-family: var(--font-serif);
   font-style: italic;
-  color: var(--r-unique);
+  color: #af6025;
+  width: 100%;
+  white-space: pre-line;
 }
+.poe-pop-sec-descr {
+  color: #baad85;
+  width: 100%;
+}
+.poe-pop-help,
 .poe-pop-note {
-  font-family: var(--font-serif);
   font-style: italic;
   color: var(--default-color);
+  width: 100%;
 }
 
 @media (prefers-reduced-motion: reduce) {

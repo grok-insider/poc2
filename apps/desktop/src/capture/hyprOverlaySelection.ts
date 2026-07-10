@@ -2,9 +2,11 @@ import { createConnection, type Socket } from "node:net";
 
 import type {
   HyprOverlayEvent,
+  HyprOverlayEventSession,
   HyprOverlayRect,
   HyprOverlaySelectionListener,
   HyprOverlaySelectionWaitOptions,
+  HyprOverlaySocketFactory,
 } from "./hyprOverlay";
 
 const HYPR_OVERLAY_EVENT_BYTES = 64 * 1024;
@@ -66,6 +68,9 @@ export function parseHyprOverlayEventLine(line: string): HyprOverlayEvent | null
       ...(Array.isArray(parsed.selectedIds) &&
       parsed.selectedIds.every((value) => typeof value === "string")
         ? { selectedIds: parsed.selectedIds as string[] }
+        : {}),
+      ...(typeof parsed.selectedIdsTruncated === "boolean"
+        ? { selectedIdsTruncated: parsed.selectedIdsTruncated }
         : {}),
       ...(rect ? { rect } : {}),
     };
@@ -167,4 +172,77 @@ export async function startHyprOverlaySelectionSocket(
     promise,
     close: () => settle(null),
   };
+}
+
+/**
+ * Long-lived socket2 subscription for interactive menu/selection events.
+ * Filters by overlayId; stays open until close() or abort. Does not settle on
+ * submit/dismiss — the app decides when the menu session ends.
+ */
+export async function startHyprOverlayEventSocket(
+  socketPath: string,
+  overlayId: string,
+  options: {
+    onEvent: (event: HyprOverlayEvent) => void;
+    signal?: AbortSignal;
+    socketFactory?: HyprOverlaySocketFactory;
+  },
+): Promise<HyprOverlayEventSession> {
+  if (!overlayId) throw new Error("overlayId is required");
+  if (options.signal?.aborted) throw new Error("event session aborted");
+
+  const socket = (options.socketFactory ?? defaultSocketFactory)(socketPath);
+  let closed = false;
+  let connected = false;
+  let pending = "";
+  let resolveReady!: () => void;
+  let rejectReady!: (reason: Error) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    options.signal?.removeEventListener("abort", onAbort);
+    if (!connected) rejectReady(new Error("event session closed"));
+    socket.destroy();
+  };
+  const onAbort = () => close();
+
+  socket.once("connect", () => {
+    if (closed) return;
+    connected = true;
+    resolveReady();
+  });
+  socket.on("data", (chunk) => {
+    if (closed) return;
+    pending += chunk.toString("utf8");
+    if (Buffer.byteLength(pending, "utf8") > HYPR_OVERLAY_EVENT_BYTES) {
+      pending = "";
+      return;
+    }
+    let newline = pending.indexOf("\n");
+    while (newline >= 0) {
+      const line = pending.slice(0, newline);
+      pending = pending.slice(newline + 1);
+      const event = parseHyprOverlayEventLine(line);
+      if (event?.overlayId === overlayId) {
+        options.onEvent(event);
+      }
+      newline = pending.indexOf("\n");
+    }
+  });
+  socket.once("error", (error) => {
+    if (!connected) rejectReady(error);
+    close();
+  });
+  socket.once("end", () => close());
+  socket.once("close", () => close());
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) onAbort();
+
+  await ready;
+  return { close };
 }
