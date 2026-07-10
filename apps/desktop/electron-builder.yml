@@ -20,9 +20,13 @@ linux:
   category: Game
   icon: build/icon.png
   executableName: poc2-desktop
+  # Avoid scoped @poc2/desktop artifact paths (fpm fails when parent @poc2/ is missing).
+  artifactName: poc2-desktop-${version}.${ext}
   # deb maintainer (electron-builder also falls back to package.json author).
   maintainer: "grok-insider <289870065+grok-insider@users.noreply.github.com>"
-
+deb:
+  # Debian package name must be lowercase with no spaces/scope.
+  packageName: poc2-desktop
 win:
   target:
     - nsis
