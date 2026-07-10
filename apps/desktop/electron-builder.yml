@@ -20,6 +20,9 @@ linux:
   category: Game
   icon: build/icon.png
   executableName: poc2-desktop
+  # deb maintainer (electron-builder also falls back to package.json author).
+  maintainer: "grok-insider <289870065+grok-insider@users.noreply.github.com>"
+
 win:
   target:
     - nsis

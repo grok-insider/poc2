@@ -85,12 +85,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 
     let listing = "https://poe2db.tw/us/Unique_item";
     info!(%listing, "fetching unique listing");
-    let html = client.get(listing).send().await?.error_for_status()?.text().await?;
+    let html = client
+        .get(listing)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
 
     // <img ... src="https://cdn.../Uniques/Facebreaker.webp" alt="Facebreaker"
     // Also accept alt before src.
     let re = Regex::new(
-        r#"src="(https://cdn\.poe2db\.tw/image/Art/2DItems/[^"]+/(?:Uniques?)/[^"]+\.webp)"[^>]*alt="([^"]+)""# ,
+        r#"src="(https://cdn\.poe2db\.tw/image/Art/2DItems/[^"]+/(?:Uniques?)/[^"]+\.webp)"[^>]*alt="([^"]+)""#,
     )?;
     let re_alt_first = Regex::new(
         r#"alt="([^"]+)"[^>]*src="(https://cdn\.poe2db\.tw/image/Art/2DItems/[^"]+/(?:Uniques?)/[^"]+\.webp)""#,
