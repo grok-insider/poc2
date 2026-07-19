@@ -1,0 +1,127 @@
+name: Package release
+
+# Build Electron desktop installers for an existing GitHub Release tag and
+# attach them (NSIS + AppImage/deb + electron-updater feeds). Used when a
+# release was cut without packages, or to re-upload after a packaging failure.
+#
+# Trigger: Actions → Package release → Run workflow → tag=vX.Y.Z
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to package (e.g. v2.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: package ${{ matrix.name }}
+    if: contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: windows, builder: "--win" }
+          - { os: ubuntu-latest, name: linux, builder: "--linux" }
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Checkout the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.117
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: package-release-${{ matrix.name }}
+
+      - name: Install web deps
+        run: bun install --frozen-lockfile
+
+      - name: Set package.json version from tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          export VERSION="$version"
+          node -e "
+            const fs = require('fs');
+            const f = 'apps/desktop/package.json';
+            const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+            j.version = process.env.VERSION;
+            fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
+            console.log('desktop version →', j.version);
+          "
+
+      - name: Build WASM + web export
+        run: |
+          rustup target add wasm32-unknown-unknown
+          bun run wasm
+          bun run build
+
+      - name: Build Windows OCR helper
+        if: runner.os == 'Windows'
+        run: cargo build -p poc2-windows-ocr --release
+
+      - name: Package desktop (${{ matrix.name }})
+        working-directory: apps/desktop
+        run: |
+          bun run build
+          bun x electron-builder ${{ matrix.builder }} --publish never
+
+      - name: Attach packages to the Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLATFORM: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          out=apps/desktop/dist-packages
+          assets=(
+            "$out"/*.exe
+            "$out"/*.AppImage
+            "$out"/*.deb
+            "$out"/*.blockmap
+            "$out"/latest.yml
+            "$out"/latest-linux.yml
+          )
+          existing=()
+          for f in "${assets[@]}"; do
+            [ -f "$f" ] && existing+=("$f")
+          done
+          if [ ${#existing[@]} -eq 0 ]; then
+            echo "::error::no desktop packages found to upload for ${PLATFORM}"
+            ls -la "$out" || true
+            exit 1
+          fi
+          if [ "$PLATFORM" = "windows" ] && [ ! -f "$out/latest.yml" ]; then
+            echo "::error::missing latest.yml in ${out}"
+            ls -la "$out" || true
+            exit 1
+          fi
+          if [ "$PLATFORM" = "linux" ] && [ ! -f "$out/latest-linux.yml" ]; then
+            echo "::error::missing latest-linux.yml in ${out}"
+            ls -la "$out" || true
+            exit 1
+          fi
+          echo "Uploading to ${TAG}:"
+          printf '  %s\n' "${existing[@]}"
+          gh release upload "$TAG" "${existing[@]}" --clobber

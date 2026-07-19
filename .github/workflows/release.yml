@@ -189,7 +189,9 @@ jobs:
   artifacts:
     name: package ${{ matrix.name }}
     needs: [resolve]
-    if: needs.resolve.result == 'success'
+    # `always()` so a skipped release-plz-release on dispatch doesn't cascade-skip
+    # this job after resolve has already succeeded.
+    if: always() && needs.resolve.result == 'success'
     permissions:
       contents: write
     strategy:
