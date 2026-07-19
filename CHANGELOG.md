@@ -7,6 +7,37 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased] — crafting-mechanics fidelity + PoE2 0.5
 
+## [2.0.0](https://github.com/grok-insider/poc2/releases/tag/v2.0.0) - 2026-07-19
+
+### Added
+
+- *(advisor)* analytic transition-model builder replaces Monte Carlo training
+- [**breaking**] migrate to Next.js/WASM web app + Electron desktop + PoE2 0.5
+- *(v3)* Layer 2 — M15.1 strategies, M15.2 predicates, M15.3 rules, M15.4 cross-source CI
+- *(v3)* Layer 1 data-substrate fixes + Layer 3 training infrastructure
+- *(v2)* crafter helper v2 — Phases A-G + IPC/UI follow-ups
+- *(engine)* wire Catalysts into the currency resolver
+- *(engine)* M2.5 — Catalysts + Recombinator
+- *(engine,advisor)* M2.9 — performance benchmark harness
+- *(advisor,engine)* M4 — beam-search optimal-path advisor
+- *(strategies)* M3 — strategy DSL + canonical worked-example fixture
+- *(engine,pipeline)* M2.7 — concept-based mod analyzer (hybrid classification)
+- *(engine)* M2.5 — Essences (Lesser/Normal/Greater/Perfect/Corrupted)
+- *(engine)* M2.6 — Omen system + integration with Exalt/Annul/Chaos/Bone
+- *(engine)* M2.5 — Hinekora's Lock + apply/preview/commit orchestration
+- *(engine)* M2.5 — Bones + Well-of-Souls reveal
+- *(engine)* M2.5 — Fracturing Orb (the user's 'checkpoint' mechanic)
+- *(engine)* M2.4e — Greater + Perfect variants of Transmute/Aug/Regal/Exalt/Chaos
+- *(engine)* M2.4d — Divine Orb + Vaal Orb
+- *(engine)* M2.4c — Alchemy / Exalt / Chaos / Annul
+- *(engine)* M2.4a+b — ModRegistry + Currency trait + Transmute/Augment/Regal
+- *(engine)* M2.1 — domain types (Item, BaseType, ModDefinition, ids, tags)
+
+### Other
+
+- *(engine)* integration test for the user's Triple T1 ES body armour craft
+- M1 foundation — flake, workspace, Tauri/Svelte skeleton, CI, docs
+
 ### Fixed — poe2db cross-validation pass (2026-06-11, follows the audit below)
 
 A 31-class validation of the data bundle against poe2db.tw (18 classes via
