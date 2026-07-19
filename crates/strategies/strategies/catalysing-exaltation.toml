@@ -53,7 +53,7 @@ abandon_criteria = [
 [[steps]]
 id = "S1-catalyst-1"
 action = { kind = "apply_currency", currency = "FleshCatalyst" }
-note = "Apply Flesh Catalyst (life-tagged). Substitute by build need: Reaver=attack, Unstable=caster, Carapace=defences."
+note = "Apply Flesh Catalyst (life-tagged). Substitute by build need: Reaver=attack, Sibilant=caster, Carapace=defences."
 on_success = "S2-catalyst-2"
 on_failure = "S2-catalyst-2"
 

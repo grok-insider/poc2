@@ -84,6 +84,11 @@ pub enum ModKind {
     Desecrated,
     /// Corrupted mod (post-Vaal, e.g., +1 socket).
     Corrupted,
+    /// Crafted mod — guaranteed mods added by Verisium Alloys, Liquid /
+    /// Ancient Emotions, and Genesis-Tree crafted-mod nodes (0.5 systems).
+    /// Per the 0.5 patch notes: "All crafted modifiers are now guaranteed,
+    /// but items can only have 1 crafted modifier at a time."
+    Crafted,
 }
 
 /// Rough taxonomy of where a mod can roll.
@@ -122,6 +127,10 @@ bitflags! {
         const HYBRID = 1 << 3;
         /// Only obtainable from Vaal corruption (typically enchantments).
         const CORRUPTED_ONLY = 1 << 4;
+        /// Rolls only via Altered Collarbone breach desecration on rare
+        /// jewellery (poe2db "Otherworldly" sections, 0.5). Excluded from
+        /// every other pool incl. regular bone reveals.
+        const OTHERWORLDLY = 1 << 5;
     }
 }
 
@@ -211,6 +220,15 @@ pub struct ModDefinition {
     pub stats: SmallVec<[ModStat; 4]>,
     /// Minimum item level for this mod to be eligible.
     pub required_level: u32,
+    /// Explicit tier ordinal within the mod-group, where `1` is the
+    /// highest/strongest tier (largest stat values, highest `required_level`)
+    /// and larger numbers are weaker tiers. `None` when the source data does
+    /// not carry an explicit tier; in that case the engine derives tier
+    /// ordering from `required_level` (higher `required_level` ⇒ stronger
+    /// tier) via [`ModRegistry`]. Defaulted for backward-compatible
+    /// deserialization of pre-tier bundles.
+    #[serde(default)]
+    pub tier: Option<u16>,
     /// Item classes this mod can roll on. Computed by the pipeline by
     /// intersecting `spawn_weights` tags with item-class tag membership.
     pub allowed_item_classes: SmallVec<[ItemClassId; 8]>,
@@ -229,6 +247,47 @@ impl ModDefinition {
     /// Is this mod eligible to roll on the given item-class?
     pub fn allowed_on(&self, class: &ItemClassId) -> bool {
         self.allowed_item_classes.iter().any(|c| c == class)
+    }
+
+    /// Resolve this mod's spawn weight against a base's tag list using the
+    /// PoE2 **leftmost-tag-wins** rule.
+    ///
+    /// The mod's `spawn_weights` is an *ordered* list of `(tag, weight)`.
+    /// Scanning it in order, the first entry whose tag is present in
+    /// `base_tags` decides the weight: a positive weight ⇒ eligible with that
+    /// weight; a zero weight ⇒ explicitly excluded (return `Some(0)`). If no
+    /// `spawn_weights` entry matches any base tag, the mod cannot roll on
+    /// this base ⇒ `None`.
+    ///
+    /// Note: "leftmost wins" here means the **first** matching entry in the
+    /// mod's `spawn_weights` ordering (which mirrors the game's
+    /// most-significant-tag-first convention as published by RePoE-fork),
+    /// not a scan of the base's tags.
+    pub fn spawn_weight_for_tags(&self, base_tags: &[TagId]) -> Option<u32> {
+        for sw in &self.spawn_weights {
+            if base_tags.contains(&sw.tag) {
+                return Some(sw.weight);
+            }
+        }
+        None
+    }
+
+    /// Effective tier-strength key for ordering within a mod-group.
+    ///
+    /// Larger value ⇒ stronger tier (higher stat values). When an explicit
+    /// `tier` ordinal is present (1 = strongest), we invert it so the
+    /// strongest tier maps to the largest key. Otherwise we fall back to
+    /// `required_level`, since higher-required-level tiers are stronger in
+    /// PoE2. This key is what the inclusive-tier weighting uses to decide
+    /// which peers count as "the same or higher tier".
+    pub fn tier_strength_key(&self) -> u32 {
+        match self.tier {
+            // Invert the 1-based ordinal: tier 1 (strongest) ⇒ large key.
+            // `t` is already a `u16`, so the subtraction cannot overflow for
+            // any in-range ordinal (tier 0 is unused; 1 = strongest).
+            Some(t) => u32::from(u16::MAX - t),
+            None => self.required_level,
+        }
     }
 }
 

@@ -1,174 +1,213 @@
-# UI Flows (M6 v1)
+# UI Flows (web app)
 
-> Describes the desktop frontend in `apps/desktop/src/`. Svelte 5 with
-> runes, served by Tauri 2 inside a webkit2gtk webview.
+> Describes the current web frontend in `apps/web/` — Next.js 16 +
+> React 19, static export, rendered as the PoE2-styled "Forge" console.
+> The UI design system (colors, fonts, component recipes) lives in
+> [`apps/web/DESIGN.md`](../apps/web/DESIGN.md) — all new UI follows it.
+> (The original Tauri 2 + Svelte 5 frontend this doc used to describe was
+> retired; see ADR-0010.)
 
-## Layout
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ Path of Crafting 2                                      │
-│ PoE2 crafting advisor — M6 advisor IPC                  │
-├─────────────────────────────────────────────────────────┤
-│  ┌─────────────────────┐  ┌────────────────────────────┐│
-│  │ Import item         │  │ Advisor                    ││
-│  │  [Read clipboard]   │  │  Risk: 0.50 ──────●────    ││
-│  │  ▾ Or paste text    │  │  Depth: 3   ─●──────────   ││
-│  ├─────────────────────┤  │  [Re-plan]                 ││
-│  │ Item                │  │  patch 0.4.0 · 25 rules ·  ││
-│  │  Base: BodyArmour   │  │  3 strategies · 2123 mods  ││
-│  │  ilvl: 82           │  │  · bundle: ~/.config/...   ││
-│  │  [Normal][Magic]... │  │                            ││
-│  │  ☐ corrupted        │  │  ┌──────────────────────┐  ││
-│  │  Prefixes (0/3)     │  │  │ PerfectOrbOfTrans... │  ││
-│  │  Suffixes (0/3)     │  │  │ score: 4.123        │  ││
-│  └─────────────────────┘  │  │ free · P=87% · d=1   │  ││
-│  [Reset to fresh BA]      │  │ Normal ilvl 82 → ... │  ││
-│                           │  │ rule R001 (verified) │  ││
-│                           │  ├──────────────────────┤  ││
-│                           │  │ ...                  │  ││
-│                           │  └──────────────────────┘  ││
-│                           └────────────────────────────┘│
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ Health check                                     │   │
-│  │  [Ping Tauri backend]   poc2 v0.1.0 ready ...    │   │
-│  └──────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Components
-
-### `App.svelte`
-
-Top-level layout. Two-column flex above 720px (item builder left,
-advisor right); single column below. Keeps shared state (`item`,
-`goal`) and propagates updates via callback props.
-
-### `ClipboardImport.svelte`
-
-- **Read clipboard** button calls `read_clipboard_item` over IPC.
-  Tauri's `tauri-plugin-clipboard-manager` reads the system clipboard;
-  the Rust handler runs `parse_clipboard_text` + `lower_to_item` and
-  returns `ParseClipboardResponse { parsed, item, unresolved }`.
-- **Manual paste** textarea calls `parse_item_text` for the same flow
-  on user-typed input.
-- Surfaces unresolved mod lines under a `<details>` so the user can
-  see which mods didn't match the loaded bundle's registry.
-
-### `ItemBuilder.svelte`
-
-Manual-edit fallback for when the user wants to construct an item
-without copy-pasting. Inputs:
-
-- Base name (text)
-- ilvl (number 1-100)
-- Rarity buttons (Normal / Magic / Rare / Unique)
-- Corrupted / Sanctified checkboxes
-- Slot summary (read-only — manual mod entry comes in M6 polish)
-- Hidden-desecrated / Hinekora-Lock indicators
-
-Every change calls `onUpdate(item)` to bubble up to `App.svelte`.
-
-### `AdvisorPanel.svelte`
-
-The advisor's live re-plan. Two sliders (risk + depth) plus a manual
-Re-plan button. Uses Svelte 5's `$effect` to call `recommend(args)`
-whenever the item, goal, risk, or depth changes.
-
-Each `Recommendation` renders as:
+## Shell layout (`components/Console.tsx`)
 
 ```
-PerfectOrbOfTransmutation                       score 4.123
-free · P(reach) ≈ 87% · depth 1
-Normal ilvl 82 base. Perfect Transmute guarantees a required-level >= 70 mod.
-rule R001-perfect-transmute-on-normal (verified)
+┌──────────────────────────────────────────────────────────────────────┐
+│ ⬡ PATH OF CRAFTING   <base · rarity · ilvl>   [capture] ⟲ patch ⟳  │  topbar
+├────┬────────────────────────────────┬────────────────────────────────┤
+│ ▣  │  THE BENCH                     │  ACTIVE PANE                   │
+│ ◎  │  ItemCard (poe2db-style popup) │  one panel per rail section    │
+│ ⚑  │  TargetSummary                 │                                │
+│ ▦  │                                │                                │
+│ …  │                                │                                │
+├────┴────────────────────────────────┴────────────────────────────────┤
+│  LedgerDock: spent · next · projected · risk/depth · [Record outcome]│  dock
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-The meta strip shows patch, rule count, strategy count, mod count, and
-the loaded bundle path (or a highlighted "no bundle loaded" warning).
+Rail sections → panels (one component per workflow):
 
-## IPC Commands
+| Section | Component | What it does |
+|---|---|---|
+| Item | `ItemEditor` | paste import, manual edit, screenshot OCR, parse preview + unresolved lines |
+| Target | `TargetEditor` | concept palette (seeded from the base's real eligible pool), archetype presets, tiers/hybrid/budget |
+| Guide | `GuidePanel` | hero recommendation + alternatives + success band (MC ± stderr) + recovery hints + traceability chip |
+| Eligible | `EligibleTab` | the rollable mod pool for the item's base/ilvl, weights + gates made explicit |
+| History | `HistoryTab` | recorded outcomes, undo, cost ledger |
+| Database | `DatabasePanel` | bases + materials browser (engine `listDatabaseEntries` / `databaseEntryDetail`) |
+| Price | `PricePanel` | trade2 stat filters from the imported item, live listings (desktop proxy) or deep link (browser) |
+| Regex | `RegexPanel` | in-game search-string generator: Goal (craft target → stash-search), Item mods / Waystone / Tablet (pool selection + roll floors + `!`unwanted), Vendor (shopping filters); 250-char budget meter, copy/auto-copy |
+| Genesis Tree | `GenesisPanel` | full-bleed 0.5 Breach tree with real art + curated goal presets (engine `genesisTree`) |
+| Tools | `ToolsPanel` | simulation runner (`runNTrials`) + recipe library (IndexedDB) |
+| Settings | `SettingsPanel` | market league + price refresh, engine League ruleset, desktop price-cache status, OCR transport/capture/region diagnostics + direct calibrate/scan controls, capture diagnostics, plugins (add/remove `.wasm`), notes, data/reset |
 
-| Command | Args | Returns |
-|---------|------|---------|
-| `ping` | — | `String` health line |
-| `recommend` | `RecommendArgs { item, goal, stash?, risk?, top_n?, depth? }` | `RecommendResponse { recommendations, patch, rule_count, strategy_count, mod_count, bundle_path }` |
-| `parse_item_text` | `text: String` | `ParseClipboardResponse { parsed, item, unresolved }` |
-| `read_clipboard_item` | — | same as `parse_item_text` |
+`OutcomeDialog` (modal) records what actually happened in game:
+add/remove/reroll mod, rarity changes — validated by the engine
+(`checkCanApply`, `recordOutcome`, `rerollableMods`).
 
-## Data Bundle Loading
+Extra routes for the desktop shell (inert stubs in a plain browser):
 
-At startup `AdvisorState::build()` searches for a bundle in:
+- `/overlay` — the ADR-0013 price overlay surface (click-through plates
+  in full mode, in-app panel in degraded mode; OCR + price resolution run
+  here).
+- `/calibrate` — full-screen Electron fallback for region calibration;
+  Hyprland/wlroots uses the native `slurp` selector instead.
 
-1. `$POC2_BUNDLE` (env var, must be an absolute path to `*.bundle.json{,.gz}`)
-2. `$XDG_CONFIG_HOME/poc2/bundles/` or `~/.config/poc2/bundles/`
-3. `$XDG_DATA_HOME/poc2/bundles/` or `~/.local/share/poc2/bundles/`
+## State (`lib/store.ts` — Zustand)
 
-The newest `*.bundle.json{,.gz}` in each directory wins. Validation
-failures are warned-and-skipped so a single bad bundle doesn't block
-startup.
+Single source of truth: item, goal, recommendations, risk/depth, history
+(with undo), active section, eligible pool, parse metadata, league +
+engine league, capture status, notes.
 
-To produce a bundle:
+- **Re-plan on every state change**: `setItem/setGoal/setRisk/setDepth`
+  → `replan()` → one worker `recommend` call. A monotonically increasing
+  token discards superseded results — no streaming, no blocking.
+- **Persistence is middleware**: one debounced store subscriber diffs the
+  persisted slice and writes to IndexedDB (`lib/persist.ts`,
+  `idb-keyval`). Never call `persist()` manually.
+- **External item text enters through `ingestExternalItemText`** — the
+  seam shared by the desktop capture bridge (`lib/bootDesktop.ts`), the
+  ADR-0011 capture daemon (`lib/captureBridge.ts`,
+  `ws://127.0.0.1:17771/ws`), and screenshot OCR (`lib/ocr.ts`).
+
+## Engine RPC (`lib/engine/`)
+
+The worker (`engine.worker.ts`) loads `/wasm/poc2_wasm_bg.wasm` + the
+bundle `/poc2.bundle.json.gz` once, constructs the WASM `Engine`, then
+serves generic `{ id, method, args }` messages. Complex args cross as
+JSON strings; string results parse back to objects.
+
+The typed client (`client.ts`) mirrors every Engine method:
+
+| Group | Methods |
+|---|---|
+| metadata | `patch`, `modCount`, `league`, `setLeague` |
+| planning | `recommend(item, goal, risk, depth, topN)` |
+| import | `parseItemText` |
+| apply/record | `checkCanApply`, `recordOutcome` |
+| inspect | `eligibleMods`, `rerollableMods` |
+| recovery | `recoveryHints(strategyId, stepId)` |
+| simulate | `runNTrials` |
+| database | `listBases`, `listDatabaseEntries`, `databaseEntryDetail` |
+| prices | `applyPrices` (poe2scout), `applyNinjaPrices` (poe.ninja) |
+| resolve | `resolveName` (fuzzy name → canonical key; OCR + prices) |
+| genesis | `genesisTree` |
+| trained models | `trainedModelCount` (the worker loads the optional `/trained-models.json` at boot via `loadTrainedModels`; ⚛ topbar chip) |
+| plugins | `setPluginContent` (phase 1 emission), `setPluginDispatch`/`clearPluginDispatch` (phase 2 live predicates; wired worker-side via the `__loadPlugins` transfer message) |
+
+New engine-boundary methods must update `client.ts` + `lib/types.ts`
+together, then typecheck.
+
+## Desktop bridge (`lib/desktop.ts`)
+
+`window.poc2Desktop` is the only contact surface with Electron (typed
+contract mirrored in `apps/desktop/src/preload.ts` — change both or
+neither). The web app **never imports Electron**; every feature detects
+the bridge and no-ops in a plain browser. Surface: capture
+(`onItemText`, `captureNow`, `captureStatus`), trade proxy
+(`tradeSearch`, `tradeFetch`), allowlisted `fetchJson`, overlay/region
+(`capabilities`, `captureRegion`, `scanRewards`, `overlayShow/Hide/SetRegion`,
+`calibrateRegion`, `onRegionCalibrated`, `onOverlayState`, scan diagnostics),
+and the price cache (`pricesSnapshot/Status/Refresh/SetLeague`).
+
+## Key flows
+
+### Import → plan → record
+
+1. Item text arrives (paste / capture / OCR) → `parse` → real bundle base
+   id + rolled values + unresolved lines surfaced in the Item pane.
+2. Any item/goal/risk/depth change → `replan()` → GuidePanel renders the
+   hero recommendation with EV math, MC confidence band, and the source
+   rule/strategy chip.
+3. User applies the action in game, records the outcome
+   (`OutcomeDialog`) → engine mutates the item → history entry (undo
+   keeps the pre-state) → automatic re-plan.
+
+### Price check
+
+`PricePanel` matches the imported item's raw lines against
+`public/trade-stats.json` (1,932 pipeline-generated entries,
+EE2-semantics matcher in `lib/trade/statIndex.ts`), builds a trade2 query
+(`lib/trade/queryBuilder.ts`; min bound = roll × 0.9), then either runs
+it through the desktop proxy (grouped listings, cheapest/median, unknown
+bases degrade to stats-only) or opens the trade-site deep link.
+
+### Goal → stash-search regex
+
+The Regex panel's Goal tab (also reachable via the ⧉ button on the
+bench's Target card) compiles the current target into an in-game search
+string: per spec, qualifying mods' `text_template` lines are reduced to
+shortest-unique fragments against the base's full pool
+(`lib/regex/shortestUnique.ts`), tier floors become per-mod-group roll
+floors (`(8[5-9]|9\d|\d\d\d).*m life`), and the terms AND-combine under
+the game's 250-char budget (`lib/regex/searchString.ts`). Precision
+first: mods whose text can't be told apart from non-qualifying mods are
+skipped with a warning rather than emitted as false-positive patterns.
+Inspired by poe2.re (unlicensed — clean-room reimplementation; fragments
+are computed at runtime from the bundle, never vendored).
+
+### Prices → planner
+
+Settings "Refresh prices" assembles the poe2scout snapshot (browser fetch
+or bridge `fetchJson`), applies it via `applyPrices`, and immediately
+re-plans so recommendations use the fresh valuator. The desktop price
+cache (hourly, sqlite) additionally feeds the OCR overlay and is shown in
+Settings; `setLeague` (and boot) point it at the active league.
+
+### OCR price overlay (desktop, ADR-0013)
+
+Reward scan hotkey (`Alt+V` / `poc2-desktop --scan`) runs one pass. The optional
+watcher (`Alt+Shift+V` / `--watch-rewards`) uses brightness/contrast hysteresis,
+frame fingerprints, 500 ms presence sampling, latest-frame-wins serialized OCR,
+and a generation guard so closed panels hide without waiting for OCR and stopped
+scans cannot repaint. A warm worker starts at most once every two seconds.
+`/overlay` runs: `captureRegion` → native canvas 2x crop/polarity fast path (3x
+and alternate-crop fallback unless catalogue matches are complete and exact) → structured Tesseract lines →
+`resolveName` against price-cache candidates → nearest-Y row locking → mixed-unit
+price selection. Tesseract boxes are inverse-mapped to source-normalized row
+centers. `hyproverlay` v4 renders one runtime-registered currency icon and stack
+value at each corresponding screen Y, immediately outside the selected region;
+v3/degraded paths retain compact cards. Portal-denied capture falls back to the
+clipboard item path. Calibration: `Alt+L` / `--recalibrate` → compositor-dimmed
+drag selection → Enter/Space confirm (or drag to redo) → persisted global rect.
+Settings diagnostics records capture, decode, fast OCR, fallback OCR, and total
+latency for the last completed scan.
+
+Item market check (`Alt+E` / `--price-check`) captures the hovered item
+with the same APT-style Ctrl+C path, then `/overlay` builds smart trade2 filters
+from `trade-stats.json` using the Price panel's 90% min / 110% max bounds. The
+desktop trade proxy searches/fetches listings; the overlay shows cheapest,
+median, result count, matched-stat count, and grouped top listings, and the
+summary is persisted to market history.
+
+Search Regex overlay (`Alt+F` / `--regex-open`) keeps PoC2 regex generation in
+the web app and sends a generic menu payload to `hyproverlay`. When the plugin
+reports `menu.interactive`, the menu is opt-in interactive (`overlayId:
+poc2-regex`): pointer toggles and in-overlay keyboard navigation emit
+`hyproverlay` IPC events that Electron main forwards to `/overlay`, which
+updates selection/preview and re-pushes the menu. External `--regex-next` /
+tab/toggle second-instance flags remain as a display-only fallback. On open it
+hydrates the current item pool plus waystone/tablet pools from the WASM engine
+where the bundle has data, then renders a capped quick-pick menu alongside the
+vendor/property presets. Copy/apply writes through Electron main (hotkey or
+on-menu action controls); non-plugin sessions get a compact Electron/degraded
+fallback card.
+
+## Bundle loading
+
+The web app fetches `/poc2.bundle.json.gz` (a gitignored local asset —
+0.5 / schema v3). To build/refresh it:
 
 ```bash
-cargo run --release -p poc2-pipeline -- build --out /tmp/poc2.bundle.json.gz --patch 0.4.0
-mkdir -p ~/.config/poc2/bundles
-cp /tmp/poc2.bundle.json.gz ~/.config/poc2/bundles/
+cargo run --release -p poc2-pipeline -- build \
+  --out ~/.config/poc2/bundles/poc2.bundle.json.gz --patch 0.5.0
+cp ~/.config/poc2/bundles/poc2.bundle.json.gz apps/web/public/
 ```
 
-## Strategy Loading
+Schema-mismatched bundles are hard-rejected by the loader with a rebuild
+instruction (`crates/data/src/lib.rs`).
 
-In addition to the 3 seed strategies bundled into the binary
-(canonical 3xT1 ES + Apprentice Blueprint + Whittling Cleanup),
-`AdvisorState::build()` walks
-`$XDG_CONFIG_HOME/poc2/strategies/*.toml` and loads every strategy
-that parses + validates. Per-file failures are warned-and-skipped.
+## Hyprland always-on-top (optional)
 
-## Phase B Polish (shipped)
-
-- **Target panel** (`TargetPanel.svelte`) edits the `Goal`
-  interactively; persists via `save_state` to
-  `$XDG_CONFIG_HOME/poc2/state.toml`.
-- **Recovery panel** (`RecoveryPanel.svelte`) surfaces strategy step
-  `recovery` hints when the user toggles "Last action failed".
-- **Settings panel** (`SettingsPanel.svelte`): bundle hot-swap,
-  league dropdown, prices auto-refresh interval, Client.txt watcher
-  toggle.
-- **Recipe library** (`RecipeLibrary.svelte`) — save / load / share
-  recipes via `$XDG_CONFIG_HOME/poc2/recipes/<name>.toml`.
-- **Simulation runner** (`SimulationRunner.svelte`) — runs N Monte
-  Carlo trials of a candidate action; renders an inline-SVG
-  change-count histogram.
-
-## Hyprland integration (Phase D.2)
-
-Per ADR-0009, the v1 always-on-top behaviour is implemented as a
-documented Hyprland configuration recipe rather than a custom Wayland
-layer-shell surface.
-
-Add to `~/.config/hypr/hyprland.conf` (or your NixOS Hyprland module):
-
-```hyprlang
-windowrulev2 = float, class:^(ai\.anomaly\.poc2)$
-windowrulev2 = pin, class:^(ai\.anomaly\.poc2)$
-windowrulev2 = noborder, class:^(ai\.anomaly\.poc2)$
-windowrulev2 = size 480 720, class:^(ai\.anomaly\.poc2)$
-windowrulev2 = move 100% 0, class:^(ai\.anomaly\.poc2)$
-windowrulev2 = opacity 0.95, class:^(ai\.anomaly\.poc2)$
-```
-
-`pin` keeps the window on top across workspaces; `float` keeps it
-out of the tiling stack; `move 100% 0` docks it to the right edge.
-Run PoE2 in borderless windowed mode (not exclusive fullscreen) for
-the overlay to actually float on top.
-
-Clipboard reads use `wl-clipboard` via
-`tauri-plugin-clipboard-manager` and work unchanged on Wayland.
-
-## Live integration (Phase D)
-
-| Subsystem | Tauri command | Event topic |
-|---|---|---|
-| Client.txt watcher (D.1) | `start_client_log` / `stop_client_log` / `client_log_status` | `client-log://event` |
-| Always-on-top (D.2) | (Hyprland windowrulev2; no Tauri command) | — |
-| Trade-search URL (D.3) | `trade_search` | — (opens browser) |
+Per ADR-0009, always-on-top is a documented Hyprland config recipe, not a
+layer-shell surface — source
+[`examples/hyprland/poc2-windowrules.conf`](../examples/hyprland/) and
+run PoE2 in borderless windowed mode.

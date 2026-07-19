@@ -189,7 +189,21 @@ impl OmenSet {
             .is_some()
     }
 
-    pub fn consume_prevent_no_change(&mut self, patch: PatchVersion) -> bool {
+    /// Consume an Omen of Corruption (suppresses the Vaal NoChange outcome).
+    ///
+    /// Cross-version league gate (P4): in **0.5 "Return of the Ancients"** the
+    /// Omen of Corruption only appears / functions in **Standard** leagues —
+    /// it is not available in the Runes of Aldur challenge league. So in 0.5+
+    /// Challenge the omen is not consumed (no effect), mirroring the
+    /// legacy-stockpile semantics already used for the Homogenising omens.
+    pub fn consume_prevent_no_change(
+        &mut self,
+        patch: PatchVersion,
+        league: crate::patch::League,
+    ) -> bool {
+        if patch >= PatchVersion::PATCH_0_5_0 && league != crate::patch::League::Standard {
+            return false;
+        }
         self.consume(patch, |e| matches!(e, OmenEffect::PreventNoChange))
             .is_some()
     }

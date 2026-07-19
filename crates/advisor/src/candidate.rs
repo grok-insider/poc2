@@ -23,7 +23,7 @@
 use poc2_engine::currency::CurrencyResolver;
 use poc2_engine::ids::CurrencyId;
 use poc2_engine::item::{Item, ModRoll, Rarity};
-use poc2_engine::patch::PatchVersion;
+use poc2_engine::patch::{League, PatchVersion};
 use poc2_engine::registry::ModRegistry;
 use poc2_rules::RuleSet;
 use poc2_strategies::{eval_all, PredicateContext, Step, Strategy, StrategyRegistry};
@@ -49,6 +49,8 @@ fn passes_engine_preconditions(
     action: &AdvisorAction,
     item: &Item,
     resolver: &dyn CurrencyResolver,
+    patch: PatchVersion,
+    league: League,
 ) -> bool {
     match action {
         AdvisorAction::ApplyCurrency { currency, .. } => {
@@ -61,8 +63,15 @@ fn passes_engine_preconditions(
                 None => false,
             }
         }
-        // Reveal/Recombine/HinekorasLock are gated by their own predicates
-        // upstream; the advisor leaves them alone here.
+        // Cross-version gate (P4): the Recombinator was removed in 0.5
+        // "Return of the Ancients" — disabled in the Runes of Aldur
+        // challenge league, kept only in Standard. Drop Recombine candidates
+        // when it is unavailable for the active (patch, league).
+        AdvisorAction::Recombine { .. } => {
+            poc2_engine::currency::recombinator_available(patch, league)
+        }
+        // Reveal/HinekorasLock are gated by their own predicates upstream;
+        // the advisor leaves them alone here.
         _ => true,
     }
 }
@@ -110,8 +119,10 @@ pub fn generate_candidates_with_goal(
     resolver: &dyn CurrencyResolver,
     stash: &Stash,
     patch: PatchVersion,
+    league: League,
     goal: Option<&Goal>,
     registry: &ModRegistry,
+    base_registry: Option<&poc2_engine::BaseRegistry>,
 ) -> Vec<Candidate> {
     let mut out = collect_candidates_pre_goal(item, ctx, rules, strategies, stash, patch);
 
@@ -141,12 +152,30 @@ pub fn generate_candidates_with_goal(
         }
     }
 
-    finalize_candidates(out, item, resolver)
+    // 0.5: Verisium Alloy moves — replace a random mod with the alloy's
+    // guaranteed crafted modifier when it advances a goal concept.
+    if let Some(goal) = goal {
+        out.extend(alloy_candidates(
+            item,
+            ctx,
+            goal,
+            resolver,
+            registry,
+            base_registry,
+            patch,
+        ));
+    }
+
+    finalize_candidates(out, item, resolver, patch, league)
 }
 
 /// Backwards-compatible call site. Emits the same candidate set as
 /// [`generate_candidates_with_goal`] but skips Phase B.2 tier-fix
 /// recommendations because the legacy callers don't know the goal.
+///
+/// Defaults to [`League::Challenge`] for the league gate. Callers that need
+/// Standard-league semantics (legacy Recombinator) use
+/// [`generate_candidates_with_goal`] with an explicit league.
 #[must_use]
 pub fn generate_candidates(
     item: &Item,
@@ -158,7 +187,7 @@ pub fn generate_candidates(
     patch: PatchVersion,
 ) -> Vec<Candidate> {
     let out = collect_candidates_pre_goal(item, ctx, rules, strategies, stash, patch);
-    finalize_candidates(out, item, resolver)
+    finalize_candidates(out, item, resolver, patch, League::current())
 }
 
 /// Rule + strategy + heuristic-fallback emission, before tier-fix /
@@ -176,7 +205,14 @@ fn collect_candidates_pre_goal(
 
     // ------- Rule-emitted candidates -------------------------------------
     for r in poc2_rules::evaluate_with_ctx(rules, item, ctx) {
-        let action = from_rule_action(&r.suggestion.action);
+        let mut action = from_rule_action(&r.suggestion.action);
+        // A guidance action carries no note of its own; populate it from the
+        // rule's suggestion note so the UI never shows an empty guidance card.
+        if let AdvisorAction::Guidance { note } = &mut action {
+            if note.is_empty() {
+                note.clone_from(&r.suggestion.note);
+            }
+        }
         if !is_action_affordable(&action, stash) {
             continue;
         }
@@ -200,7 +236,7 @@ fn collect_candidates_pre_goal(
     }
 
     // ------- Strategy-emitted candidates ---------------------------------
-    let class = poc2_engine::ids::ItemClassId::from(item.base.as_str());
+    let class = ctx.item_class_for(item);
     for strategy in strategies.for_class(&class, patch) {
         if !eval_all(&strategy.preconditions, item, ctx) {
             continue;
@@ -254,8 +290,10 @@ fn finalize_candidates(
     mut out: Vec<Candidate>,
     item: &Item,
     resolver: &dyn CurrencyResolver,
+    patch: PatchVersion,
+    league: League,
 ) -> Vec<Candidate> {
-    out.retain(|c| passes_engine_preconditions(&c.action, item, resolver));
+    out.retain(|c| passes_engine_preconditions(&c.action, item, resolver, patch, league));
     out.sort_by_key(|c| std::cmp::Reverse(c.priority));
     let mut seen: ahash::AHashSet<AdvisorAction> = ahash::AHashSet::new();
     out.retain(|c| seen.insert(c.action.clone()));
@@ -268,6 +306,16 @@ fn finalize_candidates(
 /// "T1 keeper at max → fracture before the next risky step" hint.
 fn tier_fix_candidates(item: &Item, goal: &Goal, registry: &ModRegistry) -> Vec<Candidate> {
     let mut out = Vec::new();
+
+    // Divine / Fracture are value-POLISH steps — they only make sense once the
+    // item already carries the goal's target mods and the remaining work is
+    // maxing/locking their values. On a partial item, building toward the target
+    // (Augment / Regal / Essence / Chaos) takes priority; refining one mod's
+    // value first is wasteful (it gets overwritten as more mods are added, so
+    // you'd re-Divine at the end). Gate the emitter on full goal satisfaction.
+    if !crate::goal::is_satisfied(goal, item, registry) {
+        return out;
+    }
 
     // For each visible non-fractured mod on the item, check if it
     // satisfies any target spec. If yes, decide between Divine (push to
@@ -616,6 +664,119 @@ fn is_action_affordable(action: &AdvisorAction, stash: &Stash) -> bool {
 /// Heuristic fallback set when nothing else fires. Intentionally small —
 /// these are the "obvious next moves" given an item's rarity and slot
 /// fill state.
+/// 0.5 Verisium Alloy candidates.
+///
+/// For a Rare item with at least one removable (non-fractured) modifier and
+/// no crafted modifier yet, propose every catalogue alloy whose class-target
+/// crafted mod intersects the goal's wanted concepts. Alloys behave like
+/// Perfect Essences (remove one random mod, add a guaranteed one), so they
+/// surface as a deterministic "finisher" move for goal concepts the normal
+/// pool can't reach (Runic Ward, archon/infusion lines, etc.).
+fn alloy_candidates(
+    item: &Item,
+    ctx: &PredicateContext<'_>,
+    goal: &Goal,
+    resolver: &dyn CurrencyResolver,
+    registry: &ModRegistry,
+    base_registry: Option<&poc2_engine::BaseRegistry>,
+    patch: PatchVersion,
+) -> Vec<Candidate> {
+    if patch < PatchVersion::PATCH_0_5_0
+        || item.rarity != Rarity::Rare
+        || item.has_crafted_mod()
+        || !item.is_modifiable()
+    {
+        return Vec::new();
+    }
+    let removable = item
+        .prefixes
+        .iter()
+        .chain(item.suffixes.iter())
+        .any(|m| !m.is_fractured);
+    if !removable {
+        return Vec::new();
+    }
+    // Goal concepts wanted on either affix side. No concepts → no alloy
+    // proposals (avoid spamming all 13 alloys at undirected crafts).
+    let wanted: ahash::AHashSet<&poc2_engine::ids::ConceptId> = goal
+        .target
+        .prefixes
+        .iter()
+        .chain(goal.target.suffixes.iter())
+        .flat_map(|spec| spec.concept.iter().chain(spec.concept_any.iter()))
+        .collect();
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+
+    let class = ctx.item_class_for(item);
+    let base_name = base_registry
+        .and_then(|br| br.get(&item.base).map(|b| b.name.as_str()))
+        .unwrap_or_else(|| item.base.as_str());
+    let mut out = Vec::new();
+    for alloy in resolver.alloys() {
+        // Base-targeted alloys (Distilled Emotions) fire only when the
+        // item's base name matches a target key — mirroring the engine's
+        // `resolve_target_mod` exactly (exact, case-insensitive). Proposing
+        // them on non-matching bases produced apply-rejected
+        // recommendations (M14 audit).
+        let target = if alloy.base_targets.is_empty() {
+            alloy.target_for_class(&class)
+        } else {
+            alloy
+                .base_targets
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(base_name))
+                .map(|(_, m)| m)
+        };
+        let Some(target) = target else {
+            continue;
+        };
+        let Some(def) = registry.get(target) else {
+            continue;
+        };
+        if !def.concept_set.iter().any(|c| wanted.contains(c)) {
+            continue;
+        }
+        // Skip when the granted mod's group already occupies the item: the
+        // engine's remove-then-add is atomic and rejects unless the random
+        // removal happens to free that very group — a coin flip the advisor
+        // must not recommend as a sure step.
+        if let Some(g) = registry.group_of(target) {
+            let occupied = item
+                .prefixes
+                .iter()
+                .chain(item.suffixes.iter())
+                .any(|m| registry.group_of(&m.mod_id) == Some(g));
+            if occupied {
+                continue;
+            }
+        }
+        let granted = def
+            .text_template
+            .as_deref()
+            .or(def.name.as_deref())
+            .unwrap_or(target.as_str())
+            .replace('\n', "; ");
+        out.push(Candidate {
+            action: AdvisorAction::ApplyCurrency {
+                currency: alloy.id.clone(),
+                omens: vec![],
+            },
+            source: RecommendationSource::Heuristic {
+                name: "alloy-craft".into(),
+            },
+            prior: 0.7,
+            priority: 130,
+            rationale: format!(
+                "{}: removes a random modifier and guarantees \"{granted}\" (crafted, 0.5)",
+                alloy.display_name
+            ),
+        });
+    }
+    out
+}
+
 fn heuristic_fallback(item: &Item) -> Vec<Candidate> {
     let mut out = Vec::new();
     let mk = |currency: &str, name: &str, prior: f64, priority: u32, rationale: &str| Candidate {
@@ -731,6 +892,230 @@ mod tests {
         let top = &cands[0];
         assert!(
             matches!(&top.source, RecommendationSource::Rule { id, .. } if id.starts_with("R001"))
+        );
+    }
+
+    #[test]
+    fn recombine_candidate_gated_by_league_in_0_5() {
+        // The Recombinator is removed in 0.5 Runes of Aldur (Challenge) but
+        // kept in Standard. `finalize_candidates` must drop a Recombine
+        // candidate for (0.5, Challenge) and keep it otherwise.
+        let resolver = default_resolver();
+        let item = empty_item(Rarity::Rare);
+        let recombine = Candidate {
+            action: AdvisorAction::Recombine {
+                other_item_id: "any".into(),
+                omens: vec![],
+            },
+            source: RecommendationSource::Heuristic {
+                name: "test-recombine".into(),
+            },
+            prior: 0.5,
+            priority: 100,
+            rationale: "test".into(),
+        };
+
+        let p04 = PatchVersion::PATCH_0_4_0;
+        let p05 = PatchVersion::PATCH_0_5_0;
+
+        // 0.4 Challenge: kept.
+        let kept = finalize_candidates(
+            vec![recombine.clone()],
+            &item,
+            &resolver,
+            p04,
+            League::Challenge,
+        );
+        assert_eq!(kept.len(), 1, "Recombine must survive in 0.4");
+
+        // 0.5 Challenge: dropped.
+        let dropped = finalize_candidates(
+            vec![recombine.clone()],
+            &item,
+            &resolver,
+            p05,
+            League::Challenge,
+        );
+        assert!(
+            dropped.is_empty(),
+            "Recombine must be dropped in 0.5 Runes of Aldur (Challenge)"
+        );
+
+        // 0.5 Standard: kept (legacy).
+        let standard =
+            finalize_candidates(vec![recombine], &item, &resolver, p05, League::Standard);
+        assert_eq!(standard.len(), 1, "Recombine must survive in 0.5 Standard");
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // exhaustive positive/negative matrix
+    fn alloy_candidates_surface_for_matching_goal_concepts_in_0_5() {
+        use poc2_engine::ids::{ConceptId, ModGroupId, ModId, StatId, TagId};
+        use poc2_engine::mods::{
+            ModDefinition, ModDomain, ModFlags, ModGroup, ModStat, SpawnWeight,
+        };
+        use poc2_engine::{AffixType, ModKind, PatchRange};
+        use poc2_strategies::{Target, TargetSpec};
+
+        // Registry with the alloy's target mod carrying a RunicWard concept.
+        let target_mod = ModDefinition {
+            id: ModId::from("AlloyMaximumRunicWard1"),
+            name: Some("Verisium".into()),
+            mod_group: ModGroup(ModGroupId::from("RunicWard")),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            domain: ModDomain::Item,
+            tags: smallvec![TagId::from("t")],
+            concept_set: smallvec![ConceptId::from("RunicWard")],
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from("t"),
+                weight: 0,
+            }],
+            stats: smallvec![ModStat {
+                stat_id: StatId::from("base_maximum_ward"),
+                min: 37.0,
+                max: 49.0,
+            }],
+            required_level: 10,
+            tier: None,
+            allowed_item_classes: smallvec![ItemClassId::from("Ring")],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: Some("+(37-49) to maximum Runic Ward".into()),
+        };
+        let reg = ModRegistry::from_mods(vec![target_mod], vec![]);
+
+        let resolver = poc2_engine::DefaultCurrencyResolver::new().with_alloys(vec![
+            poc2_engine::Alloy::with_class_targets(
+                "RunicAlloy",
+                "Runic Alloy",
+                vec![(
+                    ItemClassId::from("Ring"),
+                    ModId::from("AlloyMaximumRunicWard1"),
+                )],
+            ),
+        ]);
+
+        // Rare Ring with one removable mod.
+        let mut item = empty_item(Rarity::Rare);
+        item.base = ItemClassId::from("Ring").as_str().into();
+        item.prefixes.push(poc2_engine::ModRoll {
+            mod_id: ModId::from("SomeMod"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![1.0],
+            is_fractured: false,
+        });
+
+        let goal_hit = Goal::new(
+            Target {
+                prefixes: vec![TargetSpec {
+                    concept: Some(ConceptId::from("RunicWard")),
+                    concept_any: vec![],
+                    affix: None,
+                    count: 1,
+                    min_tier: None,
+                    allow_hybrid: true,
+                }],
+                suffixes: vec![],
+                constraints: vec![],
+            },
+            poc2_market::DivEquiv::point(10.0),
+        );
+
+        let ctx = PredicateContext::new(&reg);
+        let cands = alloy_candidates(
+            &item,
+            &ctx,
+            &goal_hit,
+            &resolver,
+            &reg,
+            None,
+            PatchVersion::PATCH_0_5_0,
+        );
+        assert_eq!(cands.len(), 1, "matching goal concept must surface alloy");
+        assert!(matches!(
+            &cands[0].action,
+            AdvisorAction::ApplyCurrency { currency, .. } if currency.as_str() == "RunicAlloy"
+        ));
+
+        // Same item as a captured bundle base with the class pre-resolved
+        // into the ctx — must surface the identical alloy candidate.
+        let mut bundled = item.clone();
+        bundled.base = "Metadata/Items/Rings/Ring1".into();
+        let bundled_ctx = PredicateContext::new(&reg).with_item_class(ItemClassId::from("Ring"));
+        let bundled_cands = alloy_candidates(
+            &bundled,
+            &bundled_ctx,
+            &goal_hit,
+            &resolver,
+            &reg,
+            None,
+            PatchVersion::PATCH_0_5_0,
+        );
+        assert_eq!(bundled_cands.len(), 1, "resolved class must surface alloy");
+        assert_eq!(bundled_cands[0].action, cands[0].action);
+
+        // 0.4 → no alloys.
+        assert!(
+            alloy_candidates(
+                &item,
+                &ctx,
+                &goal_hit,
+                &resolver,
+                &reg,
+                None,
+                PatchVersion::PATCH_0_4_0
+            )
+            .is_empty(),
+            "alloys are 0.5-only"
+        );
+
+        // Non-matching concept → no proposal.
+        let goal_miss = Goal::new(
+            Target {
+                prefixes: vec![TargetSpec {
+                    concept: Some(ConceptId::from("Life")),
+                    concept_any: vec![],
+                    affix: None,
+                    count: 1,
+                    min_tier: None,
+                    allow_hybrid: true,
+                }],
+                suffixes: vec![],
+                constraints: vec![],
+            },
+            poc2_market::DivEquiv::point(10.0),
+        );
+        assert!(
+            alloy_candidates(
+                &item,
+                &ctx,
+                &goal_miss,
+                &resolver,
+                &reg,
+                None,
+                PatchVersion::PATCH_0_5_0
+            )
+            .is_empty(),
+            "non-matching concepts must not propose alloys"
+        );
+
+        // Existing crafted mod → blocked (1-crafted cap).
+        let mut crafted = item.clone();
+        crafted.prefixes[0].kind = ModKind::Crafted;
+        assert!(
+            alloy_candidates(
+                &crafted,
+                &ctx,
+                &goal_hit,
+                &resolver,
+                &reg,
+                None,
+                PatchVersion::PATCH_0_5_0
+            )
+            .is_empty(),
+            "items at the crafted-mod cap must not propose alloys"
         );
     }
 
@@ -864,6 +1249,262 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c.action, AdvisorAction::Abandon { .. })),
             "abandon rule should fire above threshold"
+        );
+    }
+
+    #[test]
+    fn guidance_action_note_populated_from_rule_suggestion() {
+        // A rule emitting SuggestionAction::Guidance carries no note on the
+        // action itself (from_rule_action yields an empty note); the candidate
+        // generator must fill it from the rule's suggestion note so the UI
+        // never renders an empty guidance card.
+        use poc2_strategies::ItemPredicate;
+
+        let reg = ModRegistry::from_mods(vec![], vec![]);
+        let stash = Stash::unlimited();
+        let strategies = StrategyRegistry::default();
+        let item = empty_item(Rarity::Rare);
+
+        let rule = poc2_rules::Rule {
+            id: poc2_rules::RuleId::from("guidance-rule"),
+            category: poc2_rules::Category::Budget,
+            when: ItemPredicate::Always,
+            then: smallvec::smallvec![poc2_rules::Suggestion {
+                action: poc2_rules::SuggestionAction::Guidance,
+                note: "consider a Chaos Orb to swap the bad suffix".into(),
+                priority: 100,
+                tag: None,
+            }],
+            explanation: "test".into(),
+            source: "test".into(),
+            confidence: poc2_rules::Confidence::Verified,
+        };
+        let rules = RuleSet::from_rules(vec![rule]);
+        let resolver = default_resolver();
+        let ctx = PredicateContext::new(&reg).with_stash(&stash);
+
+        let cands = generate_candidates(
+            &item,
+            &ctx,
+            &rules,
+            &strategies,
+            &resolver,
+            &stash,
+            PatchVersion::PATCH_0_4_0,
+        );
+
+        let note = cands.iter().find_map(|c| match &c.action {
+            AdvisorAction::Guidance { note } => Some(note.clone()),
+            _ => None,
+        });
+        assert_eq!(
+            note.as_deref(),
+            Some("consider a Chaos Orb to swap the bad suffix"),
+            "Guidance candidate note must be populated from the rule's suggestion note"
+        );
+    }
+
+    /// M14 audit regression: base-targeted alloys (Distilled Emotions) must
+    /// only be proposed when the item's base name matches a target key —
+    /// the engine rejects them on any other base.
+    #[test]
+    fn base_targeted_emotions_skip_non_matching_bases() {
+        use poc2_engine::ids::{ConceptId, ModGroupId, ModId, StatId, TagId};
+        use poc2_engine::mods::{
+            ModDefinition, ModDomain, ModFlags, ModGroup, ModStat, SpawnWeight,
+        };
+        use poc2_engine::{AffixType, ModKind, PatchRange};
+        use poc2_strategies::{Target, TargetSpec};
+
+        let target_mod = ModDefinition {
+            id: ModId::from("JewelArmour"),
+            name: Some("Ire".into()),
+            mod_group: ModGroup(ModGroupId::from("JewelArmour")),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            domain: ModDomain::Jewel,
+            tags: smallvec![TagId::from("t")],
+            concept_set: smallvec![ConceptId::from("Armour")],
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from("t"),
+                weight: 0
+            }],
+            stats: smallvec![ModStat {
+                stat_id: StatId::from("armour_pct"),
+                min: 10.0,
+                max: 20.0,
+            }],
+            required_level: 1,
+            tier: None,
+            allowed_item_classes: smallvec![ItemClassId::from("Jewel")],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: None,
+        };
+        let reg = ModRegistry::from_mods(vec![target_mod], vec![]);
+        let resolver = poc2_engine::DefaultCurrencyResolver::new().with_alloys(vec![
+            poc2_engine::Alloy::with_base_targets(
+                "DilutedLiquidIre",
+                "Diluted Liquid Ire",
+                vec![("Ruby".to_string(), ModId::from("JewelArmour"))],
+            ),
+        ]);
+        let goal = Goal::new(
+            Target {
+                prefixes: vec![TargetSpec {
+                    concept: Some(ConceptId::from("Armour")),
+                    concept_any: vec![],
+                    affix: None,
+                    count: 1,
+                    min_tier: None,
+                    allow_hybrid: true,
+                }],
+                suffixes: vec![],
+                constraints: vec![],
+            },
+            poc2_market::DivEquiv::point(10.0),
+        );
+        let ctx = PredicateContext::new(&reg);
+
+        // Rare non-jewel item (BodyArmour placeholder base) with a removable
+        // mod: the emotion must NOT be proposed.
+        let mut armour = empty_item(Rarity::Rare);
+        armour.prefixes.push(poc2_engine::ModRoll {
+            mod_id: ModId::from("SomeMod"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![1.0],
+            is_fractured: false,
+        });
+        let cands = alloy_candidates(
+            &armour,
+            &ctx,
+            &goal,
+            &resolver,
+            &reg,
+            None,
+            PatchVersion::PATCH_0_5_0,
+        );
+        assert!(
+            cands.is_empty(),
+            "emotion proposed on non-matching base: {cands:?}"
+        );
+
+        // Same item shape but the base IS the targeted jewel base ("Ruby"
+        // placeholder id matches the engine's raw-base-id fallback).
+        let mut ruby = armour.clone();
+        ruby.base = "Ruby".into();
+        let cands = alloy_candidates(
+            &ruby,
+            &ctx,
+            &goal,
+            &resolver,
+            &reg,
+            None,
+            PatchVersion::PATCH_0_5_0,
+        );
+        assert_eq!(cands.len(), 1, "emotion must surface on the matching base");
+    }
+
+    /// M14 audit regression: an alloy whose granted mod-group already
+    /// occupies the item must not be proposed — the engine's atomic
+    /// remove-then-add rejects unless the random removal frees that very
+    /// group, so the recommendation would fail more often than not.
+    #[test]
+    fn alloys_skip_when_target_group_already_on_item() {
+        use poc2_engine::ids::{ConceptId, ModGroupId, ModId, StatId, TagId};
+        use poc2_engine::mods::{
+            ModDefinition, ModDomain, ModFlags, ModGroup, ModStat, SpawnWeight,
+        };
+        use poc2_engine::{AffixType, ModKind, PatchRange};
+        use poc2_strategies::{Target, TargetSpec};
+
+        let mk = |id: &str, group: &str| ModDefinition {
+            id: ModId::from(id),
+            name: None,
+            mod_group: ModGroup(ModGroupId::from(group)),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            domain: ModDomain::Item,
+            tags: smallvec![TagId::from("t")],
+            concept_set: smallvec![ConceptId::from("CastSpeed")],
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from("t"),
+                weight: 0
+            }],
+            stats: smallvec![ModStat {
+                stat_id: StatId::from("cast_speed"),
+                min: 1.0,
+                max: 5.0,
+            }],
+            required_level: 1,
+            tier: None,
+            allowed_item_classes: smallvec![ItemClassId::from("Focus")],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: None,
+        };
+        let reg = ModRegistry::from_mods(
+            vec![
+                mk("AlloyCastSpeed", "IncreasedCastSpeed"),
+                mk("RolledCastSpeed", "IncreasedCastSpeed"),
+            ],
+            vec![],
+        );
+        let resolver = poc2_engine::DefaultCurrencyResolver::new().with_alloys(vec![
+            poc2_engine::Alloy::with_class_targets(
+                "TranscendentAlloy",
+                "Transcendent Alloy",
+                vec![(ItemClassId::from("Focus"), ModId::from("AlloyCastSpeed"))],
+            ),
+        ]);
+        let goal = Goal::new(
+            Target {
+                prefixes: vec![TargetSpec {
+                    concept: Some(ConceptId::from("CastSpeed")),
+                    concept_any: vec![],
+                    affix: None,
+                    count: 1,
+                    min_tier: None,
+                    allow_hybrid: true,
+                }],
+                suffixes: vec![],
+                constraints: vec![],
+            },
+            poc2_market::DivEquiv::point(10.0),
+        );
+        let ctx = PredicateContext::new(&reg);
+
+        let mut focus = empty_item(Rarity::Rare);
+        focus.base = ItemClassId::from("Focus").as_str().into();
+        // The same group the alloy would grant is already rolled.
+        focus.prefixes.push(poc2_engine::ModRoll {
+            mod_id: ModId::from("RolledCastSpeed"),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![2.0],
+            is_fractured: false,
+        });
+        // Plus an unrelated removable mod so the removable-gate passes.
+        focus.suffixes.push(poc2_engine::ModRoll {
+            mod_id: ModId::from("OtherMod"),
+            affix_type: AffixType::Suffix,
+            kind: ModKind::Explicit,
+            values: smallvec![1.0],
+            is_fractured: false,
+        });
+        let cands = alloy_candidates(
+            &focus,
+            &ctx,
+            &goal,
+            &resolver,
+            &reg,
+            None,
+            PatchVersion::PATCH_0_5_0,
+        );
+        assert!(
+            cands.is_empty(),
+            "alloy proposed despite occupied target group: {cands:?}"
         );
     }
 }

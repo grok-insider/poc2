@@ -169,8 +169,54 @@ pub fn compute_recombine_success_chance(
     (a * c * product).clamp(0.0, 1.0)
 }
 
+/// Whether the Recombinator is available for the given `(patch, league)`.
+///
+/// Cross-version gate (P4): the Recombinator was **removed in 0.5 "Return of
+/// the Ancients"** — the Omen of Recombination was deleted and the
+/// Recombinator bench disabled in the Runes of Aldur challenge league. It
+/// still functions in **Standard** on migrated items. So:
+/// - patch < 0.5  ⇒ available in all leagues.
+/// - patch ≥ 0.5  ⇒ available only in `League::Standard`.
+///
+/// The advisor consults this before emitting Recombinator candidates; the
+/// gated entry point [`recombine_gated`] enforces it at apply time.
+pub fn recombinator_available(
+    patch: crate::patch::PatchVersion,
+    league: crate::patch::League,
+) -> bool {
+    if patch < crate::patch::PatchVersion::PATCH_0_5_0 {
+        return true;
+    }
+    league == crate::patch::League::Standard
+}
+
+/// [`recombine`] gated by `(patch, league)`. Returns
+/// [`EngineError::InvalidApplication`] when the Recombinator is unavailable
+/// (0.5 Runes of Aldur). Production callers and the advisor use this; the
+/// raw [`recombine`] remains for Standard/tests and internal reuse.
+pub fn recombine_gated(
+    a: &Item,
+    b: &Item,
+    registry: &ModRegistry,
+    rng: &mut dyn rand::RngCore,
+    patch: crate::patch::PatchVersion,
+    league: crate::patch::League,
+) -> EngineResult<Item> {
+    if !recombinator_available(patch, league) {
+        return Err(EngineError::InvalidApplication(
+            "Recombinator is disabled in this league (removed in 0.5 Runes of Aldur; \
+             available only in Standard)"
+                .into(),
+        ));
+    }
+    recombine(a, b, registry, rng)
+}
+
 /// Recombine two Rare items into one. Returns the new Rare item;
 /// callers are responsible for discarding `a` and `b`.
+///
+/// Note: this raw entry point does **not** apply the 0.5 league gate; use
+/// [`recombine_gated`] for patch/league-correct behavior.
 pub fn recombine(
     a: &Item,
     b: &Item,
@@ -448,6 +494,7 @@ mod tests {
             }],
             stats: smallvec![],
             required_level: 1,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from(class)],
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),

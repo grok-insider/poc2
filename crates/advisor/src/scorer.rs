@@ -37,10 +37,13 @@ pub struct ScoringWeights {
     pub lambda: f64,
     /// Variance penalty (cost band width as proxy).
     pub mu: f64,
-    /// Bonus added per matched concept on the post-state, scaled by
-    /// inverse of count needed. Encourages the planner to value
-    /// "made progress toward the target" even when the target isn't
-    /// fully met yet.
+    /// Weight on goal-progress: multiplied by the terminal node's
+    /// fraction-of-target-specs-satisfied (`[0, 1]`) and ADDED to the score in
+    /// [`crate::planner`]'s `score_node`, on top of the multiplicative
+    /// reliability×progress attainment term. The multiplicative term already
+    /// zeroes out no-progress actions; this additive booster makes the planner
+    /// prefer the building step that reaches MORE of the target even when it's
+    /// the riskier path.
     pub progress_bonus: f64,
     /// Per-rule prior weight: scales the rule/strategy/heuristic prior
     /// into the score.
@@ -52,7 +55,10 @@ impl Default for ScoringWeights {
         Self {
             lambda: 1.0,
             mu: 0.05,
-            progress_bonus: 0.5,
+            // Goal-progress is the primary ranking signal among building actions
+            // (a +1-spec gain ⇒ +progress_bonus/total, which outweighs the
+            // ≤0.36 prior gap), while λ·cost still discriminates within a tier.
+            progress_bonus: 1.0,
             prior_weight: 0.4,
         }
     }

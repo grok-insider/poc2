@@ -1,0 +1,155 @@
+/* Price-overlay window styling (ADR-0013).
+ *
+ * Full mode: transparent, click-through (pointer-events:none) plates floating
+ * over the game. Degraded mode: an opaque in-app panel (pointer-events restored
+ * so it reads as a normal panel). Game-exact bronze/gold palette per DESIGN.md;
+ * all art/font assets are origin-relative (the page itself loads no images). */
+
+.root {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  background: transparent;
+  color: var(--fg, #e8e0d2);
+  font-family: "FontinRegular", system-ui, sans-serif;
+  /* Full mode is click-through. */
+  pointer-events: none;
+  user-select: none;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+/* Adaptive placement: flip plates to the left edge for right-side regions. */
+.root[data-place="left"] {
+  justify-content: flex-start;
+}
+
+/* Degraded mode: a real in-app panel (opaque, interactive). */
+.root[data-degraded="true"] {
+  pointer-events: auto;
+  background: var(--bg-base, #070605);
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 10px;
+}
+
+.itemPopupWrap {
+  pointer-events: none;
+  max-width: min(420px, 100%);
+  margin-bottom: 6px;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.65));
+}
+
+.root[data-degraded="true"] .itemPopupWrap {
+  pointer-events: auto;
+  max-width: 100%;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.root[data-degraded="true"] .stack {
+  max-width: none;
+}
+
+.plate {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 3px;
+  background: rgba(10, 9, 7, 0.86);
+  border: 1px solid var(--line-strong, rgba(178, 145, 85, 0.32));
+  font-size: 13px;
+  line-height: 1.3;
+  white-space: nowrap;
+  /* Plates themselves never capture clicks in full mode. */
+}
+
+.root[data-degraded="true"] .plate {
+  background: var(--surface, #0c0b09);
+}
+
+/* Highest-value row: brighter gold frame + subtle glow. */
+.best {
+  border-color: var(--gold, #b29155);
+  box-shadow: 0 0 0 1px var(--gold, #b29155), 0 0 10px var(--primary-glow, rgba(210, 153, 51, 0.22));
+}
+
+.name {
+  font-family: "FontinSmallCaps", "FontinRegular", system-ui, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qty {
+  color: var(--fg-muted, #a89a85);
+  font-variant-numeric: tabular-nums;
+}
+
+.prices {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.total {
+  color: var(--gold-bright, #e7b478);
+  font-weight: 600;
+}
+
+.best .total {
+  color: var(--gold-action, #d29933);
+}
+
+.each {
+  color: var(--fg-faint, #6f6354);
+  font-size: 11px;
+}
+
+.muted {
+  color: var(--fg-muted, #a89a85);
+}
+
+/* Close button: dismisses the overlay window via the desktop bridge
+ * (bridge.overlayHide()). Aligned to the plate edge; clickable even in full
+ * (click-through) mode, where the rest of .root is pointer-events:none. */
+.close {
+  align-self: flex-end;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "FontinRegular", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--fg-muted, #a89a85);
+  background: rgba(10, 9, 7, 0.86);
+  border: 1px solid var(--line-strong, rgba(178, 145, 85, 0.32));
+  border-radius: 3px;
+  cursor: pointer;
+  /* Stay clickable when the window is otherwise click-through. */
+  pointer-events: auto;
+}
+
+.close:hover {
+  color: var(--gold-bright, #e7b478);
+  border-color: var(--gold, #b29155);
+}
+
+/* Follow the plate edge: left-placed regions dock the X to the left too. */
+.root[data-place="left"] .close {
+  align-self: flex-start;
+}

@@ -1,0 +1,15 @@
+# Normalize all text to LF in the repo and on checkout. The Rust crates
+# embed ~30 files via include_str!/include_bytes! (rules TOML, snapshots,
+# bundles); CRLF checkouts on Windows would change those bytes and break
+# hashes/goldens, so eol=lf is mandatory rather than core.autocrlf.
+* text=auto eol=lf
+
+# Binary assets — never normalized or diffed as text.
+*.png binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.wasm binary
+*.gz binary

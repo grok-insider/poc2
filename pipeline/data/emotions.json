@@ -1,0 +1,814 @@
+{
+ "entries": [
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion1",
+   "name": "Diluted Liquid Ire",
+   "id": "DilutedLiquidIre",
+   "drop_level": 1,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Prefix",
+     "modifier": "(10\u201420)% increased Armour",
+     "engine_mod_id": "JewelArmour"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Prefix",
+     "modifier": "(10\u201420)% increased maximum Energy Shield",
+     "engine_mod_id": "JewelEnergyShield"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Prefix",
+     "modifier": "(10\u201420)% increased Evasion Rating",
+     "engine_mod_id": "JewelEvasion"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion2",
+   "name": "Diluted Liquid Guilt",
+   "id": "DilutedLiquidGuilt",
+   "drop_level": 1,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Prefix",
+     "modifier": "(5\u201415)% increased Fire Damage",
+     "engine_mod_id": "JewelFireDamage"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Prefix",
+     "modifier": "(5\u201415)% increased Cold Damage",
+     "engine_mod_id": "JewelColdDamage"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Prefix",
+     "modifier": "(5\u201415)% increased Lightning Damage",
+     "engine_mod_id": "JewelLightningDamage"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion3",
+   "name": "Diluted Liquid Greed",
+   "id": "DilutedLiquidGreed",
+   "drop_level": 1,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Prefix",
+     "modifier": "(5\u201415)% increased Global Physical Damage",
+     "engine_mod_id": "JewelPhysicalDamage"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Prefix",
+     "modifier": "(7\u201413)% increased Chaos Damage",
+     "engine_mod_id": "JewelChaosDamage"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Prefix",
+     "modifier": "(5\u201415)% increased Elemental Damage",
+     "engine_mod_id": "JewelElementalDamage"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion4",
+   "name": "Liquid Paranoia",
+   "id": "LiquidParanoia",
+   "drop_level": 1,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Prefix",
+     "modifier": "(5\u201415)% increased Attack Damage",
+     "engine_mod_id": "JewelAttackDamage"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Suffix",
+     "modifier": "(2\u20144)% increased Cast Speed",
+     "engine_mod_id": "JewelCastSpeed"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "(2\u20144)% increased Attack Speed",
+     "engine_mod_id": "JewelAttackSpeed"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion5",
+   "name": "Liquid Envy",
+   "id": "LiquidEnvy",
+   "drop_level": 1,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Suffix",
+     "modifier": "(4\u20146)% of Skill Mana Costs Converted to Life Costs",
+     "engine_mod_id": "JewelLifeCost"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Prefix",
+     "modifier": "(5\u201415)% increased Spell Damage",
+     "engine_mod_id": "JewelSpellDamage"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "(3\u20145)% increased Cooldown Recovery Rate",
+     "engine_mod_id": "JewelCooldownSpeed"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion6",
+   "name": "Liquid Disgust",
+   "id": "LiquidDisgust",
+   "drop_level": 1,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Suffix",
+     "modifier": "(5\u201410)% increased Life Regeneration rate",
+     "engine_mod_id": "JewelLifeRegeneration"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Suffix",
+     "modifier": "Recover (1\u20142)% of maximum Mana on Kill",
+     "engine_mod_id": "JewelManaonKill"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "Recover (1\u20142)% of maximum Life on Kill",
+     "engine_mod_id": "JewelLifeonKill"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion7",
+   "name": "Liquid Despair",
+   "id": "LiquidDespair",
+   "drop_level": 1,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Suffix",
+     "modifier": "Gain 1 Rage on Melee Hit",
+     "engine_mod_id": "JewelRageonHit"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Suffix",
+     "modifier": "(5\u201415)% increased Critical Hit Chance for Spells",
+     "engine_mod_id": "JewelSpellCriticalChance"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "(6\u201416)% increased Critical Hit Chance for Attacks",
+     "engine_mod_id": "JewelAttackCriticalChance"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion8",
+   "name": "Concentrated Liquid Fear",
+   "id": "ConcentratedLiquidFear",
+   "drop_level": 69,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Suffix",
+     "modifier": "(10\u201420)% increased Warcry Speed",
+     "engine_mod_id": "JewelWarcrySpeed"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Suffix",
+     "modifier": "(10\u201420)% increased Critical Spell Damage Bonus",
+     "engine_mod_id": "JewelSpellCriticalDamage"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "(10\u201420)% increased Critical Damage Bonus for Attack Damage",
+     "engine_mod_id": "JewelAttackCriticalDamage"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion9",
+   "name": "Concentrated Liquid Suffering",
+   "id": "ConcentratedLiquidSuffering",
+   "drop_level": 73,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Prefix",
+     "modifier": "+(1\u20142) to Maximum Rage",
+     "engine_mod_id": "JewelMaximumRage"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Prefix",
+     "modifier": "(4\u20146)% increased Area of Effect",
+     "engine_mod_id": "JewelAreaofEffect"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "(1\u20142)% increased Movement Speed",
+     "engine_mod_id": "JewelMovementSpeed"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotion10",
+   "name": "Concentrated Liquid Isolation",
+   "id": "ConcentratedLiquidIsolation",
+   "drop_level": 77,
+   "kind": "liquid",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Suffix",
+     "modifier": "+1% to Maximum Fire Resistance",
+     "engine_mod_id": "JewelMaximumFireResistance"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Suffix",
+     "modifier": "+1% to Maximum Cold Resistance",
+     "engine_mod_id": "JewelMaximumColdResistance"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "+1% to Maximum Lightning Resistance",
+     "engine_mod_id": "JewelMaximumLightningResistance"
+    },
+    {
+     "base": "Diamond",
+     "affix": "Suffix",
+     "modifier": "+1% to Maximum Chaos Resistance",
+     "engine_mod_id": "CraftedJewelMaximumChaosResistance"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost1",
+   "name": "Ancient Diluted Liquid Ire",
+   "id": "AncientDilutedLiquidIre",
+   "drop_level": 1,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (2\u20143)% increased Armour",
+     "engine_mod_id": "JewelRadiusArmour"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (2\u20143)% increased maximum Energy Shield",
+     "engine_mod_id": "JewelRadiusEnergyShield"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (2\u20143)% increased Evasion Rating",
+     "engine_mod_id": "JewelRadiusEvasion"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost2",
+   "name": "Ancient Diluted Liquid Guilt",
+   "id": "AncientDilutedLiquidGuilt",
+   "drop_level": 1,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (1\u20142)% increased Fire Damage",
+     "engine_mod_id": "JewelRadiusFireDamage"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (1\u20142)% increased Cold Damage",
+     "engine_mod_id": "JewelRadiusColdDamage"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (1\u20142)% increased Lightning Damage",
+     "engine_mod_id": "JewelRadiusLightningDamage"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost3",
+   "name": "Ancient Diluted Liquid Greed",
+   "id": "AncientDilutedLiquidGreed",
+   "drop_level": 1,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (1\u20142)% increased Global Physical Damage",
+     "engine_mod_id": "JewelRadiusPhysicalDamage"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (1\u20142)% increased Chaos Damage",
+     "engine_mod_id": "JewelRadiusChaosDamage"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (1\u20142)% increased Elemental Damage",
+     "engine_mod_id": "JewelRadiusElementalDamage"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost4",
+   "name": "Ancient Liquid Paranoia",
+   "id": "AncientLiquidParanoia",
+   "drop_level": 1,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (1\u20142)% increased Attack Damage",
+     "engine_mod_id": "JewelRadiusAttackDamage"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (1\u20142)% increased Cast Speed",
+     "engine_mod_id": "JewelRadiusCastSpeed"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (1\u20142)% increased Attack Speed",
+     "engine_mod_id": "JewelRadiusAttackSpeed"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost5",
+   "name": "Ancient Liquid Envy",
+   "id": "AncientLiquidEnvy",
+   "drop_level": 1,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (2\u20143)% of Skill Mana Costs Converted to Life Costs",
+     "engine_mod_id": "JewelRadiusLifeCost"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Prefix",
+     "modifier": "Small Passive Skills in Radius also grant (1\u20142)% increased Spell Damage",
+     "engine_mod_id": "JewelRadiusSpellDamage"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (1\u20143)% increased Cooldown Recovery Rate",
+     "engine_mod_id": "JewelRadiusCooldownSpeed"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost6",
+   "name": "Ancient Liquid Disgust",
+   "id": "AncientLiquidDisgust",
+   "drop_level": 1,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (3\u20145)% increased Life Regeneration rate",
+     "engine_mod_id": "JewelRadiusLifeRegeneration"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant Recover 1% of maximum Mana on Kill",
+     "engine_mod_id": "JewelRadiusManaonKill"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant Recover 1% of maximum Life on Kill",
+     "engine_mod_id": "JewelRadiusLifeonKill"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost7",
+   "name": "Ancient Liquid Despair",
+   "id": "AncientLiquidDespair",
+   "drop_level": 1,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant Gain 1 Rage on Melee Hit",
+     "engine_mod_id": "JewelRageonHit"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (3\u20147)% increased Critical Hit Chance for Spells",
+     "engine_mod_id": "JewelRadiusSpellCriticalChance"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (3\u20147)% increased Critical Hit Chance for Attacks",
+     "engine_mod_id": "JewelRadiusAttackCriticalChance"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost8",
+   "name": "Ancient Concentrated Liquid Fear",
+   "id": "AncientConcentratedLiquidFear",
+   "drop_level": 69,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Suffix",
+     "modifier": "Small Passive Skills in Radius also grant (2\u20143)% increased Warcry Speed",
+     "engine_mod_id": "JewelRadiusWarcrySpeed"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (5\u201410)% increased Critical Spell Damage Bonus",
+     "engine_mod_id": "JewelRadiusSpellCriticalDamage"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant (5\u201410)% increased Critical Damage Bonus for Attack Damage",
+     "engine_mod_id": "JewelRadiusAttackCriticalDamage"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost9",
+   "name": "Ancient Concentrated Liquid Suffering",
+   "id": "AncientConcentratedLiquidSuffering",
+   "drop_level": 73,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Prefix",
+     "modifier": "Notable Passive Skills in Radius also grant +1 to Maximum Rage",
+     "engine_mod_id": "JewelRadiusMaximumRage"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Prefix",
+     "modifier": "Notable Passive Skills in Radius also grant (2\u20143)% increased Area of Effect",
+     "engine_mod_id": "JewelRadiusAreaofEffect"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant 1% increased Movement Speed",
+     "engine_mod_id": "JewelRadiusMovementSpeed"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/DistilledEmotionTimeLost10",
+   "name": "Ancient Concentrated Liquid Isolation",
+   "id": "AncientConcentratedLiquidIsolation",
+   "drop_level": 77,
+   "kind": "ancient",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Prefix",
+     "modifier": "Increases and Reductions to Cold and Lightning Damage in Radius are transformed to apply to Fire Damage",
+     "engine_mod_id": "JewelRadiusIncLightningColdToFire"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Prefix",
+     "modifier": "Increases and Reductions to Fire and Lightning Damage in Radius are transformed to apply to Cold Damage",
+     "engine_mod_id": "JewelRadiusIncLightningFireToCold"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Prefix",
+     "modifier": "Increases and Reductions to Cold and Fire Damage in Radius are transformed to apply to Lightning Damage",
+     "engine_mod_id": "JewelRadiusIncColdFreToLightning"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/EndgameDistilledEmotion1",
+   "name": "Potent Liquid Melancholy",
+   "id": "PotentLiquidMelancholy",
+   "drop_level": 65,
+   "kind": "potent",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Suffix",
+     "modifier": "Debilitate Enemies on Hit while you have an Emerald and a Sapphire socketed in your tree",
+     "engine_mod_id": "CraftedJewelDebilitateOnHitWhileEmeraldSapphireSocketed"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Suffix",
+     "modifier": "Inflict Elemental Exposure on Hit while you have a Ruby and an Emerald socketed in your tree",
+     "engine_mod_id": "CraftedJewelExposureOnHitWhileRubyEmeraldSocketed"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "Blind Enemies on Hit while you have a Ruby and a Sapphire socketed in your tree",
+     "engine_mod_id": "CraftedJewelBlindOnHitWhileRubySapphireSocketed"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/EndgameDistilledEmotion2",
+   "name": "Potent Liquid Ferocity",
+   "id": "PotentLiquidFerocity",
+   "drop_level": 65,
+   "kind": "potent",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Prefix",
+     "modifier": "(40\u201460)% increased Effect of Suffixes",
+     "engine_mod_id": "CraftedJewelSuffixEffect"
+    },
+    {
+     "base": "Ruby",
+     "affix": "Suffix",
+     "modifier": "(40\u201460)% increased Effect of Prefixes",
+     "engine_mod_id": "CraftedJewelPrefixEffect"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Prefix",
+     "modifier": "(40\u201460)% increased Effect of Suffixes",
+     "engine_mod_id": "CraftedJewelSuffixEffect"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Suffix",
+     "modifier": "(40\u201460)% increased Effect of Prefixes",
+     "engine_mod_id": "CraftedJewelPrefixEffect"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Prefix",
+     "modifier": "(40\u201460)% increased Effect of Suffixes",
+     "engine_mod_id": "CraftedJewelSuffixEffect"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "(40\u201460)% increased Effect of Prefixes",
+     "engine_mod_id": "CraftedJewelPrefixEffect"
+    },
+    {
+     "base": "Diamond",
+     "affix": "Prefix",
+     "modifier": "(40\u201460)% increased Effect of Suffixes",
+     "engine_mod_id": "CraftedJewelSuffixEffect"
+    },
+    {
+     "base": "Diamond",
+     "affix": "Suffix",
+     "modifier": "(40\u201460)% increased Effect of Prefixes",
+     "engine_mod_id": "CraftedJewelPrefixEffect"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/EndgameDistilledEmotion3",
+   "name": "Potent Liquid Contempt",
+   "id": "PotentLiquidContempt",
+   "drop_level": 65,
+   "kind": "potent",
+   "targets": [
+    {
+     "base": "Ruby",
+     "affix": "Prefix",
+     "modifier": "+1 Suffix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalSuffixAllowed"
+    },
+    {
+     "base": "Ruby",
+     "affix": "Suffix",
+     "modifier": "+1 Prefix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalPrefixAllowed"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Prefix",
+     "modifier": "+1 Suffix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalSuffixAllowed"
+    },
+    {
+     "base": "Sapphire",
+     "affix": "Suffix",
+     "modifier": "+1 Prefix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalPrefixAllowed"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Prefix",
+     "modifier": "+1 Suffix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalSuffixAllowed"
+    },
+    {
+     "base": "Emerald",
+     "affix": "Suffix",
+     "modifier": "+1 Prefix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalPrefixAllowed"
+    },
+    {
+     "base": "Diamond",
+     "affix": "Prefix",
+     "modifier": "+1 Suffix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalSuffixAllowed"
+    },
+    {
+     "base": "Diamond",
+     "affix": "Suffix",
+     "modifier": "+1 Prefix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalPrefixAllowed"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/EndgameDistilledEmotionTimeLost1",
+   "name": "Ancient Potent Liquid Melancholy",
+   "id": "AncientPotentLiquidMelancholy",
+   "drop_level": 65,
+   "kind": "ancient_potent",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Prefix",
+     "modifier": "Upgrades Radius to Very Large",
+     "engine_mod_id": "CraftedJewelRadiusExtraLargeSize"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Prefix",
+     "modifier": "Upgrades Radius to Very Large",
+     "engine_mod_id": "CraftedJewelRadiusExtraLargeSize"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Prefix",
+     "modifier": "Upgrades Radius to Very Large",
+     "engine_mod_id": "CraftedJewelRadiusExtraLargeSize"
+    },
+    {
+     "base": "Time-Lost Diamond",
+     "affix": "Prefix",
+     "modifier": "Upgrades Radius to Very Large",
+     "engine_mod_id": "CraftedJewelRadiusExtraLargeSize"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/EndgameDistilledEmotionTimeLost2",
+   "name": "Ancient Potent Liquid Ferocity",
+   "id": "AncientPotentLiquidFerocity",
+   "drop_level": 65,
+   "kind": "ancient_potent",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant +(5\u20147)% to Fire Resistance",
+     "engine_mod_id": "CraftedJewelRadiusFireResistance"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant +(5\u20147)% to Cold Resistance",
+     "engine_mod_id": "CraftedJewelRadiusColdResistance"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant +(5\u20147)% to Lightning Resistance",
+     "engine_mod_id": "CraftedJewelRadiusLightningResistance"
+    },
+    {
+     "base": "Time-Lost Diamond",
+     "affix": "Suffix",
+     "modifier": "Notable Passive Skills in Radius also grant +(4\u20145)% to Chaos Resistance",
+     "engine_mod_id": "CraftedJewelRadiusChaosResistance"
+    }
+   ]
+  },
+  {
+   "metadata_id": "Metadata/Items/Currency/EndgameDistilledEmotionTimeLost3",
+   "name": "Ancient Potent Liquid Contempt",
+   "id": "AncientPotentLiquidContempt",
+   "drop_level": 65,
+   "kind": "ancient_potent",
+   "targets": [
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Prefix",
+     "modifier": "+1 Suffix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalSuffixAllowed"
+    },
+    {
+     "base": "Time-Lost Ruby",
+     "affix": "Suffix",
+     "modifier": "+1 Prefix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalPrefixAllowed"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Prefix",
+     "modifier": "+1 Suffix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalSuffixAllowed"
+    },
+    {
+     "base": "Time-Lost Sapphire",
+     "affix": "Suffix",
+     "modifier": "+1 Prefix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalPrefixAllowed"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Prefix",
+     "modifier": "+1 Suffix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalSuffixAllowed"
+    },
+    {
+     "base": "Time-Lost Emerald",
+     "affix": "Suffix",
+     "modifier": "+1 Prefix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalPrefixAllowed"
+    },
+    {
+     "base": "Time-Lost Diamond",
+     "affix": "Prefix",
+     "modifier": "+1 Suffix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalSuffixAllowed"
+    },
+    {
+     "base": "Time-Lost Diamond",
+     "affix": "Suffix",
+     "modifier": "+1 Prefix Modifier allowed",
+     "engine_mod_id": "CraftedJewelAdditionalPrefixAllowed"
+    }
+   ]
+  }
+ ]
+}

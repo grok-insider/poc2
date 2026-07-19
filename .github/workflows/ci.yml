@@ -1,10 +1,17 @@
 name: CI
 
-on:
+# Branch model (see CONTRIBUTING.md): work lands in `dev` first, then a single
+# `dev -> master` PR ships. CI runs on pushes to both integration branches and on
+# every PR, so `dev` and `master` always stay green.
+"on":
   push:
-    branches: [main]
+    branches: [master, dev]
   pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -34,7 +41,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-            apps/desktop/src-tauri/target
           key: cargo-${{ runner.os }}-${{ matrix.task }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-${{ matrix.task }}-
@@ -62,36 +68,173 @@ jobs:
       - name: Flake check
         run: nix flake check --no-build
 
-  frontend:
-    name: Frontend (${{ matrix.task }})
+  web:
+    name: Web (typecheck · lint · build)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        task: [check, build]
-    defaults:
-      run:
-        working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cache cargo (wasm build)
+        uses: actions/cache@v4
         with:
-          version: 10
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-wasm-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-wasm-
+            cargo-${{ runner.os }}-
 
-      - uses: actions/setup-node@v4
+      # The web app is a Bun workspace at the repo root; everything runs from root.
+      # --frozen-lockfile fails CI if bun.lock drifts from package.json (no silent re-lock).
+      - name: Install web deps
+        run: nix develop --command bun install --frozen-lockfile
+
+      # The engine ships as WebAssembly; worker.ts imports lib/wasm/* so this
+      # must run before typecheck/build.
+      - name: Build WASM engine
+        run: nix develop --command bun run wasm
+
+      - name: Typecheck
+        run: nix develop --command bun run typecheck
+
+      - name: Lint
+        run: nix develop --command bun run lint
+
+      - name: Web unit tests
+        run: nix develop --command bun run test:web
+
+      - name: Desktop unit tests + typecheck
+        run: |
+          nix develop --command bun run test:desktop
+          nix develop --command bun run desktop:typecheck
+
+      - name: Build (static export)
+        run: nix develop --command bun run build
+
+  # ADR-0010: Windows 11 is a supported target. This lane runs WITHOUT Nix
+  # (rustup + Bun), proving the no-nix dev path end to end: workspace tests,
+  # WASM build, web export, desktop tests, and the NSIS package.
+  windows:
+    name: Windows (cargo · wasm · web · desktop)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
         with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-all-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-all-
 
-      - name: install
-        run: pnpm install --frozen-lockfile=false
+      # rustup on the runner picks up rust-toolchain.toml (incl. the
+      # wasm32-unknown-unknown target) on first invocation.
+      - name: Rust tests
+        run: cargo test --workspace --all-targets
 
-      - name: svelte-check
-        if: matrix.task == 'check'
-        run: pnpm check
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
 
-      - name: build
-        if: matrix.task == 'build'
-        run: pnpm build
+      # CLI version must match the wasm-bindgen crate in Cargo.lock.
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.117
+
+      - name: Install web deps
+        run: bun install --frozen-lockfile
+
+      # wasm-opt is absent on this lane; build-wasm.mjs warns and skips it
+      # (the Nix lane covers the optimized artifact).
+      - name: Build WASM engine
+        run: bun run wasm
+
+      - name: Typecheck + tests + export
+        run: |
+          bun run typecheck
+          bun run test:web
+          bun run build
+
+      - name: Desktop tests + typecheck
+        run: |
+          bun run test:desktop
+          bun run desktop:typecheck
+
+      - name: Package desktop (NSIS)
+        working-directory: apps/desktop
+        run: |
+          cargo build -p poc2-windows-ocr --release
+          bun run build
+          bun x electron-builder --win --publish never
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc2-desktop-windows
+          path: apps/desktop/dist-packages/*.exe
+          if-no-files-found: warn
+
+  # Linux packaging on a plain FHS runner (electron-builder downloads its
+  # own Electron; NixOS dev-runs use nixpkgs electron instead — ADR-0010).
+  desktop-linux:
+    name: Desktop package (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - name: Cache cargo (wasm build)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-desktop-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-desktop-
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.117
+
+      - name: Install web deps
+        run: bun install --frozen-lockfile
+
+      - name: Build WASM + web export
+        run: |
+          rustup target add wasm32-unknown-unknown
+          bun run wasm
+          bun run build
+
+      - name: Package desktop (AppImage + deb)
+        working-directory: apps/desktop
+        run: |
+          bun run build
+          bun x electron-builder --linux --publish never
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc2-desktop-linux
+          path: |
+            apps/desktop/dist-packages/*.AppImage
+            apps/desktop/dist-packages/*.deb
+          if-no-files-found: warn

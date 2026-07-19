@@ -55,14 +55,36 @@ use crate::featurize::FeatureVec;
 use crate::goal::Goal;
 use crate::training::value_iteration::ValueIterationResult;
 
+/// Schema version of the trained-model artefact itself — bumped whenever
+/// the **featurization semantics** change (independently of the bundle and
+/// engine schemas), because a Q-table keyed on packed [`FeatureVec`]s is
+/// only meaningful under the featurization it was trained with.
+///
+/// History:
+/// - v1: presence-only `target_match` bitmap; budget included in
+///   [`goal_hash`].
+/// - v2: count-aware `target_match` (bit `i` = spec `i` FULLY satisfied
+///   per `spec_satisfied`); budget dropped from [`goal_hash`].
+pub const TRAINED_ARTEFACT_SCHEMA_VERSION: u32 = 2;
+
+/// Serde default for artefacts written before the field existed (= v1),
+/// so pre-v2 artefacts deserialize and are then rejected by the loader's
+/// version guard.
+fn artefact_schema_v1() -> u32 {
+    1
+}
+
 /// Stable canonical hash of a [`Goal`] keyed on the externally-meaningful
 /// fields. Used as the lookup key into [`TrainedModelCache`].
 ///
-/// Two goals with the same `target.prefixes`, `target.suffixes`,
-/// `abandon_criteria`, and `budget` produce identical hashes. Field
-/// ordering inside `Vec<TargetSpec>` matters — callers should
-/// canonicalize their target specs before constructing goals if they
-/// want round-trip stability across UI sessions.
+/// Two goals with the same `target.prefixes`, `target.suffixes`, and
+/// `abandon_criteria` produce identical hashes. The **budget is
+/// deliberately excluded**: the trained policy's transition dynamics and
+/// terminal predicate don't depend on it, and hashing it made the cache
+/// miss on every budget tweak (artefact schema v2). Field ordering inside
+/// `Vec<TargetSpec>` matters — callers should canonicalize their target
+/// specs before constructing goals if they want round-trip stability
+/// across UI sessions.
 #[must_use]
 pub fn goal_hash(goal: &Goal) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -78,13 +100,7 @@ pub fn goal_hash(goal: &Goal) -> u64 {
     for spec in &goal.target.suffixes {
         spec_hash(spec, &mut hasher);
     }
-    "::SUF_BUDGET_DIVIDER::".hash(&mut hasher);
-    // Hash the budget's serialized form to avoid depending on internal
-    // representation of `DivEquiv`. This is rounding-safe because the
-    // serialization is deterministic for f64.
-    let budget_str = format!("{:?}", goal.budget);
-    budget_str.hash(&mut hasher);
-    "::BUDGET_ABANDON_DIVIDER::".hash(&mut hasher);
+    "::SUF_ABANDON_DIVIDER::".hash(&mut hasher);
     for predicate in &goal.abandon_criteria {
         let pred_str = format!("{predicate:?}");
         pred_str.hash(&mut hasher);
@@ -127,6 +143,11 @@ pub struct TrainedModel {
     /// Item class the model targets. The advisor may have trained models
     /// for multiple classes per goal; lookup keys on both.
     pub item_class: ItemClassId,
+    /// Artefact schema version (featurization semantics). Loaders refuse
+    /// mismatches against [`TRAINED_ARTEFACT_SCHEMA_VERSION`]; artefacts
+    /// written before the field existed default to v1 and are refused.
+    #[serde(default = "artefact_schema_v1")]
+    pub artefact_schema_version: u32,
     /// Bundle schema version the model was trained against. Loaders
     /// refuse mismatched versions and trigger retraining.
     pub bundle_schema_version: u32,
@@ -148,6 +169,60 @@ pub struct TrainedModel {
     /// uses this to know which side of the risk slider this model
     /// covers.
     pub reward_kind: RewardKind,
+    /// Runtime lookup index over `q_table`, keyed by packed state. Built
+    /// by [`Self::build_index`] (the cache builds it on insert); never
+    /// serialized. Empty = fall back to the linear scan.
+    #[serde(skip)]
+    q_index: AHashMap<u64, Vec<(AdvisorAction, f64)>>,
+}
+
+impl TrainedModel {
+    /// Build the per-state lookup index over `q_table`. Idempotent.
+    /// [`TrainedModelCache::insert`] calls this so plan-time lookups are
+    /// O(actions-at-state) instead of a full-table linear scan per node.
+    pub fn build_index(&mut self) {
+        if !self.q_index.is_empty() {
+            return;
+        }
+        let mut index: AHashMap<u64, Vec<(AdvisorAction, f64)>> = AHashMap::new();
+        for e in &self.q_table {
+            index
+                .entry(e.state)
+                .or_default()
+                .push((e.action.clone(), e.q));
+        }
+        self.q_index = index;
+    }
+
+    /// Does this model's solved state space include `state`? Consulted by
+    /// the on-demand solver (ADR-0015): a cache hit whose reachable set
+    /// doesn't cover the CURRENT item (e.g. solved from an empty base,
+    /// user then pasted a mid-craft Rare) is re-solved from the new root
+    /// rather than silently missing every Q lookup.
+    #[must_use]
+    pub fn covers_state(&self, state: FeatureVec) -> bool {
+        let packed = state.pack();
+        self.value_path_length.iter().any(|(s, _)| *s == packed)
+    }
+
+    /// `Q(state, action)` lookup — via the index when built, else a
+    /// linear scan over `q_table` (models constructed directly in tests).
+    #[must_use]
+    pub fn q_at(&self, state: FeatureVec, action: &AdvisorAction) -> Option<f64> {
+        let packed = state.pack();
+        if self.q_index.is_empty() {
+            return self
+                .q_table
+                .iter()
+                .find(|e| e.state == packed && &e.action == action)
+                .map(|e| e.q);
+        }
+        self.q_index
+            .get(&packed)?
+            .iter()
+            .find(|(a, _)| a == action)
+            .map(|(_, q)| *q)
+    }
 }
 
 /// Single Q-table entry: (state, action, value).
@@ -205,23 +280,35 @@ pub fn trained_model_from(
     let value_cost: Vec<(u64, f64)> = result_cost
         .map(|r| r.value.iter().map(|(s, v)| (s.pack(), *v)).collect())
         .unwrap_or_default();
-    TrainedModel {
+    let mut model = TrainedModel {
         goal_hash,
         item_class,
+        artefact_schema_version: TRAINED_ARTEFACT_SCHEMA_VERSION,
         bundle_schema_version,
         engine_schema_version,
         q_table,
         value_path_length,
         value_cost,
         reward_kind,
-    }
+        q_index: AHashMap::new(),
+    };
+    model.build_index();
+    model
+}
+
+/// One cache slot: the canonical path-length model plus the optional
+/// cost-reward twin used by the risk-slider Q-blend (docs/81 §6.3).
+#[derive(Debug, Clone)]
+struct TrainedEntry {
+    path: TrainedModel,
+    cost: Option<TrainedModel>,
 }
 
 /// Per-(goal, item-class) cache of trained models. Loaded lazily from
 /// the bundle's trained-model artefact.
 #[derive(Debug, Clone, Default)]
 pub struct TrainedModelCache {
-    by_key: AHashMap<(u64, ItemClassId), TrainedModel>,
+    by_key: AHashMap<(u64, ItemClassId), TrainedEntry>,
 }
 
 impl TrainedModelCache {
@@ -229,16 +316,44 @@ impl TrainedModelCache {
         Self::default()
     }
 
-    /// Insert a trained model into the cache.
+    /// Insert a trained (path-length) model into the cache without a cost
+    /// twin. The model's lookup index is built on insertion.
     pub fn insert(&mut self, model: TrainedModel) {
-        let key = (model.goal_hash, model.item_class.clone());
-        self.by_key.insert(key, model);
+        self.insert_pair(model, None);
     }
 
-    /// Lookup a trained model by goal hash + item class.
+    /// Insert a path-length model together with its optional cost-reward
+    /// twin (both solved from the same transition model). Lookup indexes
+    /// are built on insertion.
+    pub fn insert_pair(&mut self, mut path: TrainedModel, cost: Option<TrainedModel>) {
+        path.build_index();
+        let cost = cost.map(|mut m| {
+            m.build_index();
+            m
+        });
+        let key = (path.goal_hash, path.item_class.clone());
+        self.by_key.insert(key, TrainedEntry { path, cost });
+    }
+
+    /// Lookup the canonical (path-length) trained model by goal hash +
+    /// item class.
     #[must_use]
     pub fn lookup(&self, goal_hash: u64, item_class: &ItemClassId) -> Option<&TrainedModel> {
-        self.by_key.get(&(goal_hash, item_class.clone()))
+        self.by_key
+            .get(&(goal_hash, item_class.clone()))
+            .map(|e| &e.path)
+    }
+
+    /// Lookup both reward models: `(path_length, Option<cost>)`.
+    #[must_use]
+    pub fn lookup_pair(
+        &self,
+        goal_hash: u64,
+        item_class: &ItemClassId,
+    ) -> Option<(&TrainedModel, Option<&TrainedModel>)> {
+        self.by_key
+            .get(&(goal_hash, item_class.clone()))
+            .map(|e| (&e.path, e.cost.as_ref()))
     }
 
     /// Number of cached models.
@@ -249,6 +364,13 @@ impl TrainedModelCache {
 
     pub fn is_empty(&self) -> bool {
         self.by_key.is_empty()
+    }
+
+    /// Drop every cached model. Used when the engine's League ruleset or
+    /// plugin content changes (both alter candidate enumeration / goal
+    /// semantics, so cached policies may be stale).
+    pub fn clear(&mut self) {
+        self.by_key.clear();
     }
 }
 
@@ -263,12 +385,7 @@ pub fn score_with_trained_policy(
     state: FeatureVec,
     action: &AdvisorAction,
 ) -> Option<f64> {
-    let packed = state.pack();
-    model
-        .q_table
-        .iter()
-        .find(|e| e.state == packed && &e.action == action)
-        .map(|e| e.q)
+    model.q_at(state, action)
 }
 
 /// Detect simulator-vs-trained-model drift.
@@ -391,12 +508,87 @@ mod tests {
     }
 
     #[test]
+    fn goal_hash_ignores_budget() {
+        // Artefact schema v2: a budget tweak must NOT re-key the cache —
+        // the trained policy's dynamics don't depend on it.
+        let a = es_goal();
+        let mut b = es_goal();
+        b.budget = DivEquiv::point(1.0);
+        assert_eq!(goal_hash(&a), goal_hash(&b));
+    }
+
+    #[test]
+    fn q_at_uses_index_after_cache_insert() {
+        let mut cache = TrainedModelCache::new();
+        let class = ItemClassId::from("BodyArmour");
+        let mut model = TrainedModel {
+            goal_hash: 7,
+            item_class: class.clone(),
+            artefact_schema_version: TRAINED_ARTEFACT_SCHEMA_VERSION,
+            bundle_schema_version: 1,
+            engine_schema_version: 1,
+            q_table: vec![QEntry {
+                state: fv(1, 0).pack(),
+                action: act("ChaosOrb"),
+                q: -2.5,
+            }],
+            value_path_length: vec![],
+            value_cost: vec![],
+            reward_kind: RewardKind::PathLength,
+            q_index: AHashMap::new(),
+        };
+        // Unindexed lookup (linear scan) works…
+        assert_eq!(model.q_at(fv(1, 0), &act("ChaosOrb")), Some(-2.5));
+        // …and the indexed lookup agrees.
+        model.build_index();
+        assert_eq!(model.q_at(fv(1, 0), &act("ChaosOrb")), Some(-2.5));
+        assert_eq!(model.q_at(fv(1, 0), &act("RegalOrb")), None);
+        assert_eq!(model.q_at(fv(2, 0), &act("ChaosOrb")), None);
+
+        cache.insert(model);
+        let looked_up = cache.lookup(7, &class).unwrap();
+        assert_eq!(looked_up.q_at(fv(1, 0), &act("ChaosOrb")), Some(-2.5));
+    }
+
+    #[test]
+    fn lookup_pair_returns_cost_twin_when_inserted() {
+        let mut cache = TrainedModelCache::new();
+        let class = ItemClassId::from("BodyArmour");
+        let mk = |reward_kind: RewardKind, q: f64| TrainedModel {
+            goal_hash: 9,
+            item_class: class.clone(),
+            artefact_schema_version: TRAINED_ARTEFACT_SCHEMA_VERSION,
+            bundle_schema_version: 1,
+            engine_schema_version: 1,
+            q_table: vec![QEntry {
+                state: fv(1, 0).pack(),
+                action: act("ChaosOrb"),
+                q,
+            }],
+            value_path_length: vec![],
+            value_cost: vec![],
+            reward_kind,
+            q_index: AHashMap::new(),
+        };
+        cache.insert_pair(
+            mk(RewardKind::PathLength, -3.0),
+            Some(mk(RewardKind::Cost, -12.0)),
+        );
+        let (path, cost) = cache.lookup_pair(9, &class).unwrap();
+        assert_eq!(path.q_at(fv(1, 0), &act("ChaosOrb")), Some(-3.0));
+        assert_eq!(cost.unwrap().q_at(fv(1, 0), &act("ChaosOrb")), Some(-12.0));
+        // Plain lookup still returns the path model.
+        assert!(cache.lookup(9, &class).is_some());
+    }
+
+    #[test]
     fn cache_round_trip_preserves_q_values() {
         let mut cache = TrainedModelCache::new();
         let class = ItemClassId::from("BodyArmour");
         let model = TrainedModel {
             goal_hash: 42,
             item_class: class.clone(),
+            artefact_schema_version: TRAINED_ARTEFACT_SCHEMA_VERSION,
             bundle_schema_version: 1,
             engine_schema_version: 1,
             q_table: vec![
@@ -414,6 +606,7 @@ mod tests {
             value_path_length: vec![(fv(1, 0).pack(), -2.5)],
             value_cost: vec![],
             reward_kind: RewardKind::PathLength,
+            q_index: AHashMap::new(),
         };
         cache.insert(model);
         assert_eq!(cache.len(), 1);
@@ -431,12 +624,14 @@ mod tests {
         cache.insert(TrainedModel {
             goal_hash: 42,
             item_class: ItemClassId::from("BodyArmour"),
+            artefact_schema_version: TRAINED_ARTEFACT_SCHEMA_VERSION,
             bundle_schema_version: 1,
             engine_schema_version: 1,
             q_table: vec![],
             value_path_length: vec![],
             value_cost: vec![],
             reward_kind: RewardKind::PathLength,
+            q_index: AHashMap::new(),
         });
         assert!(cache.lookup(42, &ItemClassId::from("BodyArmour")).is_some());
         assert!(cache.lookup(99, &ItemClassId::from("BodyArmour")).is_none());
@@ -448,6 +643,7 @@ mod tests {
         let model = TrainedModel {
             goal_hash: 0,
             item_class: ItemClassId::from("BodyArmour"),
+            artefact_schema_version: TRAINED_ARTEFACT_SCHEMA_VERSION,
             bundle_schema_version: 1,
             engine_schema_version: 1,
             q_table: vec![QEntry {
@@ -458,6 +654,7 @@ mod tests {
             value_path_length: vec![],
             value_cost: vec![],
             reward_kind: RewardKind::PathLength,
+            q_index: AHashMap::new(),
         };
         assert!(score_with_trained_policy(&model, fv(2, 0), &act("ChaosOrb")).is_none());
         assert!(score_with_trained_policy(&model, fv(1, 0), &act("RegalOrb")).is_none());

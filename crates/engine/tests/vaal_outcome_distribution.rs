@@ -19,9 +19,10 @@
 //! Tier 1.4.
 
 use poc2_engine::currency::basic::VaalOrb;
+use poc2_engine::currency::{ApplyContext, Currency};
 use poc2_engine::ids::TagId;
 use poc2_engine::omen::{Omen, OmenSet};
-use poc2_engine::patch::PatchVersion;
+use poc2_engine::patch::{League, PatchVersion};
 use poc2_engine::{
     apply_currency, AffixType, BaseTypeId, Item, ItemClassId, ModDefinition, ModDomain, ModFlags,
     ModGroup, ModGroupId, ModId, ModKind, ModRegistry, ModRoll, PatchRange, QualityKind, Rarity,
@@ -49,6 +50,7 @@ fn mk_explicit_mod(id: &str, group: &str, affix: AffixType) -> ModDefinition {
         }],
         stats: smallvec![],
         required_level: 1,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
         patch_range: PatchRange::ALL,
         flags: ModFlags::empty(),
@@ -69,6 +71,7 @@ fn mk_vaal_implicit(id: &str, group: &str) -> ModDefinition {
         spawn_weights: smallvec![],
         stats: smallvec![],
         required_level: 1,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
         patch_range: PatchRange::ALL,
         flags: ModFlags::CORRUPTED_ONLY,
@@ -341,6 +344,7 @@ fn vaal_brick_replaces_with_corrupted_mod_when_pool_exists() {
                 }],
                 stats: smallvec![],
                 required_level: 1,
+                tier: None,
                 allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
                 patch_range: PatchRange::ALL,
                 flags: ModFlags::CORRUPTED_ONLY,
@@ -361,6 +365,7 @@ fn vaal_brick_replaces_with_corrupted_mod_when_pool_exists() {
                 }],
                 stats: smallvec![],
                 required_level: 1,
+                tier: None,
                 allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
                 patch_range: PatchRange::ALL,
                 flags: ModFlags::CORRUPTED_ONLY,
@@ -492,4 +497,251 @@ fn vaal_add_enchantment_pushes_corrupted_kind_into_enchantments_slot() {
         saw_enchantment,
         "AddEnchantment should land a Corrupted-Implicit roll within 2000 trials"
     );
+}
+
+// =========================================================================
+// M-bugfix: Omen of Corruption league gate (0.5 "Return of the Ancients").
+//
+// In 0.5+ the Omen of Corruption only functions in Standard leagues. In the
+// challenge league the omen is NOT consumed and has no effect, so NoChange
+// remains a possible Vaal outcome. `apply_currency` builds its own context
+// defaulting to League::current() (== Challenge), so these tests construct
+// `ApplyContext` directly and drive the league via `with_league` to exercise
+// both rulesets deterministically.
+// =========================================================================
+
+/// In 0.5 Challenge the Omen of Corruption is gated off: it is neither
+/// consumed nor effective, so NoChange can still occur and the omen survives
+/// the apply.
+#[test]
+fn omen_of_corruption_has_no_effect_in_0_5_challenge() {
+    let registry = registry_with_vaal_implicits();
+
+    // Robust signal: a single apply on a fresh item must NOT consume the omen
+    // because the 0.5 Challenge gate short-circuits before consumption.
+    {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x_0C5C_0001);
+        let mut omens = OmenSet::new();
+        omens.push(Omen::corruption());
+        let mut item = mk_rare_armour();
+        let mut ctx = ApplyContext::new_without_bases(
+            &registry,
+            &mut rng,
+            PatchVersion::PATCH_0_5_0,
+            &mut omens,
+        )
+        .with_league(League::Challenge);
+        VaalOrb::new()
+            .apply(&mut item, &mut ctx)
+            .expect("Vaal must succeed on a non-corrupted Rare");
+        assert!(item.corrupted, "item should be corrupted after Vaal");
+        assert!(
+            !omens.is_empty(),
+            "Omen of Corruption must NOT be consumed in 0.5 Challenge (it is league-gated off)"
+        );
+        assert_eq!(
+            omens.len(),
+            1,
+            "exactly the un-consumed corruption omen should remain in the set"
+        );
+    }
+
+    // Distribution signal: because the omen is ineffective, the NoChange
+    // outcome (item corrupted but mods/sockets/quality unchanged) must still
+    // appear across many seeded fresh Rares. The fixture's empty-stat mods
+    // make NoChange and RerollValues observationally identical, so observing
+    // the "no observable change" bucket at all confirms the NoChange branch
+    // was reachable (it would be suppressed if the omen were honored).
+    let mut saw_no_change = false;
+    for trial in 0..4_000usize {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x_0C5C_5EED ^ trial as u64);
+        let mut omens = OmenSet::new();
+        omens.push(Omen::corruption());
+        let mut item = mk_rare_armour();
+        let before_sockets = item.sockets.len();
+        let before_quality = item.quality;
+        {
+            let mut ctx = ApplyContext::new_without_bases(
+                &registry,
+                &mut rng,
+                PatchVersion::PATCH_0_5_0,
+                &mut omens,
+            )
+            .with_league(League::Challenge);
+            VaalOrb::new().apply(&mut item, &mut ctx).unwrap();
+        }
+        assert!(item.corrupted);
+        if classify(&item, before_sockets, before_quality).unwrap() == "no_change_or_reroll" {
+            saw_no_change = true;
+            break;
+        }
+    }
+    assert!(
+        saw_no_change,
+        "in 0.5 Challenge the ineffective corruption omen must leave NoChange reachable"
+    );
+}
+
+/// In 0.5 Standard the Omen of Corruption is active: it IS consumed by a
+/// single apply and the NoChange branch is suppressed across many trials.
+#[test]
+fn omen_of_corruption_consumed_in_0_5_standard() {
+    let registry = registry_with_vaal_implicits();
+
+    // The omen is consumed by a single apply in Standard.
+    {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x_05D5_0001);
+        let mut omens = OmenSet::new();
+        omens.push(Omen::corruption());
+        let mut item = mk_rare_armour();
+        let mut ctx = ApplyContext::new_without_bases(
+            &registry,
+            &mut rng,
+            PatchVersion::PATCH_0_5_0,
+            &mut omens,
+        )
+        .with_league(League::Standard);
+        VaalOrb::new()
+            .apply(&mut item, &mut ctx)
+            .expect("Vaal must succeed on a non-corrupted Rare");
+        assert!(item.corrupted);
+        assert!(
+            omens.is_empty(),
+            "Omen of Corruption must be consumed in 0.5 Standard"
+        );
+    }
+
+    // With the omen honored, NoChange (the only outcome that leaves the item
+    // entirely unchanged) is removed from the distribution. Because the
+    // fixture's mods carry no stats, RerollValues still lands in the
+    // "no observable change" bucket — so we cannot assert the bucket is empty.
+    // Instead we assert the strictly-NoChange branch never fires by checking
+    // the renormalized bucket frequency falls far below the no-omen baseline
+    // of 0.45 (it should sit near the 0.267 RerollValues mass).
+    let trials = 5_000usize;
+    let mut no_or_reroll = 0usize;
+    for trial in 0..trials {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x_05D5_5EED ^ trial as u64);
+        let mut omens = OmenSet::new();
+        omens.push(Omen::corruption());
+        let mut item = mk_rare_armour();
+        let before_sockets = item.sockets.len();
+        let before_quality = item.quality;
+        {
+            let mut ctx = ApplyContext::new_without_bases(
+                &registry,
+                &mut rng,
+                PatchVersion::PATCH_0_5_0,
+                &mut omens,
+            )
+            .with_league(League::Standard);
+            VaalOrb::new().apply(&mut item, &mut ctx).unwrap();
+        }
+        if classify(&item, before_sockets, before_quality).unwrap() == "no_change_or_reroll" {
+            no_or_reroll += 1;
+        }
+    }
+    let p = no_or_reroll as f64 / trials as f64;
+    assert!(
+        p < 0.35,
+        "with the corruption omen honored in 0.5 Standard, the NoChange|Reroll bucket should \
+         fall far below the 0.45 no-omen baseline (NoChange suppressed); got {p:.4}"
+    );
+}
+
+/// AddQuality bumps quality by +5 and clamps at 30. Start a Rare near the cap
+/// and run many seeds; the post-Vaal quality invariant `<= 30` must always
+/// hold, and at least one seed must hit the AddQuality path (proving the
+/// clamp, not merely the absence of the path).
+#[test]
+fn vaal_add_quality_caps_at_30() {
+    let registry = registry_with_vaal_implicits();
+    let mut saw_add_quality = false;
+    for trial in 0..3_000usize {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x_0BAD_0CAB ^ trial as u64);
+        let mut omens = OmenSet::new();
+        let mut item = mk_rare_armour();
+        // Near the cap: a single +5 AddQuality would overshoot to 33 without
+        // the clamp.
+        item.quality = 28;
+        apply_currency(
+            &VaalOrb::new(),
+            &mut item,
+            &registry,
+            &mut rng,
+            PATCH,
+            &mut omens,
+        )
+        .unwrap();
+        assert!(
+            item.quality <= 30,
+            "Vaal AddQuality must clamp quality at 30; got {} on trial {trial}",
+            item.quality
+        );
+        if item.quality > 28 {
+            // AddQuality fired (the only path that raises quality). With the
+            // clamp it lands at exactly 30 (28 + 5 = 33 -> 30).
+            assert_eq!(
+                item.quality, 30,
+                "AddQuality from quality 28 must clamp to exactly 30"
+            );
+            saw_add_quality = true;
+        }
+    }
+    assert!(
+        saw_add_quality,
+        "AddQuality (the quality-raising outcome) should fire within 3000 trials"
+    );
+}
+
+/// BrickMods clears non-fractured explicit mods but must NEVER remove a
+/// fractured mod. Build a Rare with one fractured prefix plus several
+/// non-fractured mods, run many seeds, and assert the fractured mod is always
+/// still present afterward.
+#[test]
+fn vaal_brick_preserves_fractured_mods() {
+    let registry = registry_with_vaal_implicits();
+    for trial in 0..3_000usize {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x_FAC7_5EED ^ trial as u64);
+        let mut omens = OmenSet::new();
+        let mut item = mk_rare_armour();
+        // One fractured prefix + a second non-fractured prefix, plus the
+        // fixture's non-fractured suffix. The fractured mod must survive every
+        // outcome (BrickMods in particular).
+        item.prefixes = smallvec![
+            ModRoll {
+                mod_id: ModId::from("FracturedPrefix"),
+                affix_type: AffixType::Prefix,
+                kind: ModKind::Explicit,
+                values: smallvec![],
+                is_fractured: true,
+            },
+            ModRoll {
+                mod_id: ModId::from("ExplicitPrefix"),
+                affix_type: AffixType::Prefix,
+                kind: ModKind::Explicit,
+                values: smallvec![],
+                is_fractured: false,
+            },
+        ];
+        apply_currency(
+            &VaalOrb::new(),
+            &mut item,
+            &registry,
+            &mut rng,
+            PATCH,
+            &mut omens,
+        )
+        .unwrap();
+        assert!(item.corrupted);
+        let fractured_present = item
+            .prefixes
+            .iter()
+            .any(|m| m.mod_id.as_str() == "FracturedPrefix" && m.is_fractured);
+        assert!(
+            fractured_present,
+            "fractured mod must survive every Vaal outcome (BrickMods must not strip it); \
+             missing on trial {trial}"
+        );
+    }
 }

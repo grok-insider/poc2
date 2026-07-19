@@ -11,8 +11,10 @@ members = [
     "crates/parser",
     "crates/plugin-host",
     "crates/plugin-sdk",
+    "crates/poc2-wasm",
+    "crates/capture",
+    "apps/desktop/native/windows-ocr",
     "pipeline",
-    "apps/desktop/src-tauri",
 ]
 default-members = [
     "crates/engine",
@@ -29,7 +31,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
@@ -42,6 +44,15 @@ readme = "README.md"
 # Core
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+base64 = "0.22"
+windows = { version = "0.61", features = [
+    "Foundation",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
+    "Win32_System_WinRT",
+] }
 toml = "0.8"
 thiserror = "1.0"
 anyhow = "1.0"
@@ -78,17 +89,19 @@ proptest = "1.5"
 insta = { version = "1.40", features = ["yaml", "json"] }
 
 # Internal crates
-poc2-engine      = { path = "crates/engine",      version = "0.1.0" }
-poc2-data        = { path = "crates/data",        version = "0.1.0" }
-poc2-strategies  = { path = "crates/strategies",  version = "0.1.0" }
-poc2-rules       = { path = "crates/rules",       version = "0.1.0" }
-poc2-probability = { path = "crates/probability", version = "0.1.0" }
-poc2-market      = { path = "crates/market",      version = "0.1.0" }
-poc2-advisor     = { path = "crates/advisor",     version = "0.1.0" }
-poc2-parser      = { path = "crates/parser",      version = "0.1.0" }
-poc2-pipeline    = { path = "pipeline",           version = "0.1.0" }
-poc2-plugin-host = { path = "crates/plugin-host", version = "0.1.0" }
-poc2-plugin-sdk  = { path = "crates/plugin-sdk",  version = "0.1.0" }
+poc2-engine      = { path = "crates/engine",      version = "1.0.0" }
+poc2-data        = { path = "crates/data",        version = "1.0.0" }
+poc2-strategies  = { path = "crates/strategies",  version = "1.0.0" }
+poc2-rules       = { path = "crates/rules",       version = "1.0.0" }
+poc2-probability = { path = "crates/probability", version = "1.0.0" }
+# `net` (reqwest/tokio price pollers) is opt-in: off by default so the advisor
+# and the WASM build stay wasm-buildable. Net users (desktop) add features=["net"].
+poc2-market      = { path = "crates/market",      version = "1.0.0", default-features = false }
+poc2-advisor     = { path = "crates/advisor",     version = "1.0.0" }
+poc2-parser      = { path = "crates/parser",      version = "1.0.0" }
+poc2-pipeline    = { path = "pipeline",           version = "1.0.0" }
+poc2-plugin-host = { path = "crates/plugin-host", version = "1.0.0" }
+poc2-plugin-sdk  = { path = "crates/plugin-sdk",  version = "1.0.0" }
 
 # Wasm runtime (Phase F)
 wasmtime = { version = "26", default-features = false, features = ["cranelift", "runtime"] }

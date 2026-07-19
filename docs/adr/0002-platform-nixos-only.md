@@ -1,7 +1,12 @@
 # ADR-0002 — Platform: NixOS + Hyprland only (v1)
 
-- Status: Accepted
+- Status: **Superseded by [ADR-0010](0010-desktop-shell-electron-cross-platform.md)** (2026-06-10)
 - Date: 2026-04-26
+- Supersede note: the platform scope below was reversed by explicit user
+  decision — Linux, NixOS, and Windows 11 are now supported targets via the
+  Electron desktop shell. The "no Linux-hardcoding" commitments in this ADR
+  remain binding and made the transition cheap; the historical context below
+  is unchanged.
 
 ## Context
 

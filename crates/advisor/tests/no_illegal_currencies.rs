@@ -88,6 +88,7 @@ fn run_plan(item: Item) -> Vec<poc2_advisor::Recommendation> {
         valuator: &valuator,
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
+        league: poc2_engine::patch::League::current(),
         plugin_dispatch: None,
         base_registry: None,
         trained_models: None,

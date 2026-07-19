@@ -1,25 +1,32 @@
 # 99. Catalyst recommendations (jewelry-specific).
 # These rules don't fit /docs/34's 13-section taxonomy cleanly because
 # catalysts are an item-class-specific quality currency. They feed into
-# Exalt-vs-Desecrate decisions for rings/amulets/belts.
+# Exalt-vs-Desecrate decisions for rings/amulets (base catalysts) and
+# jewels (Refined catalysts).
+#
+# PoE2 0.5 (poe2db catalysts.html): exactly 24 catalysts — 12 base kinds
+# that apply to "a ring or amulet" and 12 "Refined" variants that apply
+# to "a jewel". Belts take no catalyst. The PoE1 names "Intrinsic
+# Catalyst" / "Unstable Catalyst" do not exist; caster = Sibilant,
+# attribute = Adaptive.
 
 [[rule]]
 id = "R090-flesh-catalyst-on-life-rare-jewelry"
 category = "other"
-explanation = "Catalysts multiply tag-matching mod values; quality is consumed by Catalysing Exaltation later."
-source = "/docs/33 §18 (Catalysing Exaltation)"
+explanation = "Catalysts multiply tag-matching mod values; quality is consumed by Catalysing Exaltation later. 0.5: base catalysts apply to rings and amulets only (not belts)."
+source = "/docs/33 §18 (Catalysing Exaltation) + poe2db catalysts.html (0.5)"
 confidence = "community"
 
 [rule.when]
 all = [
     { rarity = "rare" },
-    { item_class_any = ["Ring", "Amulet", "Belt"] },
+    { item_class_any = ["Ring", "Amulet"] },
     { corrupted = false },
     { has_concept = { concept = "Life" } },
 ]
 
 [[rule.then]]
-note = "Rare jewelry with a life mod: Flesh Catalyst boosts life-tagged mods by +5%/apply (cap 20%)."
+note = "Rare ring/amulet with a life mod: Flesh Catalyst boosts life-tagged mods by +5%/apply (cap 20%)."
 priority = 110
 [rule.then.action]
 kind = "apply_currency"
@@ -54,10 +61,10 @@ omens = []
 # ---------------------------------------------------------------------
 
 [[rule]]
-id = "R092-unstable-catalyst-on-caster-rare-jewelry"
+id = "R092-sibilant-catalyst-on-caster-rare-jewelry"
 category = "other"
-explanation = "Catalyst-quality boosts spell mods on jewelry pre-Exalt slam."
-source = "/docs/33 §18"
+explanation = "Catalyst-quality boosts spell-mod values on jewelry pre-Exalt slam. 0.5: the caster catalyst is Sibilant (the PoE1 'Unstable Catalyst' does not exist in PoE2)."
+source = "/docs/33 §18 + poe2db catalysts.html (0.5)"
 confidence = "community"
 
 [rule.when]
@@ -69,36 +76,35 @@ all = [
 ]
 
 [[rule.then]]
-note = "Rare jewelry with caster mods: Unstable Catalyst boosts caster-tagged mods."
+note = "Rare jewelry with caster mods: Sibilant Catalyst boosts caster-tagged mods."
 priority = 110
 [rule.then.action]
 kind = "apply_currency"
-currency = "UnstableCatalyst"
+currency = "SibilantCatalyst"
 omens = []
 
 # ---------------------------------------------------------------------
 
 [[rule]]
-id = "R093-adaptive-catalyst-on-belt-breach"
+id = "R093-adaptive-catalyst-is-attribute-tag"
 category = "other"
-explanation = "Belts with breach-related mods (Mark of the Abyss, Mageblood-style synergies) get the most value out of an Adaptive catalyst tagged for breach. M14.5 enforces the class-eligibility gate (`Ring/Amulet/Belt/Jewel`); this rule layers a tag-preference recommendation on top of that gate. Community: the heuristics rulebook does not give a verified exclusion, but breach-aligned belts are the canonical case in 0.4 builds."
-source = "/docs/34 §99 (catalysts)"
-confidence = "community"
+explanation = "0.5: Adaptive Catalyst is the fixed attribute-tag catalyst (+5%/apply like every other catalyst). The PoE1-style wildcard/breach-tag behaviour does not exist, and belts cannot be catalysed at all — base catalysts gate on rings/amulets, Refined on jewels."
+source = "poe2db catalysts.html (0.5)"
+confidence = "verified"
 
 [rule.when]
 all = [
     { rarity = "rare" },
-    { item_class = "Belt" },
+    { item_class_any = ["Ring", "Amulet"] },
     { corrupted = false },
 ]
 
 [[rule.then]]
-note = "Belt: Adaptive Catalyst tagged 'breach' is the canonical 0.4 belt-quality currency for breach-relevant builds. The engine's Catalyst::can_apply_to gate (M14.5) accepts any catalyst on a Belt; this rule reflects the typical preferred recommendation rather than a hard restriction."
-priority = 100
+note = "Adaptive Catalyst enhances Attribute modifiers (+5%/apply, cap 20%). Use it on attribute-stacking rings/amulets; Refined Adaptive Catalyst is the jewel equivalent."
+priority = 60
+tag = "meta"
 [rule.then.action]
-kind = "apply_currency"
-currency = "AdaptiveCatalyst"
-omens = []
+kind = "guidance"
 
 # =====================================================================
 # M15.3 — Catalyst quality mechanics rules.
@@ -114,60 +120,37 @@ confidence = "verified"
 
 [rule.when]
 all = [
-    { item_class_any = ["Ring", "Amulet", "Belt", "Jewel"] },
+    { item_class_any = ["Ring", "Amulet", "Jewel"] },
     { quality = { op = "gte", value = 5 } },
     { corrupted = false },
 ]
 
 [[rule.then]]
-note = "Quality is tagged to the last catalyst used. Switching catalyst tags resets quality to 0 — commit to one tag (Flesh / Reaver / Unstable / Carapace / Adaptive) per craft."
+note = "Quality is tagged to the last catalyst used. Switching catalyst tags resets quality to 0 — commit to one tag (Flesh / Neural / Reaver / Sibilant / Carapace / Adaptive / ...) per craft."
 priority = 35
 tag = "meta"
 [rule.then.action]
 kind = "guidance"
 
 # ---------------------------------------------------------------------
-# R230 — Quality boosts tag-matching mod weight by 1% per quality
+# R230 — Quality boosts tag-matching mod *values*, not roll chances
 [[rule]]
-id = "R230-catalyst-quality-boosts-mod-weights"
+id = "R230-catalyst-quality-boosts-mod-values"
 category = "other"
-explanation = "Tagged catalyst quality boosts the spawn weight of tag-matching mods by 1% per quality, capping at +20% with a fully-quality'd catalyst (4× normal applies, +5%/apply). This biases sample_eligible_mod toward the catalyst's tag during subsequent Trans/Aug/Regal/Exalt/Chaos."
-source = "/docs/34 §99 (M15.3 R230) + poe2 wiki Catalyst quality scaling"
+explanation = "Tagged catalyst quality boosts the rolled values of tag-matching mods by +1% per quality (cap +20% at full quality, 4x +5%/apply). It does NOT bias which mods roll: quality converts into mod-roll chance only via Omen of Catalysing Exaltation, which consumes the quality to bias the next Exalted Orb toward the tag."
+source = "/docs/34 §99 (M15.3 R230) + /docs/33 §18 (Catalysing Exaltation)"
 confidence = "verified"
 
 [rule.when]
 all = [
-    { item_class_any = ["Ring", "Amulet", "Belt", "Jewel"] },
+    { item_class_any = ["Ring", "Amulet", "Jewel"] },
     { quality = { op = "gte", value = 15 } },
     { rarity = "rare" },
 ]
 
 [[rule.then]]
-note = "Catalyst quality at 15+ adds a meaningful weight bias on tag-matching mods. Apply your finishing Exalt / Regal NOW to capture the bias before further mods dilute it."
+note = "Catalyst quality at 15+ multiplies tag-matching mod values, but it does not change Exalt odds by itself. To convert quality into a tag-biased slam, pair the finishing Exalt with Omen of Catalysing Exaltation (consumes the quality)."
 priority = 95
-tag = "meta"
-[rule.then.action]
-kind = "guidance"
-
-# ---------------------------------------------------------------------
-# R234 — Belt class catalyst restrictions in 0.4
-[[rule]]
-id = "R234-belt-class-catalyst-restrictions-0-4"
-category = "other"
-explanation = "Per the 0.4 catalyst data, Belts are documented to accept Unstable (caster) and Flesh (life) catalysts cleanly; other catalyst types may not have a meaningful tag intersection on belt-base mods. Engine Catalyst::can_apply_to (M14.5) accepts any catalyst on a Belt — this rule layers a tag-preference recommendation on top."
-source = "/docs/34 §99 (M15.3 R234) + community testing"
-confidence = "community"
-
-[rule.when]
-all = [
-    { item_class = "Belt" },
-    { rarity = "rare" },
-    { corrupted = false },
-]
-
-[[rule.then]]
-note = "Belt catalyst preferences in 0.4: Unstable (caster) for spell-tagged belts, Flesh (life) for life-tagged belts, Adaptive (breach) for breach-aligned builds. Other catalyst tags work mechanically but their per-mod weight bias may be smaller."
-priority = 60
 tag = "meta"
 [rule.then.action]
 kind = "guidance"

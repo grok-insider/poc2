@@ -1,0 +1,235 @@
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.headTitle {
+  font-family: var(--font-display);
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+.context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-base);
+}
+
+.tabs {
+  padding: 12px 18px 4px;
+}
+
+.scroll {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 8px 18px 18px;
+}
+
+.modeBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.addControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  background: var(--bg-base);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0 9px;
+}
+.search input {
+  border: none;
+  background: none;
+  padding: 7px 0;
+  flex: 1;
+}
+.search input:focus {
+  border: none;
+}
+
+.modList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+.modItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--surface-2);
+  transition: border-color 120ms var(--easing), background 120ms var(--easing);
+}
+.modItem:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+}
+.modPicked {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface-2));
+}
+.modName {
+  flex: 1;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modSub {
+  color: var(--fg-faint);
+  font-weight: 400;
+}
+.modDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.modDot[data-affix="prefix"] {
+  background: var(--r-magic);
+}
+.modDot[data-affix="suffix"] {
+  background: var(--accent);
+}
+.modDot[data-affix="implicit"] {
+  background: var(--fg-faint);
+}
+
+.groupWrap {
+  display: flex;
+  flex-direction: column;
+}
+.groupRow {
+  cursor: pointer;
+}
+.tierList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 4px 16px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.tierRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--bg-base);
+  font-size: 12px;
+  transition: border-color 120ms var(--easing), background 120ms var(--easing);
+}
+.tierRow:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+.tierPicked {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, var(--bg-base));
+}
+.tierRange {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.tierName {
+  color: var(--fg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 38%;
+}
+
+.pickedRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--line);
+}
+.pickedInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  font-size: 12px;
+  min-width: 0;
+}
+.rollControl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  font-size: 11px;
+}
+.rollControl input[type="range"] {
+  width: 100%;
+}
+
+.sanctRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.sanctRow input {
+  width: auto;
+}
+
+.rerollCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.rerollHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rarityRow {
+  display: flex;
+  gap: 10px;
+}
+.rarityRow .btn {
+  flex: 1;
+  padding: 14px;
+}
+.rarityOn {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface-2));
+}

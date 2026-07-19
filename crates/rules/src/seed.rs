@@ -77,6 +77,10 @@ const SEED_RULE_FILES: &[(&str, &str)] = &[
         include_str!("../seed_rules/13_confidence_ev.toml"),
     ),
     (
+        "14_genesis_tree",
+        include_str!("../seed_rules/14_genesis_tree.toml"),
+    ),
+    (
         "99_catalysts",
         include_str!("../seed_rules/99_catalysts.toml"),
     ),

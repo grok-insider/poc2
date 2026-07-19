@@ -1,0 +1,247 @@
+name: Release
+
+# Automated versioning + GitHub Releases via release-plz (config: release-plz.toml).
+#
+# Flow on every push to master:
+#   * release-plz-pr      — opens/updates the "release PR" (bumps the single
+#                           [workspace.package].version + Cargo.lock, regenerates
+#                           CHANGELOG.md from Conventional Commits) and rewrites
+#                           that PR's changelog section with AI-written notes.
+#   * release-plz-release — when that PR is merged, creates the `vX.Y.Z` tag +
+#                           GitHub Release from the changelog.
+#   * resolve / artifacts — builds the Electron desktop packages (Windows NSIS,
+#                           Linux AppImage + deb) for the released tag and
+#                           attaches them to the Release.
+#
+# poc2's deliverable is the web app + WASM engine + Electron desktop shell, not a
+# single CLI binary — so the artifacts are the packaged desktop apps. The web app
+# itself ships as the static export (apps/web/out) the desktop bundles.
+#
+# Nothing is published to crates.io — see `git_only` in release-plz.toml.
+
+"on":
+  push:
+    branches: [master]
+
+# Least privilege by default; each job elevates only what it needs.
+permissions:
+  contents: read
+
+jobs:
+  # Keep the release PR up to date on every push. Merging that PR is what later
+  # triggers the `release` job (via the resulting push to master).
+  release-plz-pr:
+    name: release-plz PR
+    # Canonical-org guard (fork protection). Cargo metadata names
+    # `anomalyco`; the automation account is `grok-insider` — accept both
+    # until the canonical remote is settled (AGENTS.md "Release Notes").
+    if: contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
+    runs-on: ubuntu-latest
+    # release-plz runs `cargo package` per crate to detect changes, which fetches
+    # the crates.io index + git deps. That network step is flaky on hosted runners;
+    # make cargo retry transient failures and fetch git deps via the system git CLI.
+    env:
+      CARGO_NET_RETRY: "10"
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Persist the PAT so the AI changelog step can push to the Release PR branch.
+          persist-credentials: true
+          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run release-plz (release-pr)
+        id: release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          # PAT so the release PR triggers required CI (a GITHUB_TOKEN-opened PR doesn't).
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # Rewrite the release PR's CHANGELOG section with user-facing, AI-written notes.
+      - name: Check out the Release PR
+        if: ${{ steps.release-plz.outputs.pr != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+          PR_JSON: ${{ steps.release-plz.outputs.pr }}
+        run: |
+          set -euo pipefail
+          pr="$(jq -r '.number // empty' <<<"$PR_JSON")"
+          ver="$(jq -r '.releases[0].version // empty' <<<"$PR_JSON")"
+          [ -n "$pr" ] && [ -n "$ver" ] || { echo "No release PR to enrich."; exit 0; }
+          gh pr checkout "$pr"
+          { echo "RP_PR=$pr"; echo "RP_VER=$ver"; } >> "$GITHUB_ENV"
+
+      - name: Generate AI changelog into the Release PR
+        if: ${{ env.RP_PR != '' }}
+        uses: grok-insider/release-changelog-action@v1
+        with:
+          version: ${{ env.RP_VER }}
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          project-description: "PoE2 crafting advisor — Rust/WASM engine + Next.js web app + Electron desktop (poc2)"
+
+      - name: Commit AI changelog to the Release PR
+        if: ${{ env.RP_PR != '' }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- CHANGELOG.md; then
+            git add CHANGELOG.md
+            git commit -m "docs(changelog): generate release notes for v${RP_VER}"
+            git push
+          fi
+
+  # On a release-PR merge: create the `vX.Y.Z` tag + GitHub Release. Exposes
+  # whether a release was cut (and its tag/version) to the artifact jobs below.
+  release-plz-release:
+    name: release-plz release
+    if: contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+      releases: ${{ steps.release-plz.outputs.releases }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz (release)
+        id: release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+  # Resolve the just-created release's tag/version once so the desktop matrix
+  # doesn't each need jq.
+  resolve:
+    name: resolve release tag
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.r.outputs.tag }}
+      version: ${{ steps.r.outputs.version }}
+    steps:
+      - id: r
+        env:
+          RELEASES: ${{ needs.release-plz-release.outputs.releases }}
+        run: |
+          set -euo pipefail
+          echo "tag=$(echo "$RELEASES" | jq -r '.[0].tag')" >> "$GITHUB_OUTPUT"
+          echo "version=$(echo "$RELEASES" | jq -r '.[0].version')" >> "$GITHUB_OUTPUT"
+
+  # Build the Electron desktop packages for the released tag and attach them to the
+  # Release. Mirrors the windows / desktop-linux lanes in ci.yml (rustup + Bun, no
+  # Nix), each independent (fail-fast: false): one platform failing leaves the
+  # others (and the tag/Release/changelog) intact, re-runnable.
+  artifacts:
+    name: package ${{ matrix.name }}
+    needs: [release-plz-release, resolve]
+    if: needs.release-plz-release.outputs.releases_created == 'true'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: windows, builder: "--win" }
+          - { os: ubuntu-latest, name: linux, builder: "--linux" }
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - name: Checkout the released tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      # CLI version must match the wasm-bindgen crate in Cargo.lock.
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.117
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-desktop-${{ matrix.name }}
+
+      - name: Install web deps
+        run: bun install --frozen-lockfile
+
+      # Keep the packaged app's version in lockstep with the release tag:
+      # electron-builder reads apps/desktop/package.json, which is NOT
+      # bumped by release-plz (it owns the Cargo workspace version only).
+      - name: Sync desktop package version to the release
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const f = 'apps/desktop/package.json';
+            const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+            j.version = process.env.VERSION;
+            fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
+          "
+
+      # The engine ships as WebAssembly; the web export imports lib/wasm/*, so this
+      # must run before the web build. build-wasm.mjs warns-and-skips wasm-opt when
+      # it's absent (the optimized artifact is covered by the Nix CI lane).
+      - name: Build WASM + web export
+        run: |
+          rustup target add wasm32-unknown-unknown
+          bun run wasm
+          bun run build
+
+      - name: Build Windows OCR helper
+        if: runner.os == 'Windows'
+        run: cargo build -p poc2-windows-ocr --release
+
+      - name: Package desktop (${{ matrix.name }})
+        working-directory: apps/desktop
+        run: |
+          bun run build
+          bun x electron-builder ${{ matrix.builder }} --publish never
+
+      # `shell: bash` runs in Git Bash on the Windows runner too, keeping one
+      # portable upload step across both targets.
+      - name: Attach packages to the Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(apps/desktop/dist-packages/*.exe apps/desktop/dist-packages/*.AppImage apps/desktop/dist-packages/*.deb)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "::warning::no desktop packages found to upload for ${{ matrix.name }}"
+            exit 0
+          fi
+          gh release upload "$TAG" "${assets[@]}" --clobber

@@ -1,6 +1,7 @@
 [package]
 name = "poc2-pipeline"
 description = "Path of Crafting 2 — data bundle build pipeline (RePoE-fork + Craft of Exile + poe2db scrape + GGG trade-stat)"
+default-run = "poc2-pipeline"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,12 +18,28 @@ name = "fetch-base-icons"
 path = "src/bin/fetch_base_icons.rs"
 
 [[bin]]
+name = "fetch-unique-icons"
+path = "src/bin/fetch_unique_icons.rs"
+
+[[bin]]
 name = "regen-poe2db-fixtures"
 path = "src/bin/regen_poe2db_fixtures.rs"
 
 [[bin]]
 name = "train-advisor"
 path = "src/bin/train_advisor.rs"
+
+[[bin]]
+name = "audit-matrix"
+path = "src/bin/audit_matrix.rs"
+
+[[bin]]
+name = "fetch-genesis-assets"
+path = "src/bin/fetch_genesis_assets.rs"
+
+[[bin]]
+name = "fetch-trade-stats"
+path = "src/bin/fetch_trade_stats.rs"
 
 [dependencies]
 poc2-engine.workspace = true
@@ -46,6 +63,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 indexmap.workspace = true
 smallvec.workspace = true
+rand.workspace = true
+rand_xoshiro.workspace = true
 ahash.workspace = true
 clap = { version = "4.5", features = ["derive", "env"] }
 sha2 = "0.10"

@@ -154,15 +154,17 @@ pub fn normalize_coe(snapshot: &CoeSnapshot, bundle: &mut Bundle) -> PipelineRes
     for ess in &snapshot.data.essences.seq {
         let tooltip = parse_essence_tooltip(&ess.tooltip);
         let tiers = parse_essence_tiers(&ess.tiers);
-        // Resolve base groups for the tier base ids: each base id might be
-        // a base group (`bgroups`) or a concrete base (`bases`). We emit
-        // both id and a friendly label.
+        // Essence tier maps key on the BASES table (`bases`.id_base), whose
+        // low ids overlap `bgroups`.id_bgroup (e.g. base 3 = Belt vs bgroup
+        // 3 = Boots; base 12 = Dagger vs bgroup 12 = Tablets) — concrete
+        // bases must resolve FIRST, base groups only as a fallback for ids
+        // absent from the bases table. We emit both id and a friendly label.
         let mut tier_groups: Vec<serde_json::Value> = Vec::new();
         for (base_id, tier_list) in &tiers {
-            let label = if let Some(bg) = bgroup_by_id.get(base_id.as_str()) {
-                bg.name_bgroup.as_str()
-            } else if let Some(b) = base_by_id.get(base_id.as_str()) {
+            let label = if let Some(b) = base_by_id.get(base_id.as_str()) {
                 b.name_base.as_str()
+            } else if let Some(bg) = bgroup_by_id.get(base_id.as_str()) {
+                bg.name_bgroup.as_str()
             } else {
                 base_id.as_str()
             };
@@ -360,41 +362,91 @@ pub fn populate_weights(
             MapStrategy::TemplateTokens => report.via_template_tokens += 1,
         }
         for (base_id, tier_list) in by_base {
-            let scope = if let Some(b) = base_by_id.get(base_id.as_str()) {
-                WeightScope::Base {
-                    base: BaseTypeId::from(b.name_base.as_str()),
-                }
+            // Resolve the weight's scope target. A concrete base can carry
+            // ilvl-stratified weights (`BaseAtIlvl`); a CoE base-GROUP maps to
+            // an item class, which has no ilvl axis (single weight).
+            let (base, item_class) = if let Some(b) = base_by_id.get(base_id.as_str()) {
+                (Some(BaseTypeId::from(b.name_base.as_str())), None)
             } else if let Some(bg) = bgroup_by_id.get(base_id.as_str()) {
-                WeightScope::ItemClass {
-                    item_class: item_class_id_from_bgroup_name(&bg.name_bgroup),
-                }
+                (None, Some(item_class_id_from_bgroup_name(&bg.name_bgroup)))
             } else if let Some(name) = bitem_by_id.get(base_id.as_str()) {
-                WeightScope::Base {
-                    base: BaseTypeId::from(*name),
-                }
+                (Some(BaseTypeId::from(*name)), None)
             } else {
                 continue;
             };
-            let max_tier = tier_list
+
+            // Positive-weight (ilvl, weight) breakpoints from the tier ladder.
+            let mut points: Vec<(u32, f64)> = tier_list
                 .iter()
                 .filter_map(|t| {
                     let w: u32 = t.weighting.parse().ok()?;
                     let ilvl: u32 = t.ilvl.parse().ok()?;
-                    Some((w, ilvl))
+                    (w > 0).then_some((ilvl, f64::from(w)))
                 })
-                .filter(|(w, _)| *w > 0)
-                .max_by_key(|(_, ilvl)| *ilvl);
-            let Some((weight, _ilvl)) = max_tier else {
+                .collect();
+            if points.is_empty() {
                 continue;
-            };
-            weights.push(WeightObservation {
-                mod_id: ModId::from(engine_mod.id.as_str()),
-                scope,
-                primary_weight: f64::from(weight),
-                secondary_weight: None,
-                confidence: Confidence::Community,
-                note: Some(format!("from CoE mod {coe_mod_id} via {strategy:?}")),
-            });
+            }
+
+            let mod_id = ModId::from(engine_mod.id.as_str());
+            let note = || Some(format!("from CoE mod {coe_mod_id} via {strategy:?}"));
+
+            if let Some(base) = base {
+                // Collapse the tier ladder to genuine breakpoints: sort by ilvl
+                // ascending, then drop runs of equal weight.
+                points.sort_by_key(|(ilvl, _)| *ilvl);
+                let mut ladder: Vec<(u32, f64)> = Vec::new();
+                for (ilvl, w) in points {
+                    if ladder.last().map(|&(_, lw)| lw) != Some(w) {
+                        ladder.push((ilvl, w));
+                    }
+                }
+                if ladder.len() >= 2 {
+                    // §5.5: emit one `BaseAtIlvl` observation per breakpoint.
+                    // `numeric_weight` picks the highest `min_ilvl <= item.ilvl`,
+                    // so high-ilvl items resolve to the top-tier weight (matching
+                    // the previous max-tier behaviour) while lower item levels
+                    // now resolve to the correct lower-tier weight.
+                    for (min_ilvl, w) in ladder {
+                        weights.push(WeightObservation {
+                            mod_id: mod_id.clone(),
+                            scope: WeightScope::BaseAtIlvl {
+                                base: base.clone(),
+                                min_ilvl,
+                            },
+                            primary_weight: w,
+                            secondary_weight: None,
+                            confidence: Confidence::Community,
+                            note: note(),
+                        });
+                    }
+                } else {
+                    // One effective weight across all tiers → flat `Base` scope.
+                    weights.push(WeightObservation {
+                        mod_id,
+                        scope: WeightScope::Base { base },
+                        primary_weight: ladder[0].1,
+                        secondary_weight: None,
+                        confidence: Confidence::Community,
+                        note: note(),
+                    });
+                }
+            } else if let Some(item_class) = item_class {
+                // Class scope: keep the highest-ilvl tier weight (unchanged).
+                let (_, weight) = points
+                    .iter()
+                    .copied()
+                    .max_by_key(|(ilvl, _)| *ilvl)
+                    .expect("points is non-empty");
+                weights.push(WeightObservation {
+                    mod_id,
+                    scope: WeightScope::ItemClass { item_class },
+                    primary_weight: weight,
+                    secondary_weight: None,
+                    confidence: Confidence::Community,
+                    note: note(),
+                });
+            }
         }
     }
     bundle.mods = bundle_mods;
@@ -787,6 +839,7 @@ mod tests {
             spawn_weights: smallvec![],
             stats: smallvec![],
             required_level: 1,
+            tier: None,
             allowed_item_classes: smallvec![],
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),
@@ -962,8 +1015,239 @@ mod tests {
         }
     }
 
+    fn mk_tier(ilvl: &str, weighting: &str) -> crate::sources::coe::CoeTierEntry {
+        crate::sources::coe::CoeTierEntry {
+            ilvl: ilvl.into(),
+            weighting: weighting.into(),
+            nvalues: None,
+            tord: 0,
+            alias: None,
+        }
+    }
+
+    /// Build a snapshot with one CoE mod resolvable to engine mod `MaxLife`
+    /// (via name-substring) carrying the given tier ladder on base "Vaal Regalia".
+    fn snapshot_with_tiers(tiers: Vec<crate::sources::coe::CoeTierEntry>) -> CoeSnapshot {
+        use crate::sources::coe::{CoeBase, CoeData, Section};
+        let mut by_base = std::collections::BTreeMap::new();
+        by_base.insert("b1".to_string(), tiers);
+        let mut tiers_by_mod = std::collections::BTreeMap::new();
+        tiers_by_mod.insert("9001".to_string(), by_base);
+        let coe_data = CoeData {
+            bitems: Section { seq: vec![] },
+            bases: Section {
+                seq: vec![CoeBase {
+                    id_bgroup: "bg1".into(),
+                    id_base: "b1".into(),
+                    name_base: "Vaal Regalia".into(),
+                    is_jewellery: None,
+                    base_type: None,
+                    is_legacy: None,
+                    is_martial: None,
+                }],
+            },
+            bgroups: Section { seq: vec![] },
+            modifiers: Section {
+                seq: vec![mk_coe_mod("9001", "+# to maximum Life")],
+            },
+            mgroups: Section { seq: vec![] },
+            mtypes: Section { seq: vec![] },
+            catalysts: Section { seq: vec![] },
+            essences: Section { seq: vec![] },
+            basemods: std::collections::BTreeMap::new(),
+            modbases: std::collections::BTreeMap::new(),
+            tiers: tiers_by_mod,
+        };
+        CoeSnapshot {
+            data: coe_data,
+            revisions: poc2_data::SourceRevisions::default(),
+        }
+    }
+
+    #[test]
+    fn populate_weights_emits_base_at_ilvl_for_multi_tier_base() {
+        // §5.5: a base whose tier ladder has distinct weights at distinct ilvls
+        // yields one `BaseAtIlvl` observation per breakpoint, so the engine can
+        // resolve the right weight per item level.
+        use poc2_data::weights::WeightScope;
+        let mut bundle = empty_bundle_for_test();
+        bundle
+            .mods
+            .push(mk_engine_mod("MaxLife", Some("maximum Life"), None));
+        let snapshot = snapshot_with_tiers(vec![
+            mk_tier("1", "100"),
+            mk_tier("50", "250"),
+            mk_tier("80", "1000"),
+        ]);
+
+        let report = populate_weights(&snapshot, &mut bundle, &AHashMap::new(), &AHashMap::new());
+        assert_eq!(
+            report.total_matched(),
+            1,
+            "CoE mod must resolve via name-substring"
+        );
+
+        let mut got: Vec<(u32, f64)> = bundle
+            .weights
+            .iter()
+            .filter(|o| o.mod_id.as_str() == "MaxLife")
+            .filter_map(|o| match &o.scope {
+                WeightScope::BaseAtIlvl { base, min_ilvl } if base.as_str() == "Vaal Regalia" => {
+                    Some((*min_ilvl, o.primary_weight))
+                }
+                _ => None,
+            })
+            .collect();
+        got.sort_by_key(|(i, _)| *i);
+        assert_eq!(
+            got,
+            vec![(1, 100.0), (50, 250.0), (80, 1000.0)],
+            "expected one BaseAtIlvl breakpoint per CoE tier"
+        );
+        // No flat Base observation should be emitted for this base when the
+        // BaseAtIlvl ladder is present.
+        assert!(
+            !bundle
+                .weights
+                .iter()
+                .any(|o| matches!(&o.scope, WeightScope::Base { base } if base.as_str() == "Vaal Regalia")),
+            "ilvl-stratified bases must not also emit a flat Base observation"
+        );
+    }
+
+    #[test]
+    fn populate_weights_collapses_single_weight_ladder_to_base_scope() {
+        // When every tier shares one weight there is no real breakpoint, so a
+        // single flat `Base` observation is emitted (no spurious ladder).
+        use poc2_data::weights::WeightScope;
+        let mut bundle = empty_bundle_for_test();
+        bundle
+            .mods
+            .push(mk_engine_mod("MaxLife", Some("maximum Life"), None));
+        let snapshot = snapshot_with_tiers(vec![
+            mk_tier("1", "500"),
+            mk_tier("50", "500"),
+            mk_tier("80", "500"),
+        ]);
+
+        populate_weights(&snapshot, &mut bundle, &AHashMap::new(), &AHashMap::new());
+        let base_scoped: Vec<f64> = bundle
+            .weights
+            .iter()
+            .filter(|o| o.mod_id.as_str() == "MaxLife")
+            .filter_map(|o| match &o.scope {
+                WeightScope::Base { base } if base.as_str() == "Vaal Regalia" => {
+                    Some(o.primary_weight)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            base_scoped,
+            vec![500.0],
+            "uniform tiers → one flat Base weight"
+        );
+        assert!(
+            !bundle
+                .weights
+                .iter()
+                .any(|o| matches!(&o.scope, WeightScope::BaseAtIlvl { .. })),
+            "uniform-weight ladder must not emit BaseAtIlvl breakpoints"
+        );
+    }
+
     fn empty_bundle_for_test() -> Bundle {
         Bundle::empty(poc2_engine::patch::PatchVersion::PATCH_0_4_0, "test")
+    }
+
+    /// Snapshot exercising the essence tier-label join: id "3" is BOTH a
+    /// concrete base (Belt) and a base group (Boots) — mirroring the live
+    /// CoE id overlap — plus one id only in bgroups and one in neither.
+    fn snapshot_with_overlapping_essence_ids() -> CoeSnapshot {
+        use crate::sources::coe::{CoeData, CoeEssence, Section};
+        let coe_data = CoeData {
+            bitems: Section { seq: vec![] },
+            bases: Section {
+                seq: vec![CoeBase {
+                    id_bgroup: "1".into(),
+                    id_base: "3".into(),
+                    name_base: "Belt".into(),
+                    is_jewellery: None,
+                    base_type: None,
+                    is_legacy: None,
+                    is_martial: None,
+                }],
+            },
+            bgroups: Section {
+                seq: vec![
+                    CoeBaseGroup {
+                        id_bgroup: "3".into(),
+                        name_bgroup: "Boots".into(),
+                        max_affix: "6".into(),
+                        is_rare: "1".into(),
+                        is_craftable: "1".into(),
+                        max_sockets: "0".into(),
+                    },
+                    CoeBaseGroup {
+                        id_bgroup: "77".into(),
+                        name_bgroup: "Offhands".into(),
+                        max_affix: "6".into(),
+                        is_rare: "1".into(),
+                        is_craftable: "1".into(),
+                        max_sockets: "0".into(),
+                    },
+                ],
+            },
+            modifiers: Section { seq: vec![] },
+            mgroups: Section { seq: vec![] },
+            mtypes: Section { seq: vec![] },
+            catalysts: Section { seq: vec![] },
+            essences: Section {
+                seq: vec![CoeEssence {
+                    id_essence: "1".into(),
+                    name_essence: "Essence of Insanity".into(),
+                    tooltip: "[]".into(),
+                    tiers: r#"{"3":[[{"mod":"6","id":"EssenceInsanityBelt1","ilvl":"1"}]],"77":[[{"mod":"7","id":"EssenceInsanityOffhand1","ilvl":"1"}]],"999":[[{"mod":"8","id":"EssenceInsanityUnknown1","ilvl":"1"}]]}"#.into(),
+                    corrupt: "0".into(),
+                }],
+            },
+            basemods: std::collections::BTreeMap::new(),
+            modbases: std::collections::BTreeMap::new(),
+            tiers: std::collections::BTreeMap::new(),
+        };
+        CoeSnapshot {
+            data: coe_data,
+            revisions: poc2_data::SourceRevisions::default(),
+        }
+    }
+
+    #[test]
+    fn essence_tier_labels_resolve_bases_before_bgroups() {
+        // Root cause of the 0.5 essence-scope bug: CoE essence tiers key on
+        // the bases table, whose ids overlap bgroup ids. Bases must win;
+        // bgroups remain a fallback for ids absent from bases.
+        let snapshot = snapshot_with_overlapping_essence_ids();
+        let mut bundle = empty_bundle_for_test();
+        normalize_coe(&snapshot, &mut bundle).unwrap();
+        assert_eq!(bundle.essences.entries.len(), 1);
+        let groups = bundle.essences.entries[0]["tier_groups"]
+            .as_array()
+            .unwrap();
+        let label_for = |id: &str| {
+            groups
+                .iter()
+                .find(|g| g["base_group_id"] == id)
+                .map_or_else(
+                    || panic!("no tier group for id {id}"),
+                    |g| g["label"].as_str().unwrap().to_string(),
+                )
+        };
+        // id 3 = base Belt AND bgroup Boots → the concrete base wins.
+        assert_eq!(label_for("3"), "Belt");
+        // id 77 exists only in bgroups → group fallback still resolves.
+        assert_eq!(label_for("77"), "Offhands");
+        // id 999 exists in neither table → raw id passes through.
+        assert_eq!(label_for("999"), "999");
     }
 
     #[test]

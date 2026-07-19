@@ -145,14 +145,69 @@ pub struct HiddenDesecratedSlot {
     /// Only valid for `bone_subtype == Jawbone | Collarbone` (weapons /
     /// jewellery).
     pub abyss_lord: Option<AbyssLord>,
+    /// Effective Minimum Modifier Level for the revealed mod, resolved at
+    /// bone-apply time from the bone size (Ancient = 40) and bricked to 0
+    /// when a lord-targeting omen consumed the Ancient floor. Reveal
+    /// sampling filters out tiers whose `required_level` is below this.
+    /// Defaulted for backward-compatible deserialization of pre-P3 state.
+    #[serde(default)]
+    pub min_mod_level: u32,
+    /// True when the slot came from an Altered Collarbone (0.5 breach
+    /// desecration): the reveal pool then ALSO offers Otherworldly mods
+    /// (`ModFlags::OTHERWORLDLY`), which regular bones never surface.
+    #[serde(default)]
+    pub otherworldly: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BoneSize {
+    /// Campaign-tier bone. **Cannot desecrate items above ilvl 64.**
     Gnawed,
+    /// Any ilvl, no modifier-level floor.
     Preserved,
+    /// Any ilvl, but guarantees a **Minimum Modifier Level of 40** on the
+    /// revealed mod (unless a lord-targeting omen bricks the floor).
     Ancient,
+    /// Breach-desecration size — exists only as "Altered Collarbone" and
+    /// unlocks Otherworldly reveal options on rare jewellery (0.5).
+    Altered,
+}
+
+impl BoneSize {
+    /// Maximum item level this bone size may be applied to. `None` = no
+    /// ceiling. Gnawed bones are campaign-tier and reject ilvl > 64.
+    /// (poe2db Abyssal Bones; wiki Desecrated Modifier.)
+    pub const fn max_ilvl(self) -> Option<u32> {
+        match self {
+            Self::Gnawed => Some(64),
+            Self::Preserved | Self::Ancient | Self::Altered => None,
+        }
+    }
+
+    /// Minimum modifier level guaranteed on the revealed desecrated mod.
+    /// Ancient bones guarantee `>= 40`; Gnawed/Preserved have no floor.
+    /// A lord-targeting omen (Liege/Sovereign/Blackblooded) **bricks** the
+    /// Ancient floor — see [`crate::currency::bone`].
+    pub const fn min_mod_level(self) -> u32 {
+        match self {
+            Self::Gnawed | Self::Preserved | Self::Altered => 0,
+            Self::Ancient => 40,
+        }
+    }
+
+    /// Which size × subtype combinations exist as real 0.5 currency items
+    /// (poe2db Desecrated_Modifiers): Gnawed/Preserved/Ancient exist for
+    /// Rib/Jawbone/Collarbone; Cranium exists ONLY as Preserved; Altered
+    /// exists ONLY as Collarbone ("Altered Collarbone — Desecrates a Rare
+    /// Amulet, Ring or Belt with a chance for otherworldly modifiers").
+    pub const fn valid_with(self, subtype: BoneSubtype) -> bool {
+        match self {
+            Self::Altered => matches!(subtype, BoneSubtype::Collarbone),
+            Self::Gnawed | Self::Ancient => !matches!(subtype, BoneSubtype::Cranium),
+            Self::Preserved => true,
+        }
+    }
 }
 
 /// Bone subtype determines which item classes accept the bone and which
@@ -180,7 +235,18 @@ impl BoneSubtype {
     /// when waystone crafting graduates beyond the v3 deferred-scope list.
     pub const fn valid_classes(self) -> &'static [&'static str] {
         match self {
-            Self::Rib => &["BodyArmour", "Helmet", "Boots", "Gloves"],
+            // "Desecrates a Rare Armour" (poe2db) — includes off-hand
+            // armour pieces; their 0.5 desecrated pools are non-empty
+            // (Shield 20 / Buckler 14 / Focus 18 mods).
+            Self::Rib => &[
+                "BodyArmour",
+                "Helmet",
+                "Boots",
+                "Gloves",
+                "Shield",
+                "Buckler",
+                "Focus",
+            ],
             Self::Jawbone => &[
                 "OneHandSword",
                 "TwoHandSword",
@@ -196,6 +262,8 @@ impl BoneSubtype {
                 "Wand",
                 "Dagger",
                 "Claw",
+                "Warstaff",
+                "Flail",
                 "Quiver",
             ],
             Self::Collarbone => &["Ring", "Amulet", "Belt", "Talisman"],
@@ -203,17 +271,22 @@ impl BoneSubtype {
         }
     }
 
-    /// True iff this subtype's pool ever yields a lord-targeted desecrated
-    /// mod (Liege/Sovereign/Blackblooded). Used by the apply-time gate
-    /// to reject lord-pool omens on jewels (whose pool is `Lightless` /
-    /// `of the Abyss`, not Lich-named) and sceptres (which have no
-    /// exclusive desecrated per the wiki).
+    /// True iff this subtype's pool can yield a lord-targeted desecrated
+    /// mod (Liege=Amanamu / Sovereign=Ulaman / Blackblooded=Kurgal).
+    ///
+    /// **Lord-targeting omens only work on Weapons and Jewellery.** Per the
+    /// wiki (Omen of the Liege / Sovereign / Blackblooded), these omens
+    /// "only work when desecrating weapons and jewellery; they do not have
+    /// any effect on armour items, jewels, or waystones."
+    ///
+    /// Mapping to bone subtypes:
+    /// - `Jawbone` → weapons + quiver ⇒ supports lord pool.
+    /// - `Collarbone` → ring/amulet/belt/talisman (jewellery) ⇒ supports.
+    /// - `Rib` → armour ⇒ does NOT support (lord omen is wasted).
+    /// - `Cranium` → jewel uses the `Lightless`/`of the Abyss` pool ⇒ does
+    ///   NOT support.
     pub const fn supports_lord_pool(self) -> bool {
-        // Cranium → Jewel uses the Lightless / of-the-Abyss pool, not the
-        // lord-named pool. Other subtypes can host lord mods on classes
-        // that accept lord-targeted desecrated. Sceptres are an exception
-        // handled at the apply-time gate by class-string check.
-        !matches!(self, Self::Cranium)
+        matches!(self, Self::Jawbone | Self::Collarbone)
     }
 }
 
@@ -330,6 +403,25 @@ impl Item {
         self.prefixes.len() + self.suffixes.len()
     }
 
+    /// Does the item carry a crafted modifier (Alloy / Emotion / Genesis
+    /// crafted-node output)? 0.5 limits items to one crafted mod at a time.
+    pub fn has_crafted_mod(&self) -> bool {
+        self.prefixes
+            .iter()
+            .chain(self.suffixes.iter())
+            .any(|m| m.kind == crate::mods::ModKind::Crafted)
+    }
+
+    /// Number of *revealed* desecrated mods on the item. 0.5 limits items
+    /// to one desecrated modifier (the hidden slot is gated separately).
+    pub fn desecrated_mod_count(&self) -> usize {
+        self.prefixes
+            .iter()
+            .chain(self.suffixes.iter())
+            .filter(|m| m.kind == crate::mods::ModKind::Desecrated)
+            .count()
+    }
+
     /// Total mod count for Fracturing Orb's eligibility check.
     ///
     /// Includes the hidden-desecrated slot (which counts) but not implicits
@@ -431,6 +523,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
         assert_eq!(it.fracturing_eligibility_count(), 4);
     }
@@ -453,6 +547,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
 
         // 3 visible non-fractured mods (2 prefixes + 1 suffix).

@@ -24,9 +24,15 @@ use rand::Rng;
 
 use crate::currency::{ApplyContext, ApplyOutcome, Currency};
 use crate::error::{EngineError, EngineResult};
-use crate::ids::{CurrencyId, ModId};
+use crate::ids::{CurrencyId, ItemClassId, ModId};
 use crate::item::{AffixType, Item, ModRoll, Rarity};
+use crate::item_class::AttributePool;
 use crate::mods::{ModDefinition, ModKind};
+
+/// Maximum modifiers a Rare item may carry on each affix side (3 prefixes /
+/// 3 suffixes in PoE2). Used to keep the remove-then-add path from
+/// overflowing a side.
+const MAX_AFFIXES_PER_SIDE: usize = 3;
 
 /// Quality tier of an essence — controls its apply behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,6 +61,20 @@ impl EssenceQuality {
     }
 }
 
+/// One per-class target binding for an essence. The same essence grants a
+/// *different* concrete mod per item class (poe2db/CoE: e.g. Essence of
+/// Alacrity — Wand `IncreasedCastSpeed3`, Staff `IncreasedCastSpeedTwoHand3`),
+/// and on armour the granted defence mod differs per attribute pool
+/// (STR armour% vs INT energy-shield%).
+#[derive(Debug, Clone)]
+pub struct EssenceTarget {
+    pub class: ItemClassId,
+    /// `None` = any attribute pool of the class. `Some(pool)` entries take
+    /// precedence over `None` entries for matching bases.
+    pub attribute_pool: Option<AttributePool>,
+    pub mod_id: ModId,
+}
+
 /// One essence — characterized by quality and the specific mod it grants.
 ///
 /// In production, the full Essence catalogue (19 types × 4 tiers + Corrupted)
@@ -69,11 +89,17 @@ pub struct Essence {
     pub display_name: &'static str,
     /// Quality tier (drives apply semantics).
     pub quality: EssenceQuality,
-    /// The mod this essence guarantees to add. The mod's `affix_type`
-    /// dictates which slot it occupies; Crystallisation's affix-only filter
-    /// is independent of this and applies to the *removal* step on
-    /// Perfect/Corrupted essences.
+    /// The mod this essence guarantees to add when `class_targets` is empty
+    /// (legacy single-target shape, kept for fixtures). The mod's
+    /// `affix_type` dictates which slot it occupies; Crystallisation's
+    /// affix-only filter is independent of this and applies to the *removal*
+    /// step on Perfect/Corrupted essences.
     pub target_mod: ModId,
+    /// Class-specific targets (the data-driven production shape). When
+    /// non-empty, the item's class (and attribute pool) selects the granted
+    /// mod, and a class with no entry **cannot receive this essence** —
+    /// weapon essences must not land on jewellery.
+    pub class_targets: Vec<EssenceTarget>,
 }
 
 impl Essence {
@@ -88,7 +114,48 @@ impl Essence {
             display_name,
             quality,
             target_mod: target_mod.into(),
+            class_targets: Vec::new(),
         }
+    }
+
+    /// Construct a class-targeted essence (the data-driven production
+    /// shape). `targets` must be non-empty; the first entry doubles as the
+    /// legacy `target_mod` fallback for diagnostics.
+    pub fn with_class_targets(
+        id: impl Into<CurrencyId>,
+        display_name: &'static str,
+        quality: EssenceQuality,
+        targets: Vec<EssenceTarget>,
+    ) -> Self {
+        let fallback = targets
+            .first()
+            .map_or_else(|| ModId::from("UnboundEssenceTarget"), |t| t.mod_id.clone());
+        Self {
+            id: id.into(),
+            display_name,
+            quality,
+            target_mod: fallback,
+            class_targets: targets,
+        }
+    }
+
+    /// Resolve the granted mod for an item's class + attribute pool.
+    /// `None` when this essence has class targets but none match (the
+    /// essence is illegal on the class).
+    pub fn resolve_target(&self, class: &ItemClassId, pool: AttributePool) -> Option<&ModId> {
+        if self.class_targets.is_empty() {
+            return Some(&self.target_mod);
+        }
+        // Pool-specific entry wins over the class-generic entry.
+        self.class_targets
+            .iter()
+            .find(|t| &t.class == class && t.attribute_pool == Some(pool))
+            .or_else(|| {
+                self.class_targets
+                    .iter()
+                    .find(|t| &t.class == class && t.attribute_pool.is_none())
+            })
+            .map(|t| &t.mod_id)
     }
 }
 
@@ -103,10 +170,46 @@ impl Currency for Essence {
 
     fn valid_rarities(&self) -> crate::currency::RaritySet {
         match self.quality {
-            EssenceQuality::Lesser | EssenceQuality::Normal => crate::currency::RaritySet::NORMAL,
-            EssenceQuality::Greater => crate::currency::RaritySet::MAGIC,
+            // Lesser / Normal / Greater all "Upgrade a Magic item to a Rare
+            // item, adding a guaranteed modifier" (PoE2 0.3 essence rework,
+            // stable in 0.5; per the wiki + poe2db). They therefore apply to
+            // MAGIC items — matching `apply_promoting`, which requires Magic.
+            // (Previously Lesser/Normal incorrectly declared NORMAL, which made
+            // their success path unreachable: the rarity gate allowed only
+            // Normal items but `apply_promoting` then rejected the non-Magic.)
+            EssenceQuality::Lesser | EssenceQuality::Normal | EssenceQuality::Greater => {
+                crate::currency::RaritySet::MAGIC
+            }
             EssenceQuality::Perfect | EssenceQuality::Corrupted => crate::currency::RaritySet::RARE,
         }
+    }
+
+    /// Pre-flight class gate (mirrors `Bone`/`Catalyst`): rarity + mirrored
+    /// via the default semantics, plus a best-effort class-target check when
+    /// the item's class is resolvable without a registry (legacy PascalCase
+    /// placeholders). Real bundle ids resolve at apply time via
+    /// `ctx.base_registry` — `apply` re-checks with full fidelity.
+    fn can_apply_to(&self, item: &Item) -> Result<(), crate::currency::CannotApply> {
+        let valid = self.valid_rarities();
+        if !valid.contains(item.rarity) {
+            return Err(crate::currency::CannotApply::WrongRarity {
+                item_rarity: item.rarity,
+                expected: valid,
+            });
+        }
+        if item.mirrored {
+            return Err(crate::currency::CannotApply::Mirrored);
+        }
+        if !self.class_targets.is_empty() {
+            if let Some(class) = crate::base_registry::EMPTY.resolve_item_class_opt(item) {
+                if !self.class_targets.iter().any(|t| t.class == class) {
+                    return Err(crate::currency::CannotApply::Other(
+                        "essence has no modifier for this item class",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
@@ -125,11 +228,24 @@ impl Currency for Essence {
             return Err(EngineError::ItemCorrupted);
         }
 
-        let target_def = ctx.registry.get(&self.target_mod).ok_or_else(|| {
-            EngineError::Data(format!(
-                "Essence: target mod `{}` not in registry",
-                self.target_mod
+        // Registry-backed class gate: the essence grants a class-specific
+        // mod; a class with no target rejects the essence (weapon essences
+        // must not land on jewellery).
+        let class = ctx.base_registry.resolve_item_class(item);
+        let pool = ctx
+            .base_registry
+            .get(&item.base)
+            .map_or(AttributePool::None, |b| b.attribute_pool);
+        let target_id = self.resolve_target(&class, pool).ok_or_else(|| {
+            EngineError::InvalidApplication(format!(
+                "{}: no modifier for item class {}",
+                self.display_name,
+                class.as_str()
             ))
+        })?;
+
+        let target_def = ctx.registry.get(target_id).ok_or_else(|| {
+            EngineError::Data(format!("Essence: target mod `{target_id}` not in registry"))
         })?;
 
         if self.quality.is_promoting() {
@@ -166,7 +282,7 @@ fn apply_promoting(
         });
     }
     // Refuse if the target mod's group is already occupied.
-    if let Some(g) = ctx.registry.group_of(&essence.target_mod) {
+    if let Some(g) = ctx.registry.group_of(&target_def.id) {
         let occupied = item
             .prefixes
             .iter()
@@ -200,7 +316,34 @@ fn apply_remove_add(
         )));
     }
 
-    let affix_filter = ctx.omens.consume_affix_only(ctx.patch);
+    let crystallisation = ctx.omens.consume_affix_only(ctx.patch);
+
+    // The essence's guaranteed mod always lands in `target_def.affix_type`.
+    // On a Rare that already fills that side (3 mods), the removal MUST free a
+    // slot on the *same* side, otherwise the add overflows to a 4th
+    // prefix/suffix — an illegal item state. Constrain the removal to keep the
+    // result legal, composing with Sinistral/Dextral Crystallisation.
+    let target_affix = target_def.affix_type;
+    let target_full = match target_affix {
+        AffixType::Prefix => item.prefixes.len() >= MAX_AFFIXES_PER_SIDE,
+        AffixType::Suffix => item.suffixes.len() >= MAX_AFFIXES_PER_SIDE,
+        _ => false,
+    };
+    let affix_filter = match (crystallisation, target_full) {
+        // Crystallisation forces the opposite side while the target side is
+        // full: the removal cannot open a slot for the new mod.
+        (Some(forced), true) if forced != target_affix => {
+            return Err(EngineError::AffixSlotFull {
+                affix_type:
+                    "Essence: target affix slot is full and Crystallisation forces the other side",
+            });
+        }
+        (Some(forced), _) => Some(forced),
+        // No Crystallisation but the target side is full → remove from the
+        // target side so the new mod has room.
+        (None, true) => Some(target_affix),
+        (None, false) => None,
+    };
 
     // Build removable list per filter.
     let mut removables: smallvec::SmallVec<[(AffixType, usize); 8]> = smallvec::SmallVec::new();
@@ -238,7 +381,7 @@ fn apply_remove_add(
     };
 
     // Now check group exclusivity against survivors.
-    if let Some(g) = ctx.registry.group_of(&essence.target_mod) {
+    if let Some(g) = ctx.registry.group_of(&target_def.id) {
         let occupied = item
             .prefixes
             .iter()
@@ -271,7 +414,7 @@ fn push_essence_roll(
         .map(|s| s.roll(ctx.rng.gen::<f64>()))
         .collect();
     let roll = ModRoll {
-        mod_id: essence.target_mod.clone(),
+        mod_id: target_def.id.clone(),
         affix_type: target_def.affix_type,
         kind,
         values,
@@ -318,6 +461,7 @@ mod tests {
                 max: 50.0,
             }],
             required_level: 1,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
             patch_range: PatchRange::ALL,
             flags: ModFlags::ESSENCE_ONLY,
@@ -539,5 +683,87 @@ mod tests {
             .unwrap();
         assert_eq!(item.suffixes.len(), 1);
         assert_eq!(item.suffixes[0].kind, ModKind::Corrupted);
+    }
+
+    /// Class-targeted essences must reject classes they carry no mod for —
+    /// a weapon essence cannot land on jewellery (M14 audit regression).
+    #[test]
+    fn class_targeted_essence_rejects_unlisted_class() {
+        let target = mk_target_mod("EssMod_AttackSpeed", "IAS", AffixType::Suffix);
+        let reg = ModRegistry::from_mods(vec![target], vec![]);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x5);
+        let mut omens = OmenSet::new();
+
+        let ess = Essence::with_class_targets(
+            "EssenceOfHaste",
+            "Essence of Haste",
+            EssenceQuality::Greater,
+            vec![EssenceTarget {
+                class: ItemClassId::from("Wand"),
+                attribute_pool: None,
+                mod_id: ModId::from("EssMod_AttackSpeed"),
+            }],
+        );
+
+        // can_apply_to: legacy PascalCase base resolves via the EMPTY
+        // registry fallback → class gate fires pre-flight.
+        let mut item = fixture_armour(); // base "BodyArmour", Magic
+        assert!(ess.can_apply_to(&item).is_err(), "pre-flight class gate");
+
+        // apply: registry-backed gate fires even if pre-flight is bypassed.
+        let r = ess.apply(
+            &mut item,
+            &mut ApplyContext::new_without_bases(
+                &reg,
+                &mut rng,
+                PatchVersion::PATCH_0_5_0,
+                &mut omens,
+            ),
+        );
+        assert!(
+            matches!(r, Err(EngineError::InvalidApplication(ref m)) if m.contains("no modifier for item class")),
+            "apply-time class gate; got {r:?}"
+        );
+        assert_eq!(item.prefixes.len() + item.suffixes.len(), 0);
+    }
+
+    /// Attribute-pool-specific targets beat the class-generic entry; a
+    /// class with no entry resolves to `None`.
+    #[test]
+    fn resolve_target_prefers_pool_specific_entry() {
+        use crate::item_class::AttributePool;
+        let ess = Essence::with_class_targets(
+            "EssenceOfEnhancement",
+            "Essence of Enhancement",
+            EssenceQuality::Greater,
+            vec![
+                EssenceTarget {
+                    class: ItemClassId::from("BodyArmour"),
+                    attribute_pool: None,
+                    mod_id: ModId::from("DefencesGeneric"),
+                },
+                EssenceTarget {
+                    class: ItemClassId::from("BodyArmour"),
+                    attribute_pool: Some(AttributePool::Int),
+                    mod_id: ModId::from("EnergyShieldPercent"),
+                },
+            ],
+        );
+        let body = ItemClassId::from("BodyArmour");
+        assert_eq!(
+            ess.resolve_target(&body, AttributePool::Int),
+            Some(&ModId::from("EnergyShieldPercent")),
+            "pool-specific entry wins"
+        );
+        assert_eq!(
+            ess.resolve_target(&body, AttributePool::Str),
+            Some(&ModId::from("DefencesGeneric")),
+            "generic entry covers other pools"
+        );
+        assert_eq!(
+            ess.resolve_target(&ItemClassId::from("Ring"), AttributePool::None),
+            None,
+            "unlisted class rejects"
+        );
     }
 }

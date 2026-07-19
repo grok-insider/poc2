@@ -182,6 +182,7 @@ fn train_advisor_with_bundle_produces_non_degenerate_v_path() {
         // Perfect orbs by default, so the synthetic mod must clear
         // that bar to be eligible.
         required_level: 75,
+        tier: None,
         allowed_item_classes: smallvec![class.clone()],
         patch_range: PatchRange::ALL,
         flags: ModFlags::empty(),

@@ -56,10 +56,15 @@ kind = "guidance"
 2. Edit `Cargo.toml` (rename) + `src/lib.rs` (your closure).
 3. Edit `poc2-plugin.toml` to set the right id + capabilities.
 4. `cargo build --release --target wasm32-unknown-unknown`.
-5. Drop the resulting `.wasm` + `poc2-plugin.toml` in
-   `~/.config/poc2/plugins/<your-plugin-id>/`.
-6. Restart the desktop app (or call the `reload_bundle` Tauri
-   command — the host walks the plugins dir on every reload).
+5. Load it into the app: **Settings → Plugins → Add plugin…** (the
+   ADR-0014 browser host stores the `.wasm` in IndexedDB, instantiates
+   it sandboxed, and installs its emitted strategies/rules). The native
+   host (`PluginHost::discover_plugins` over
+   `~/.config/poc2/plugins/<id>/`) remains for tests/tools.
+6. **Note:** phase 1 covers strategy/rule emission only. Custom
+   predicates (`eval_predicate`) and recommendation emitters need the
+   phase 2 dispatch (`plugin_dispatch` is still `None` during planning
+   — see ADR-0014).
 
 ## Capabilities cheat sheet
 
@@ -74,5 +79,6 @@ kind = "guidance"
 | `emit_recommendations` | Export `emit_recommendations(state)` |
 
 The host refuses to load plugins declaring capabilities the user
-hasn't approved; manage approvals in the Settings → Plugins UI
-(Phase F.6 ships in v1).
+hasn't approved. (The Settings → Plugins approval UI belonged to the
+retired Tauri app; a replacement ships with the plugin re-wiring —
+see `docs/70-roadmap.md`.)

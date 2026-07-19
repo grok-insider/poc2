@@ -47,6 +47,35 @@ fn has_gz_extension(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("gz"))
 }
 
+/// Read a bundle from in-memory bytes, auto-detecting gzip by magic bytes
+/// (`0x1f 0x8b`).
+///
+/// This is the filesystem-free entry point used by the WebAssembly build (and
+/// any non-Tauri host): the caller fetches the `*.bundle.json[.gz]` as bytes
+/// and passes them in. Mirrors [`read_bundle`] but takes a `&[u8]` instead of a
+/// path.
+pub fn read_bundle_bytes(bytes: &[u8]) -> DataResult<Bundle> {
+    let is_gz = bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
+    if is_gz {
+        #[cfg(feature = "gzip")]
+        {
+            let gz = flate2::read::GzDecoder::new(bytes);
+            return serde_json::from_reader(gz).map_err(|e| DataError::Json {
+                path: "<bytes>".to_string(),
+                source: e,
+            });
+        }
+        #[cfg(not(feature = "gzip"))]
+        {
+            return Err(DataError::Gzip("gzip feature disabled".into()));
+        }
+    }
+    serde_json::from_slice(bytes).map_err(|e| DataError::Json {
+        path: "<bytes>".to_string(),
+        source: e,
+    })
+}
+
 /// Write a bundle to a path. `pretty` controls indentation; ignored for `.gz`.
 pub fn write_bundle<P: AsRef<Path>>(bundle: &Bundle, path: P, pretty: bool) -> DataResult<()> {
     let path = path.as_ref();

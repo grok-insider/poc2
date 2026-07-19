@@ -22,7 +22,7 @@ use poc2_engine::currency::CurrencyResolver;
 use poc2_engine::ids::ItemClassId;
 use poc2_engine::item::Item;
 use poc2_engine::omen::OmenSet;
-use poc2_engine::patch::PatchVersion;
+use poc2_engine::patch::{League, PatchVersion};
 use poc2_engine::registry::ModRegistry;
 use poc2_market::{DivEquiv, Valuator};
 use poc2_rules::RuleSet;
@@ -142,6 +142,13 @@ pub struct PlanInput<'a> {
     pub valuator: &'a Valuator,
     pub stash: &'a Stash,
     pub patch: PatchVersion,
+    /// League ruleset (Standard vs the current challenge league). Gates
+    /// items disabled in the challenge league — notably the Recombinator,
+    /// which 0.5 "Return of the Ancients" removed from Runes of Aldur but
+    /// kept in Standard. Defaults to [`League::Challenge`] in the public
+    /// builder. The candidate generator drops Recombine actions when
+    /// `recombinator_available(patch, league)` is false.
+    pub league: League,
     pub config: BeamConfig,
     /// Plugin-host bridge for custom predicates (Phase F.3). `None`
     /// means the planner runs without plugin custom predicates;
@@ -165,12 +172,19 @@ pub struct PlanInput<'a> {
 /// the per-node accumulated cost. Predicates that reference cost / stash
 /// / valuator data evaluate against this context; everything else
 /// continues to read the item directly. Plugin custom predicates
-/// dispatch via `input.plugin_dispatch` when set (Phase F.3).
-fn ctx_for_node<'a>(input: &'a PlanInput<'a>, accumulated_cost: DivEquiv) -> PredicateContext<'a> {
+/// dispatch via `input.plugin_dispatch` when set (Phase F.3). The item's
+/// class is resolved once here (via `input.base_registry`) so class-gated
+/// predicates and the candidate generator share one resolution per node.
+fn ctx_for_node<'a>(
+    input: &'a PlanInput<'a>,
+    item: &Item,
+    accumulated_cost: DivEquiv,
+) -> PredicateContext<'a> {
     let mut ctx = PredicateContext::new(input.registry)
         .with_cost(accumulated_cost.expected)
         .with_valuator(input.valuator)
-        .with_stash(input.stash);
+        .with_stash(input.stash)
+        .with_item_class(item_class_for(item, input.base_registry));
     if let Some(dispatch) = input.plugin_dispatch {
         ctx = ctx.with_plugin_dispatch(dispatch);
     }
@@ -184,7 +198,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
 
     // Short-circuit: if the goal is already met at the root, the only
     // recommendation is to stop. The advisor's job is done.
-    let root_ctx = ctx_for_node(input, DivEquiv::ZERO);
+    let root_ctx = ctx_for_node(input, &input.item, DivEquiv::ZERO);
     if is_satisfied_with_ctx(&input.goal, &input.item, &root_ctx) {
         return vec![Recommendation {
             action: AdvisorAction::Stop,
@@ -193,6 +207,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
             },
             expected_cost: DivEquiv::ZERO,
             expected_prob: 1.0,
+            goal_progress: 1.0,
             prob_stderr: 0.0,
             score: f64::INFINITY,
             rationale: "Item already satisfies the target; stop and equip or sell.".into(),
@@ -203,6 +218,9 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
 
     let mut frontier = vec![PlanNode::root(input.item.clone())];
     let mut all_terminated: Vec<PlanNode> = Vec::new();
+    // Depth-1 advisory (`Guidance`) tips, surfaced only as a fallback when
+    // the beam produces no concrete crafting recommendation.
+    let mut advisory: Vec<PlanNode> = Vec::new();
 
     for depth in 1..=cfg.depth {
         let mut next: Vec<(PlanNode, f64)> = Vec::new();
@@ -211,7 +229,7 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
                 next.push((node.clone(), 0.0));
                 continue;
             }
-            let node_ctx = ctx_for_node(input, node.accumulated_cost);
+            let node_ctx = ctx_for_node(input, &node.item, node.accumulated_cost);
             // Goal already met → terminate.
             if is_satisfied_with_ctx(&input.goal, &node.item, &node_ctx) {
                 let mut t = node.clone();
@@ -237,10 +255,25 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
                 input.resolver,
                 input.stash,
                 input.patch,
+                input.league,
                 Some(&input.goal),
                 input.registry,
+                input.base_registry,
             );
             for cand in cands {
+                // `Guidance` is non-mutating meta-advice: expanding it yields
+                // a child identical to the parent, which would waste beam
+                // slots and crowd out concrete crafting branches. Collect
+                // such tips separately (depth-1 only) and surface them as a
+                // fallback when no concrete step exists; never expand them in
+                // the beam.
+                if matches!(cand.action, AdvisorAction::Guidance { .. }) {
+                    if depth == 1 {
+                        let child = expand_with_candidate(node, &cand, depth, input);
+                        advisory.push(child);
+                    }
+                    continue;
+                }
                 let child = expand_with_candidate(node, &cand, depth, input);
                 let s = score_node(&child, input, &cfg);
                 next.push((child, s));
@@ -255,15 +288,38 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
         }
     }
 
-    // Group by first action; pick the highest-scoring node per group.
+    // Group by first action; pick the highest-scoring node per group, then
+    // rank and truncate to top-N.
+    let grouped = group_by_first_action(&frontier, &all_terminated, input, &cfg);
+
+    // Fallback: if the beam produced no concrete recommendation (e.g. the
+    // only candidates were advisory guidance), surface the best advisory tip
+    // so the UI is never empty.
+    if grouped.is_empty() {
+        return advisory_recommendations(&advisory, input, &cfg);
+    }
+
+    grouped
+        .into_iter()
+        .map(|(n, s)| node_to_recommendation(&n, s, input))
+        .collect()
+}
+
+/// Group terminal/frontier nodes by their first action, keeping the
+/// highest-scoring node per first-action, then sort by score and truncate to
+/// `top_n`.
+fn group_by_first_action(
+    frontier: &[PlanNode],
+    all_terminated: &[PlanNode],
+    input: &PlanInput<'_>,
+    cfg: &BeamConfig,
+) -> Vec<(PlanNode, f64)> {
     let mut by_first: ahash::AHashMap<AdvisorAction, (PlanNode, f64)> = ahash::AHashMap::new();
-    let candidates_for_grouping = frontier.iter().chain(all_terminated.iter());
-    for node in candidates_for_grouping {
-        if node.path.is_empty() {
+    for node in frontier.iter().chain(all_terminated.iter()) {
+        let Some(key) = node.path.first().cloned() else {
             continue;
-        }
-        let key = node.path[0].clone();
-        let s = score_node(node, input, &cfg);
+        };
+        let s = score_node(node, input, cfg);
         by_first
             .entry(key)
             .and_modify(|(existing, score)| {
@@ -277,10 +333,28 @@ pub fn plan(input: &PlanInput<'_>) -> Vec<Recommendation> {
     let mut grouped: Vec<(PlanNode, f64)> = by_first.into_values().collect();
     grouped.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     grouped.truncate(cfg.top_n as usize);
-
     grouped
-        .into_iter()
-        .map(|(n, s)| node_to_recommendation(&n, s, input.valuator))
+}
+
+/// Rank depth-1 advisory (`Guidance`) nodes as a fallback recommendation set
+/// when the beam produced no concrete crafting step.
+fn advisory_recommendations(
+    advisory: &[PlanNode],
+    input: &PlanInput<'_>,
+    cfg: &BeamConfig,
+) -> Vec<Recommendation> {
+    let mut adv: Vec<(PlanNode, f64)> = advisory
+        .iter()
+        .filter(|n| !n.path.is_empty())
+        .map(|n| {
+            let s = score_node(n, input, cfg);
+            (n.clone(), s)
+        })
+        .collect();
+    adv.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    adv.truncate(cfg.top_n as usize);
+    adv.into_iter()
+        .map(|(n, s)| node_to_recommendation(&n, s, input))
         .collect()
 }
 
@@ -345,12 +419,21 @@ fn expand_with_candidate(
 
 /// Score a frontier node against the goal.
 fn score_node(node: &PlanNode, input: &PlanInput<'_>, cfg: &BeamConfig) -> f64 {
-    let ctx = ctx_for_node(input, node.accumulated_cost);
+    let ctx = ctx_for_node(input, &node.item, node.accumulated_cost);
     let progress = if is_satisfied_with_ctx(&input.goal, &node.item, &ctx) {
         1.0
     } else {
         partial_progress(&node.item, &input.goal, input.registry)
     };
+    // Goal-attainment = execution-reliability × goal-progress. Keeping these
+    // MULTIPLIED is what suppresses cheap no-ops: an action that makes zero
+    // progress earns zero attainment credit no matter how "reliable" it is, so
+    // a safe-but-useless Annul/Divine can't ride its high per-step success to
+    // the top. On top of that we add an explicit, weighted structural-progress
+    // reward (activates the previously dead `ScoringWeights.progress_bonus`) so
+    // that — among building steps — the one reaching MORE of the target wins
+    // even when it's the riskier path. (Premature Divine on a still-partial item
+    // is handled separately by the `tier_fix_candidates` gate.)
     let success_prob = node.accumulated_prob * progress;
     let base = score(
         success_prob,
@@ -358,7 +441,7 @@ fn score_node(node: &PlanNode, input: &PlanInput<'_>, cfg: &BeamConfig) -> f64 {
         node.first_prior,
         cfg.risk,
         cfg.weights,
-    );
+    ) + cfg.weights.progress_bonus * progress;
     // Phase B.1 — fold the cumulative occupancy adjustment in. We also
     // amplify by the risk-aware variance penalty so a cautious user
     // (low risk) feels the protection bonus more strongly than a
@@ -371,44 +454,66 @@ fn score_node(node: &PlanNode, input: &PlanInput<'_>, cfg: &BeamConfig) -> f64 {
     // pair, blend the Q-value into the score. Q dominates the
     // heuristic; the heuristic stays as a tiebreaker. Lookup miss →
     // pure heuristic ranking.
-    if let Some(q) = trained_policy_q(node, input) {
+    if let Some(q) = trained_policy_q(node, input, cfg.risk) {
         return q * cfg.trained_uplift_weight + heuristic;
     }
     heuristic
 }
 
-/// Look up `Q(featurize(node.item, goal), node.path[0])` in the trained
-/// model cache, when one exists for the current `(goal, item-class)`.
+/// Look up the trained policy's Q-value for a node's **first action** from
+/// the **root state**, when a model exists for the current
+/// `(goal, item-class)`.
+///
+/// `Q(featurize(input.item), path[0])` — deliberately the root state, not
+/// the node's: recommendations are ranked by their first action, and
+/// `Q(s0, a1)` is exactly the trained policy's preference over first
+/// actions. Every descendant of the same first action shares the Q score,
+/// so the v2 heuristic ranks within-path ties at any depth. (The
+/// historical `Q(fv(node), path[0])` keyed the CURRENT state to the FIRST
+/// action — a pair that usually doesn't exist in the model at depth ≥ 2,
+/// silently dropping deep nodes back to heuristic scale mid-frontier.)
+///
+/// When the artefact carries the cost-reward twin, the returned value is
+/// the docs/81 §6.3 risk blend `(1 − risk)·Q_cost + risk·Q_steps` — a
+/// cautious (low-risk) user prioritizes expected cost, a greedy one
+/// expected steps. Path-only artefacts fall back to `Q_steps` alone.
+///
 /// Returns `None` when:
 ///
 /// - no cache supplied
 /// - node is the root (no first action yet)
 /// - cache miss for the goal hash + class
-/// - the trained model doesn't have an entry for this `(state, action)`
+/// - the path-length model has no entry for `(root_state, first_action)`
 ///
 /// The advisor uses `None` as the signal to fall back to v2 heuristic
 /// scoring.
-fn trained_policy_q(node: &PlanNode, input: &PlanInput<'_>) -> Option<f64> {
+fn trained_policy_q(node: &PlanNode, input: &PlanInput<'_>, risk: f64) -> Option<f64> {
     let cache = input.trained_models?;
     let first_action = node.path.first()?;
-    let item_class = item_class_for(&node.item, input.base_registry);
+    let item_class = item_class_for(&input.item, input.base_registry);
     let goal_h = goal_hash(&input.goal);
-    let model = cache.lookup(goal_h, &item_class)?;
-    let fv = featurize(&node.item, &input.goal, input.registry);
-    score_with_trained_policy(model, fv, first_action)
+    let (path_model, cost_model) = cache.lookup_pair(goal_h, &item_class)?;
+    let root_fv = featurize(&input.item, &input.goal, input.registry);
+    let q_steps = score_with_trained_policy(path_model, root_fv, first_action)?;
+    let q_cost = cost_model.and_then(|m| m.q_at(root_fv, first_action));
+    Some(match q_cost {
+        Some(qc) => {
+            let r = risk.clamp(0.0, 1.0);
+            (1.0 - r) * qc + r * q_steps
+        }
+        None => q_steps,
+    })
 }
 
 /// Resolve `Item.base` → `ItemClassId`, honouring [`BaseRegistry`]
-/// when supplied and falling back to the v3 placeholder convention
-/// (`Item.base` *is* the class id) otherwise. Mirrors the engine's
-/// `class_for_item` helper which is `pub(crate)`.
+/// when supplied. Routes through `BaseRegistry::resolve_item_class`
+/// (against the shared empty registry when none is supplied) so the
+/// legacy placeholder fallback — and its misclassification warning —
+/// live in exactly one place.
 fn item_class_for(item: &Item, base_registry: Option<&BaseRegistry>) -> ItemClassId {
-    if let Some(reg) = base_registry {
-        if let Some(class) = reg.class_of(&item.base) {
-            return class.clone();
-        }
-    }
-    ItemClassId::from(item.base.as_str())
+    base_registry
+        .unwrap_or(&poc2_engine::base_registry::EMPTY)
+        .resolve_item_class(item)
 }
 
 /// Roughly: fraction of the goal's target specs that are satisfied.
@@ -458,8 +563,9 @@ fn partial_progress(item: &Item, goal: &Goal, registry: &ModRegistry) -> f64 {
 fn node_to_recommendation(
     node: &PlanNode,
     score_value: f64,
-    valuator: &Valuator,
+    input: &PlanInput<'_>,
 ) -> Recommendation {
+    let valuator = input.valuator;
     let action = node.path[0].clone();
     let cost = action_cost(&action, valuator);
     let source = node
@@ -473,12 +579,28 @@ fn node_to_recommendation(
     } else {
         None
     };
+    // Display metrics describe the user's CURRENT item, not the plan's
+    // single-rollout terminal state. `goal_progress` is the fraction of goal
+    // specs the item ALREADY satisfies — a stable, intuitive "n/m specs" bar
+    // (the noisy terminal state of one Monte-Carlo rollout would make it jump
+    // around). `expected_prob` is the honest P(reach goal) = execution-
+    // reliability × that closeness, so a useless step far from the goal reads
+    // low instead of the old ~90% raw step-execution probability. (Ranking, in
+    // `score_node`, still uses the terminal projected progress to reward
+    // building plans.)
+    let ctx = ctx_for_node(input, &input.item, DivEquiv::ZERO);
+    let progress = if is_satisfied_with_ctx(&input.goal, &input.item, &ctx) {
+        1.0
+    } else {
+        partial_progress(&input.item, &input.goal, input.registry)
+    };
     Recommendation {
         action,
         source,
         expected_cost: cost,
-        expected_prob: node.accumulated_prob,
-        prob_stderr: node.accumulated_prob_var.sqrt(),
+        expected_prob: node.accumulated_prob * progress,
+        prob_stderr: node.accumulated_prob_var.sqrt() * progress,
+        goal_progress: progress,
         score: score_value,
         rationale: node.first_rationale.clone(),
         depth: node.path.len() as u32,
@@ -526,7 +648,7 @@ mod tests {
     use super::*;
     use poc2_engine::currency::DefaultCurrencyResolver;
     use poc2_engine::ids::ItemClassId;
-    use poc2_engine::item::{QualityKind, Rarity};
+    use poc2_engine::item::{ModRoll, QualityKind, Rarity};
     use poc2_strategies::Target;
     use smallvec::smallvec;
 
@@ -548,6 +670,22 @@ mod tests {
             sockets: smallvec![],
             hinekora_lock: None,
         }
+    }
+
+    /// A Magic Body Armour with one filler prefix — yields multiple
+    /// *concrete* depth-1 candidates (Augmentation to fill the open suffix,
+    /// Regal to promote, plus Greater/Perfect variants), which the
+    /// trained-policy reorder test needs.
+    fn magic_one_prefix_item() -> Item {
+        let mut it = empty_item(Rarity::Magic);
+        it.prefixes.push(ModRoll {
+            mod_id: poc2_engine::ids::ModId::from("FillerPrefix"),
+            affix_type: poc2_engine::item::AffixType::Prefix,
+            kind: poc2_engine::mods::ModKind::Explicit,
+            values: smallvec![],
+            is_fractured: false,
+        });
+        it
     }
 
     /// Build a non-trivial goal so [`is_satisfied`] returns false at root,
@@ -590,6 +728,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            league: League::current(),
             plugin_dispatch: None,
             base_registry: None,
             trained_models: None,
@@ -648,6 +787,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            league: League::current(),
             plugin_dispatch: None,
             base_registry: None,
             trained_models: None,
@@ -676,6 +816,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            league: League::current(),
             plugin_dispatch: None,
             base_registry: None,
             trained_models: None,
@@ -721,6 +862,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            league: League::current(),
             plugin_dispatch: None,
             base_registry: None,
             trained_models: None,
@@ -728,7 +870,7 @@ mod tests {
         };
         let dummy_node = PlanNode::root(input.item.clone());
         // Empty path → no first action → None even if a cache had one.
-        assert!(trained_policy_q(&dummy_node, &input).is_none());
+        assert!(trained_policy_q(&dummy_node, &input, 0.5).is_none());
     }
 
     /// Score a fresh `Normal`-rarity body armour through the planner
@@ -748,7 +890,9 @@ mod tests {
         let strategies = StrategyRegistry::default();
         let valuator = Valuator::default();
         let stash = Stash::unlimited();
-        let item = empty_item(Rarity::Normal);
+        // Magic item with one prefix → multiple concrete depth-1 candidates,
+        // so the trained-policy uplift has an underdog to promote.
+        let item = magic_one_prefix_item();
         let goal = three_es_prefix_goal();
         let goal_h = goal_hash(&goal);
 
@@ -764,6 +908,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            league: League::current(),
             plugin_dispatch: None,
             base_registry: None,
             trained_models: None,
@@ -817,6 +962,7 @@ mod tests {
             valuator: &valuator,
             stash: &stash,
             patch: PatchVersion::PATCH_0_4_0,
+            league: League::current(),
             plugin_dispatch: None,
             base_registry: None,
             config: BeamConfig {
@@ -835,6 +981,121 @@ mod tests {
             trained_top, underdog,
             "trained-policy uplift should force the underdog to top: \
              baseline={baseline:#?}, trained={trained:#?}"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Anti-myopia — de-diluted goal-progress scoring
+    // ---------------------------------------------------------------
+
+    /// White-box guard for the goal-progress scoring. Two nodes with identical
+    /// reliability / cost / prior but terminal progress 0 vs 1 differ in score by
+    /// `accumulated_prob·Δprogress` (the multiplicative attainment term) PLUS
+    /// `progress_bonus·Δprogress` (the additive structural booster). With
+    /// `accumulated_prob = 0.5` and Δprogress = 1, the delta is exactly
+    /// `0.5 + progress_bonus`. Pins both halves of the progress signal and fails
+    /// if either the multiplicative term or the booster is dropped.
+    #[test]
+    fn score_node_rewards_goal_progress() {
+        use poc2_engine::ids::{ConceptId, ModGroupId, StatId, TagId};
+        use poc2_engine::item::AffixType;
+        use poc2_engine::mods::{ModDefinition, ModDomain, ModFlags, ModGroup, SpawnWeight};
+        use poc2_engine::patch::PatchRange;
+        use poc2_engine::ModStat;
+
+        // Registry with one ES prefix mod so an item carrying it satisfies a
+        // one-ES-prefix goal (progress 1.0); an empty item is progress 0.0.
+        let es_mod = ModDefinition {
+            id: poc2_engine::ids::ModId::from("ES1"),
+            name: Some("ES".into()),
+            mod_group: ModGroup(ModGroupId::from("ES1")),
+            affix_type: AffixType::Prefix,
+            kind: poc2_engine::mods::ModKind::Explicit,
+            domain: ModDomain::Item,
+            tags: smallvec![],
+            concept_set: smallvec![ConceptId::from("EnergyShield")],
+            spawn_weights: smallvec![SpawnWeight {
+                tag: TagId::from("BodyArmour"),
+                weight: 1
+            }],
+            stats: smallvec![ModStat {
+                stat_id: StatId::from("es"),
+                min: 100.0,
+                max: 200.0,
+            }],
+            required_level: 1,
+            tier: None,
+            allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
+            patch_range: PatchRange::ALL,
+            flags: ModFlags::empty(),
+            text_template: None,
+        };
+        let registry = ModRegistry::from_mods(vec![es_mod], vec![]);
+        let resolver = DefaultCurrencyResolver::new();
+        let rules = RuleSet::default();
+        let strategies = StrategyRegistry::default();
+        let valuator = Valuator::default();
+        let stash = Stash::unlimited();
+        let goal = Goal::new(
+            Target {
+                prefixes: vec![poc2_strategies::TargetSpec {
+                    concept: Some(ConceptId::from("EnergyShield")),
+                    concept_any: vec![],
+                    affix: Some(AffixType::Prefix),
+                    count: 1,
+                    min_tier: None,
+                    allow_hybrid: true,
+                }],
+                suffixes: vec![],
+                constraints: vec![],
+            },
+            DivEquiv::point(100.0),
+        );
+        let input = PlanInput {
+            item: empty_item(Rarity::Magic),
+            goal,
+            rules: &rules,
+            strategies: &strategies,
+            registry: &registry,
+            resolver: &resolver,
+            valuator: &valuator,
+            stash: &stash,
+            patch: PatchVersion::PATCH_0_4_0,
+            league: League::current(),
+            plugin_dispatch: None,
+            base_registry: None,
+            trained_models: None,
+            config: BeamConfig::default(),
+        };
+        let cfg = input.config;
+
+        // Same reliability / cost / prior; only terminal progress differs.
+        let mut node_a = PlanNode::root(empty_item(Rarity::Magic));
+        node_a.accumulated_prob = 0.5;
+        let mut item_b = empty_item(Rarity::Magic);
+        item_b.prefixes.push(ModRoll {
+            mod_id: poc2_engine::ids::ModId::from("ES1"),
+            affix_type: AffixType::Prefix,
+            kind: poc2_engine::mods::ModKind::Explicit,
+            values: smallvec![150.0],
+            is_fractured: false,
+        });
+        let mut node_b = PlanNode::root(item_b);
+        node_b.accumulated_prob = 0.5;
+
+        let sa = score_node(&node_a, &input, &cfg);
+        let sb = score_node(&node_b, &input, &cfg);
+        // accumulated_prob (0.5) × Δprogress (1.0) + progress_bonus × Δprogress.
+        let expected_delta = 0.5 + cfg.weights.progress_bonus;
+        assert!(
+            (sb - sa - expected_delta).abs() < 1e-9,
+            "progress reward must be reliability×progress + progress_bonus×progress \
+             (== {expected_delta}); got delta {}",
+            sb - sa
+        );
+        assert!(
+            sb > sa,
+            "the progress-bearing node must rank strictly higher"
         );
     }
 }

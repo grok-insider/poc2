@@ -12,7 +12,7 @@ mods still need aliasing:
 ```bash
 # Build a fresh bundle (network required for live CoE feed).
 cargo run --release -p poc2-pipeline -- build \
-  --out /tmp/poc2.bundle.json.gz --patch 0.4.0 --skip-validation
+  --out /tmp/poc2.bundle.json.gz --patch 0.5.0 --skip-validation
 
 # Diagnose: shows the top-N unmatched CoE mod names by frequency.
 cargo run --release -p poc2-pipeline -- diagnose-coe /tmp/poc2.bundle.json.gz --limit 100

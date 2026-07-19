@@ -35,6 +35,7 @@ pub mod executor;
 pub mod loader;
 pub mod predicate;
 pub mod registry;
+pub mod seed;
 
 pub use dsl::{
     Action, Branch, CmpOp, Confidence, FloatValuePredicate, ItemPredicate, RecoveryHint, Source,
@@ -49,3 +50,4 @@ pub use predicate::{
     eval, eval_all, eval_any, is_hybrid_mod, PluginPredicateDispatch, PredicateContext, StashView,
 };
 pub use registry::StrategyRegistry;
+pub use seed::seed_strategies;

@@ -1,324 +1,30 @@
-//! Basic orbs: Transmute / Augment / Regal (M2.4b).
+//! Basic orbs: Transmute / Augment / Regal / Alchemy / Exalt / Annul /
+//! Chaos / Divine.
 //!
-//! Alch / Exalt / Chaos / Annul / Divine / Vaal land in M2.4c-d.
-//! Greater / Perfect variants land in M2.4e.
+//! The shared sampling/removal kernel lives in [`super::common`]; the
+//! Greater / Perfect tier variants live in [`super::variants`]; the Vaal
+//! Orb and its corruption model live in [`super::vaal`]. The variant and
+//! Vaal types are re-exported below so callers keep addressing them via
+//! `currency::basic`.
 
 use rand::Rng;
-use smallvec::SmallVec;
 
+use crate::currency::common::{
+    affix_label, collect_removable_filtered, pick_lowest_mod_level, pick_open_affix,
+    pick_open_affix_with_omen, push_mod, remove_mod_at, roll_mod, sample_eligible_mod,
+    BASIC_ORB_EXCLUDES,
+};
 use crate::currency::{ApplyContext, ApplyOutcome, Currency};
 use crate::error::{EngineError, EngineResult};
-use crate::ids::{CurrencyId, ItemClassId};
-use crate::item::{AffixType, Item, ModRoll, Rarity};
-use crate::mods::{ModDefinition, ModFlags, ModKind};
-use crate::registry::{ModIndex, ModRegistry};
+use crate::ids::CurrencyId;
+use crate::item::{Item, Rarity};
 
-/// Mod-flag exclusion mask for basic-orb sampling (M14.3).
-///
-/// Trans / Aug / Regal / Alch / Exalt / Chaos (every tier) cannot roll mods
-/// flagged as essence-, desecrated-, or corrupted-only. The bundle tags
-/// these mods at pipeline time; this constant is the runtime gate that
-/// honors those tags during [`sample_eligible_mod`].
-///
-/// Per `docs/81-engine-training-and-rule-encoding-plan.md` §4.3 Tier 1.3
-/// and rule R232.
-const BASIC_ORB_EXCLUDES: ModFlags = ModFlags::ESSENCE_ONLY
-    .union(ModFlags::DESECRATED_ONLY)
-    .union(ModFlags::CORRUPTED_ONLY);
-
-// =========================================================================
-// Helpers shared by all "add a mod" orbs
-// =========================================================================
-
-/// Compute the class of an item from its base.
-///
-/// M14.2: resolves via [`crate::BaseRegistry`] when the item's `base` is a
-/// real bundle id. Falls back to `ItemClassId::from(item.base.as_str())`
-/// for legacy fixtures that stuff the class id into `Item.base` as a
-/// placeholder. The fallback is preserved through the v3 transitional
-/// period; the v3 hard-reset bundle migration (M14.7) eliminates the need
-/// for the fallback by guaranteeing every imported item carries a real
-/// `BaseTypeId`.
-pub(crate) fn class_for_item(
-    item: &Item,
-    base_registry: &crate::base_registry::BaseRegistry,
-) -> ItemClassId {
-    if let Some(class) = base_registry.class_of(&item.base) {
-        return class.clone();
-    }
-    ItemClassId::from(item.base.as_str())
-}
-
-/// Sample a mod from the eligible set with CoE-derived numerical weights.
-///
-/// Eligibility:
-/// 1. The mod's `affix_type` matches `affix`.
-/// 2. The mod's `allowed_item_classes` contains the item's class
-///    (this is what `for_class_affix` already filters by).
-/// 3. The mod's `required_level` is `<= ilvl`.
-/// 4. The mod's group is not already present on the item (mod-group exclusivity).
-/// 5. The mod is `ModKind::Explicit` (we don't roll implicits/enchants/desecrated
-///    via this path).
-/// 6. The mod's `patch_range` contains the current patch.
-/// 7. **(M14.3)** The mod's `flags` does not intersect `excludes`. Basic
-///    orbs pass [`BASIC_ORB_EXCLUDES`] so essence-only / desecrated-only /
-///    corrupted-only mods never leak into Trans/Aug/Regal/Alch/Exalt/Chaos
-///    pools. Other call sites (essence apply, bone reveal, Vaal corruption)
-///    pass their own masks per `docs/34-heuristics-rulebook.md`.
-///
-/// Weights are resolved via [`ModRegistry::weight_for`], which consults
-/// `bundle.weights` (CoE numerical weights) and falls back to RePoE-fork
-/// eligibility flags. Mods with weight `<= 0.0` are excluded; weighted
-/// random selection over the rest uses the f64 cumulative-distribution
-/// trick.
-#[allow(clippy::too_many_arguments)] // 8 args: 7 prior + the M14.3 `excludes` mask.
-fn sample_eligible_mod<'r>(
-    registry: &'r ModRegistry,
-    base_registry: &crate::base_registry::BaseRegistry,
-    item: &Item,
-    affix: AffixType,
-    rng: &mut dyn rand::RngCore,
-    patch: crate::patch::PatchVersion,
-    min_required_level: u32,
-    excludes: ModFlags,
-) -> Option<&'r ModDefinition> {
-    let class = class_for_item(item, base_registry);
-    let candidates = registry.for_class_affix(&class, affix);
-
-    // Build the list of (mod, weight) tuples after filtering.
-    // SmallVec to avoid heap allocation in the small-eligibility-set common case.
-    let mut eligible: SmallVec<[(ModIndex, f64); 64]> = SmallVec::new();
-
-    let occupied_groups = collect_occupied_groups(registry, item);
-
-    for &idx in candidates {
-        let Some(m) = registry.at(idx) else { continue };
-        if m.kind != ModKind::Explicit {
-            continue;
-        }
-        if m.required_level < min_required_level || m.required_level > item.ilvl {
-            continue;
-        }
-        if !m.patch_range.contains(patch) {
-            continue;
-        }
-        if occupied_groups.contains(&m.mod_group.0) {
-            continue;
-        }
-        if m.flags.intersects(excludes) {
-            continue;
-        }
-        let w = total_weight_for_item(m, item, registry, &class);
-        if w <= 0.0 {
-            continue;
-        }
-        eligible.push((idx, w));
-    }
-
-    if eligible.is_empty() {
-        return None;
-    }
-
-    let total: f64 = eligible.iter().map(|(_, w)| *w).sum();
-    if total <= 0.0 {
-        return None;
-    }
-    let mut pick = rng.gen_range(0.0..total);
-    for (idx, w) in &eligible {
-        if pick < *w {
-            return registry.at(*idx);
-        }
-        pick -= *w;
-    }
-    // Defensive: floating-point summation may round the cumulative just under
-    // `total` so the loop falls through — return the last eligible entry.
-    eligible.last().and_then(|(i, _)| registry.at(*i))
-}
-
-/// Resolve the spawn weight of a mod on this item via the registry's
-/// CoE-derived weight tables, with the eligibility fallback for mods that
-/// lack observations.
-fn total_weight_for_item(
-    m: &ModDefinition,
-    item: &Item,
-    registry: &ModRegistry,
-    class: &ItemClassId,
-) -> f64 {
-    registry.weight_for(&m.id, &item.base, item.ilvl, class)
-}
-
-/// Set of mod-groups already occupied on the item (any affix slot).
-fn collect_occupied_groups(
-    registry: &ModRegistry,
-    item: &Item,
-) -> SmallVec<[crate::ids::ModGroupId; 8]> {
-    let mut out = SmallVec::new();
-    for m in item.prefixes.iter().chain(item.suffixes.iter()) {
-        if let Some(g) = registry.group_of(&m.mod_id) {
-            if !out.contains(g) {
-                out.push(g.clone());
-            }
-        }
-    }
-    out
-}
-
-/// Filtered variant for omen-aware Annul/Chaos paths.
-///
-/// - `affix_filter` (Some(_)) restricts the result to mods of that affix
-///   type (Sinistral/Dextral Annulment, Sinistral/Dextral Erasure).
-/// - `desecrated_only` restricts to mods of `kind = Desecrated` (Omen of
-///   Light: next Annul removes only Desecrated mods).
-fn collect_removable_filtered(
-    item: &Item,
-    affix_filter: Option<AffixType>,
-    desecrated_only: bool,
-) -> SmallVec<[(AffixType, usize); 8]> {
-    let mut out = SmallVec::new();
-    if affix_filter != Some(AffixType::Suffix) {
-        for (i, m) in item.prefixes.iter().enumerate() {
-            if m.is_fractured {
-                continue;
-            }
-            if desecrated_only && m.kind != crate::mods::ModKind::Desecrated {
-                continue;
-            }
-            out.push((AffixType::Prefix, i));
-        }
-    }
-    if affix_filter != Some(AffixType::Prefix) {
-        for (i, m) in item.suffixes.iter().enumerate() {
-            if m.is_fractured {
-                continue;
-            }
-            if desecrated_only && m.kind != crate::mods::ModKind::Desecrated {
-                continue;
-            }
-            out.push((AffixType::Suffix, i));
-        }
-    }
-    out
-}
-
-/// Find the lowest-required-level mod among the candidates. Used by
-/// Omen of Whittling. Returns the index in `candidates` of the chosen mod,
-/// or `None` if `candidates` is empty.
-fn pick_lowest_mod_level(
-    item: &Item,
-    candidates: &[(AffixType, usize)],
-    registry: &ModRegistry,
-) -> Option<usize> {
-    let mut best_idx = None;
-    let mut best_lvl = u32::MAX;
-    for (i, (slot, idx)) in candidates.iter().enumerate() {
-        let roll = match slot {
-            AffixType::Prefix => &item.prefixes[*idx],
-            AffixType::Suffix => &item.suffixes[*idx],
-            _ => continue,
-        };
-        if let Some(def) = registry.get(&roll.mod_id) {
-            if def.required_level < best_lvl {
-                best_lvl = def.required_level;
-                best_idx = Some(i);
-            }
-        }
-    }
-    best_idx
-}
-
-/// Remove a mod by `(affix, index)` and return the removed `ModRoll`.
-fn remove_mod_at(item: &mut Item, affix: AffixType, idx: usize) -> Option<ModRoll> {
-    match affix {
-        AffixType::Prefix if idx < item.prefixes.len() => Some(item.prefixes.remove(idx)),
-        AffixType::Suffix if idx < item.suffixes.len() => Some(item.suffixes.remove(idx)),
-        _ => None,
-    }
-}
-
-/// Roll a value `t ∈ [0,1]` for each stat in the mod, then linear-interpolate.
-fn roll_values(m: &ModDefinition, rng: &mut dyn rand::RngCore) -> SmallVec<[f64; 4]> {
-    m.stats
-        .iter()
-        .map(|s| {
-            let t = rng.gen::<f64>();
-            s.roll(t)
-        })
-        .collect()
-}
-
-/// Build a `ModRoll` from a sampled `ModDefinition`, rolling values.
-fn roll_mod(m: &ModDefinition, rng: &mut dyn rand::RngCore) -> ModRoll {
-    ModRoll {
-        mod_id: m.id.clone(),
-        affix_type: m.affix_type,
-        kind: m.kind,
-        values: roll_values(m, rng),
-        is_fractured: false,
-    }
-}
-
-/// Pick a Prefix-or-Suffix slot among empty slots.
-///
-/// Without omens: uniform random over open slots.
-/// With Sinistral/Dextral *Exaltation* (or any AffixOnly omen): forced to
-/// the omen's affix if a slot is open; otherwise the omen is consumed but
-/// no slot is opened (caller errors with [`EngineError::AffixSlotFull`]).
-fn pick_open_affix(item: &Item, rng: &mut dyn rand::RngCore, max_slots: u8) -> Option<AffixType> {
-    let prefix_open = item.prefixes.len() < max_slots as usize;
-    let suffix_open = item.suffixes.len() < max_slots as usize;
-    match (prefix_open, suffix_open) {
-        (true, true) => Some(if rng.gen::<bool>() {
-            AffixType::Prefix
-        } else {
-            AffixType::Suffix
-        }),
-        (true, false) => Some(AffixType::Prefix),
-        (false, true) => Some(AffixType::Suffix),
-        (false, false) => None,
-    }
-}
-
-/// Pick a Prefix-or-Suffix, consulting omens. Used by Exalt-class currencies
-/// (Exalted, Greater/Perfect Exalted) where Sinistral/Dextral Exaltation
-/// constrains the choice.
-fn pick_open_affix_with_omen(
-    item: &Item,
-    ctx: &mut ApplyContext<'_>,
-    max_slots: u8,
-) -> Option<AffixType> {
-    if let Some(forced) = ctx.omens.consume_affix_only(ctx.patch) {
-        let occupied = match forced {
-            AffixType::Prefix => item.prefixes.len() >= max_slots as usize,
-            AffixType::Suffix => item.suffixes.len() >= max_slots as usize,
-            _ => return None,
-        };
-        if occupied {
-            return None;
-        }
-        return Some(forced);
-    }
-    pick_open_affix(item, ctx.rng, max_slots)
-}
-
-/// Static label for an affix slot (used in error messages).
-fn affix_label(a: AffixType) -> &'static str {
-    match a {
-        AffixType::Prefix => "prefix",
-        AffixType::Suffix => "suffix",
-        AffixType::Implicit => "implicit",
-        AffixType::Enchantment => "enchantment",
-    }
-}
-
-/// Add a rolled mod to the appropriate affix slot.
-fn push_mod(item: &mut Item, roll: ModRoll) {
-    match roll.affix_type {
-        AffixType::Prefix => item.prefixes.push(roll),
-        AffixType::Suffix => item.suffixes.push(roll),
-        // Implicit / Enchantment paths never come through here.
-        _ => {}
-    }
-}
+pub use crate::currency::vaal::{VaalOrb, VaalOutcome};
+pub use crate::currency::variants::{
+    GreaterChaosOrb, GreaterExaltedOrb, GreaterOrbOfAugmentation, GreaterOrbOfTransmutation,
+    GreaterRegalOrb, PerfectChaosOrb, PerfectExaltedOrb, PerfectOrbOfAugmentation,
+    PerfectOrbOfTransmutation, PerfectRegalOrb,
+};
 
 // =========================================================================
 // Orb of Transmutation
@@ -795,8 +501,9 @@ impl Currency for ChaosOrb {
 }
 
 /// Shared Chaos apply. Used by both vanilla [`ChaosOrb`] and the Greater /
-/// Perfect variants (which thread a min-mod-level through).
-fn chaos_apply(
+/// Perfect variants in [`super::variants`] (which thread a min-mod-level
+/// through).
+pub(crate) fn chaos_apply(
     item: &mut Item,
     ctx: &mut ApplyContext<'_>,
     min_level: u32,
@@ -867,9 +574,9 @@ fn chaos_apply(
 /// - Skips fractured mods (their values are locked).
 /// - Does NOT touch implicits or enchantments by default; with the
 ///   Omen of the Blessed (M2.6), Divine instead targets *only* implicits.
-/// - Ranges come from the underlying [`ModDefinition::stats`]; we look up
-///   each `ModRoll`'s `mod_id` in the registry and reroll uniformly within
-///   `[min, max]` for every stat in the mod.
+/// - Ranges come from the underlying [`crate::mods::ModDefinition::stats`];
+///   we look up each `ModRoll`'s `mod_id` in the registry and reroll
+///   uniformly within `[min, max]` for every stat in the mod.
 #[derive(Debug)]
 pub struct DivineOrb {
     id: CurrencyId,
@@ -913,12 +620,68 @@ impl Currency for DivineOrb {
                 "Divine Orb has no effect on a Normal-rarity item".into(),
             ));
         }
+
+        // Omen of the Blessed: Divine rerolls *only* the implicit modifier.
+        if ctx.omens.consume_blessed(ctx.patch) {
+            reroll_implicit_values(item, ctx);
+            return Ok(());
+        }
+
+        // Omen of Sanctification: extended-range Divine, then the item is
+        // sanctified (locked from further crafting).
+        if ctx.omens.consume_sanctification(ctx.patch) {
+            sanctify_values(item, ctx);
+            return Ok(());
+        }
+
         reroll_explicit_values(item, ctx);
         Ok(())
     }
 }
 
-fn reroll_explicit_values(item: &mut Item, ctx: &mut ApplyContext<'_>) {
+/// Omen of the Blessed: reroll only the implicit modifier's values.
+fn reroll_implicit_values(item: &mut Item, ctx: &mut ApplyContext<'_>) {
+    for m in &mut item.implicits {
+        if let Some(def) = ctx.registry.get(&m.mod_id) {
+            m.values = def
+                .stats
+                .iter()
+                .map(|s| s.roll(ctx.rng.gen::<f64>()))
+                .collect();
+        }
+    }
+}
+
+/// Omen of Sanctification value pass, then lock the item.
+///
+/// - ≤0.4: rolls each stat anywhere in 80–120% of its normal range
+///   (randomise beyond range).
+/// - 0.5+: per patch notes, Sanctification now *multiplies each modifier
+///   based on its current value* instead of randomising. Modelled as a
+///   per-mod uniform multiplier in [0.8, 1.2] (Experimental — exact factor
+///   range is not published).
+fn sanctify_values(item: &mut Item, ctx: &mut ApplyContext<'_>) {
+    if ctx.patch >= crate::patch::PatchVersion::PATCH_0_5_0 {
+        multiply_explicit_values(item, ctx, 0.8, 1.2);
+    } else {
+        for m in item.prefixes.iter_mut().chain(item.suffixes.iter_mut()) {
+            if m.is_fractured {
+                continue;
+            }
+            if let Some(def) = ctx.registry.get(&m.mod_id) {
+                let scale = 0.8 + ctx.rng.gen::<f64>() * 0.4;
+                m.values = def
+                    .stats
+                    .iter()
+                    .map(|s| s.roll(ctx.rng.gen::<f64>()) * scale)
+                    .collect();
+            }
+        }
+    }
+    item.sanctified = true;
+}
+
+pub(crate) fn reroll_explicit_values(item: &mut Item, ctx: &mut ApplyContext<'_>) {
     for m in item.prefixes.iter_mut().chain(item.suffixes.iter_mut()) {
         if m.is_fractured {
             continue;
@@ -933,626 +696,29 @@ fn reroll_explicit_values(item: &mut Item, ctx: &mut ApplyContext<'_>) {
     }
 }
 
-// =========================================================================
-// Vaal Orb
-// =========================================================================
-
-/// What kind of corruption outcome did Vaal produce?
+/// 0.5 value-shift model: multiply each non-fractured explicit mod's values
+/// by a single per-mod uniform factor in `[lo, hi]`.
 ///
-/// Reported by the engine for diagnostics / advisor explanation. Mirrors
-/// the outcomes documented in `/docs/11-game-mechanics.md` (lands in M2.10):
-///
-/// - `NoChange` — item is corrupted but otherwise unchanged. Removable by
-///   Omen of Corruption (M2.6).
-/// - `RerollValues` — divine-like reroll across explicit mods.
-/// - `BrickMods` — strips all explicit mods and replaces them with a
-///   simulated brick (here: just rerolls one prefix to a "useless" state;
-///   real brick semantics land when desecrated mod data is integrated).
-/// - `AddEnchantment` — adds a corrupted enchantment (placeholder for now).
-/// - `AddSocket` — adds a socket beyond the normal cap.
-/// - `AddQuality` — bumps quality past the cap (caps at +30).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VaalOutcome {
-    NoChange,
-    RerollValues,
-    BrickMods,
-    AddEnchantment,
-    AddSocket,
-    AddQuality,
-}
-
-/// Vaal Orb: corrupt the item with one of several random outcomes.
-///
-/// Once corrupted, the item is locked from most further crafting (only
-/// Architect's Orb double-corrupt, Vaal Cultivation Orb on uniques, and a
-/// handful of omens still apply).
-///
-/// The outcome distribution is approximated for M2.4 — refined in M2.5
-/// when omen-conditioning lands. For now we use uniform 1/6 across the
-/// six outcomes; Omen of Corruption (M2.6) will remove `NoChange`.
-#[derive(Debug)]
-pub struct VaalOrb {
-    id: CurrencyId,
-}
-
-impl VaalOrb {
-    pub fn new() -> Self {
-        Self {
-            id: CurrencyId::from("VaalOrb"),
-        }
-    }
-}
-
-impl Default for VaalOrb {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Currency for VaalOrb {
-    fn id(&self) -> &CurrencyId {
-        &self.id
-    }
-    fn name(&self) -> &'static str {
-        "Vaal Orb"
-    }
-    fn valid_rarities(&self) -> crate::currency::RaritySet {
-        crate::currency::RaritySet::all()
-    }
-
-    fn apply(&self, item: &mut Item, ctx: &mut ApplyContext<'_>) -> EngineResult<ApplyOutcome> {
-        if item.corrupted {
-            return Err(EngineError::ItemCorrupted);
-        }
-        if item.sanctified {
-            return Err(EngineError::ItemSanctified);
-        }
-        if item.mirrored {
-            return Err(EngineError::InvalidApplication(
-                "Vaal Orb cannot be applied to a mirrored item".into(),
-            ));
-        }
-
-        // M14.4: Omen of Corruption suppresses the NoChange outcome.
-        // `consume_prevent_no_change` removes the omen iff present and in
-        // patch range; the boolean shifts the sampler into a 5-outcome mode.
-        let prevent_no_change = ctx.omens.consume_prevent_no_change(ctx.patch);
-        let outcome = sample_vaal_outcome(ctx.rng, prevent_no_change);
-        item.corrupted = true;
-        match outcome {
-            VaalOutcome::NoChange => {}
-            VaalOutcome::RerollValues => reroll_explicit_values(item, ctx),
-            VaalOutcome::BrickMods => {
-                // Clear non-fractured explicit mods. For each cleared slot,
-                // attempt to sample a ModKind::Corrupted mod from the
-                // registry (filtered by item class and affix type). When
-                // no Corrupted-explicit pool exists for the class — which
-                // is the v3 starting state, since `vaal_implicits.json`
-                // populates only Implicit-affix Corrupted mods — the slot
-                // stays empty and the item ends up with fewer explicit
-                // mods, which approximates the in-game brick.
-                let kept_prefixes = item
-                    .prefixes
-                    .iter()
-                    .filter(|m| m.is_fractured)
-                    .cloned()
-                    .collect::<smallvec::SmallVec<_>>();
-                let kept_suffixes = item
-                    .suffixes
-                    .iter()
-                    .filter(|m| m.is_fractured)
-                    .cloned()
-                    .collect::<smallvec::SmallVec<_>>();
-                let prefixes_to_replace = item.prefixes.len() - kept_prefixes.len();
-                let suffixes_to_replace = item.suffixes.len() - kept_suffixes.len();
-                item.prefixes = kept_prefixes;
-                item.suffixes = kept_suffixes;
-                for _ in 0..prefixes_to_replace {
-                    if let Some(m) = sample_corrupted_explicit(
-                        ctx.registry,
-                        ctx.base_registry,
-                        item,
-                        AffixType::Prefix,
-                        ctx.rng,
-                        ctx.patch,
-                    ) {
-                        push_mod(item, roll_mod(m, ctx.rng));
-                    }
-                }
-                for _ in 0..suffixes_to_replace {
-                    if let Some(m) = sample_corrupted_explicit(
-                        ctx.registry,
-                        ctx.base_registry,
-                        item,
-                        AffixType::Suffix,
-                        ctx.rng,
-                        ctx.patch,
-                    ) {
-                        push_mod(item, roll_mod(m, ctx.rng));
-                    }
-                }
-            }
-            VaalOutcome::AddEnchantment => {
-                // Roll one Vaal implicit (Corrupted-kind, Implicit-affix)
-                // from the registry filtered by item class. The outcome is
-                // a no-op when the bundle has no Vaal-implicit data for
-                // the class (older fixtures).
-                if let Some(m) = sample_corrupted_implicit(
-                    ctx.registry,
-                    ctx.base_registry,
-                    item,
-                    ctx.rng,
-                    ctx.patch,
-                ) {
-                    let values = m
-                        .stats
-                        .iter()
-                        .map(|s| s.roll(ctx.rng.gen::<f64>()))
-                        .collect();
-                    item.enchantments.push(ModRoll {
-                        mod_id: m.id.clone(),
-                        affix_type: AffixType::Implicit,
-                        kind: ModKind::Corrupted,
-                        values,
-                        is_fractured: false,
-                    });
-                }
-            }
-            VaalOutcome::AddSocket => {
-                // Vaal can add a socket beyond the cap; we just push an empty one.
-                item.sockets.push(crate::item::Socket { augment: None });
-            }
-            VaalOutcome::AddQuality => {
-                item.quality = item.quality.saturating_add(5).min(30);
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Vaal outcome categorical distribution (M14.4).
-///
-/// Authoritative source: poe2wiki Vaal Orb outcomes, cross-checked with
-/// `docs/81-engine-training-and-rule-encoding-plan.md` §4.4 Tier 1.4.
-///
-/// | Outcome        | Base | Omen of Corruption |
-/// |----------------|------|--------------------|
-/// | NoChange       | 0.25 | 0.0                |
-/// | RerollValues   | 0.20 | 0.267              |
-/// | BrickMods      | 0.15 | 0.20               |
-/// | AddEnchantment | 0.20 | 0.267              |
-/// | AddSocket      | 0.10 | 0.133              |
-/// | AddQuality     | 0.10 | 0.133              |
-///
-/// The omen variant simply removes the NoChange branch and renormalizes
-/// the remaining five over their original 0.75 mass.
-fn sample_vaal_outcome(rng: &mut dyn rand::RngCore, prevent_no_change: bool) -> VaalOutcome {
-    let r: f64 = rng.gen();
-    if prevent_no_change {
-        // Cumulative thresholds over [RerollValues, BrickMods,
-        // AddEnchantment, AddSocket, AddQuality] with mass 0.20 / 0.15 /
-        // 0.20 / 0.10 / 0.10 normalized by 0.75:
-        //   0.2667, 0.4667, 0.7333, 0.8667, 1.0
-        if r < 0.266_666_67 {
-            VaalOutcome::RerollValues
-        } else if r < 0.466_666_67 {
-            VaalOutcome::BrickMods
-        } else if r < 0.733_333_33 {
-            VaalOutcome::AddEnchantment
-        } else if r < 0.866_666_67 {
-            VaalOutcome::AddSocket
-        } else {
-            VaalOutcome::AddQuality
-        }
-    } else {
-        // Cumulative thresholds: 0.25 / 0.45 / 0.60 / 0.80 / 0.90 / 1.00.
-        if r < 0.25 {
-            VaalOutcome::NoChange
-        } else if r < 0.45 {
-            VaalOutcome::RerollValues
-        } else if r < 0.60 {
-            VaalOutcome::BrickMods
-        } else if r < 0.80 {
-            VaalOutcome::AddEnchantment
-        } else if r < 0.90 {
-            VaalOutcome::AddSocket
-        } else {
-            VaalOutcome::AddQuality
-        }
-    }
-}
-
-/// Sample a Corrupted-kind explicit mod from the registry filtered by
-/// item class and affix type. Used by Vaal's [`VaalOutcome::BrickMods`]
-/// path to replace cleared explicit slots. Returns `None` when no
-/// matching Corrupted-explicit mods exist for the class (the typical
-/// case in v3 starter bundles).
-fn sample_corrupted_explicit<'r>(
-    registry: &'r ModRegistry,
-    base_registry: &crate::base_registry::BaseRegistry,
-    item: &Item,
-    affix: AffixType,
-    rng: &mut dyn rand::RngCore,
-    patch: crate::patch::PatchVersion,
-) -> Option<&'r ModDefinition> {
-    let class = class_for_item(item, base_registry);
-    let candidates = registry.for_class_affix(&class, affix);
-    let occupied = collect_occupied_groups(registry, item);
-    let mut eligible: SmallVec<[(ModIndex, f64); 16]> = SmallVec::new();
-    for &idx in candidates {
-        let Some(m) = registry.at(idx) else { continue };
-        if m.kind != ModKind::Corrupted {
-            continue;
-        }
-        if !m.patch_range.contains(patch) {
-            continue;
-        }
-        if occupied.contains(&m.mod_group.0) {
-            continue;
-        }
-        if m.required_level > item.ilvl {
-            continue;
-        }
-        // Vaal corruption can roll essence-only-flagged Corrupted mods
-        // (those don't exist) but never Desecrated-only ones.
-        if m.flags
-            .intersects(ModFlags::ESSENCE_ONLY | ModFlags::DESECRATED_ONLY)
-        {
-            continue;
-        }
-        // Use the registry's weight resolver; falls back to eligibility-flag
-        // if no per-base/per-class observation exists.
-        let w = registry.weight_for(&m.id, &item.base, item.ilvl, &class);
-        if w <= 0.0 {
-            continue;
-        }
-        eligible.push((idx, w));
-    }
-    if eligible.is_empty() {
-        return None;
-    }
-    let total: f64 = eligible.iter().map(|(_, w)| *w).sum();
-    let mut pick = rng.gen_range(0.0..total);
-    for (idx, w) in &eligible {
-        if pick < *w {
-            return registry.at(*idx);
-        }
-        pick -= *w;
-    }
-    eligible.last().and_then(|(i, _)| registry.at(*i))
-}
-
-/// Sample a Vaal implicit (Corrupted-kind, Implicit-affix) from the
-/// registry filtered by item class. Used by Vaal's
-/// [`VaalOutcome::AddEnchantment`] path. Returns `None` when no Vaal
-/// implicits exist for the class.
-fn sample_corrupted_implicit<'r>(
-    registry: &'r ModRegistry,
-    base_registry: &crate::base_registry::BaseRegistry,
-    item: &Item,
-    rng: &mut dyn rand::RngCore,
-    patch: crate::patch::PatchVersion,
-) -> Option<&'r ModDefinition> {
-    let class = class_for_item(item, base_registry);
-    // The `by_class_affix` index keys on `m.affix_type`, including
-    // `AffixType::Implicit`, so Vaal implicits land in the per-class
-    // implicit slot of the index naturally.
-    let candidates = registry.for_class_affix(&class, AffixType::Implicit);
-    let mut eligible: SmallVec<[(ModIndex, f64); 16]> = SmallVec::new();
-    for &idx in candidates {
-        let Some(m) = registry.at(idx) else { continue };
-        if m.kind != ModKind::Corrupted {
-            continue;
-        }
-        if !m.patch_range.contains(patch) {
-            continue;
-        }
-        if m.required_level > item.ilvl {
-            continue;
-        }
-        // Don't double-add an existing Vaal implicit. Also respect
-        // mod-group exclusivity against the existing enchantment slot.
-        if item.enchantments.iter().any(|e| e.mod_id == m.id) {
-            continue;
-        }
-        if item.enchantments.iter().any(|e| {
-            registry
-                .group_of(&e.mod_id)
-                .is_some_and(|g| g == &m.mod_group.0)
-        }) {
-            continue;
-        }
-        // Uniform weighting for Vaal-implicit selection — the wiki
-        // does not document a per-implicit weight table for PoE2.
-        eligible.push((idx, 1.0));
-    }
-    if eligible.is_empty() {
-        return None;
-    }
-    let total: f64 = eligible.iter().map(|(_, w)| *w).sum();
-    let mut pick = rng.gen_range(0.0..total);
-    for (idx, w) in &eligible {
-        if pick < *w {
-            return registry.at(*idx);
-        }
-        pick -= *w;
-    }
-    eligible.last().and_then(|(i, _)| registry.at(*i))
-}
-
-// =========================================================================
-// Greater / Perfect tier variants
-// =========================================================================
-//
-// Greater and Perfect variants of Transmute / Aug / Regal / Exalt / Chaos
-// behave identically to their base counterparts EXCEPT that the added mod
-// is constrained to `required_level >= min_mod_level`. This raises the
-// expected tier of the added mod (the 'rules out the lower tiers' effect
-// described in the apprentice blueprint).
-//
-// Min mod-level gates per planning research:
-// - Greater Transmute / Aug:  ~35  (Aug = 55 is also seen; we use 35 for
-//   Transmute and 55 for Aug per RePoE-fork conventions)
-// - Greater Regal / Exalt / Chaos: ~50
-// - Perfect (all variants):    ~70
-//
-// The actual numerical thresholds vary slightly across community tracking
-// of patch 0.4. We codify the conservative-floor values here; a future
-// refinement pass (M2.5+) can refine them from poe2db tier tables.
-
-const MIN_LEVEL_GREATER_TRANSMUTE: u32 = 35;
-const MIN_LEVEL_GREATER_AUGMENT: u32 = 55;
-const MIN_LEVEL_GREATER_REGAL: u32 = 50;
-const MIN_LEVEL_GREATER_EXALT: u32 = 50;
-const MIN_LEVEL_GREATER_CHAOS: u32 = 50;
-const MIN_LEVEL_PERFECT_ALL: u32 = 70;
-
-/// Generic implementation of "promote rarity, add 1 mod ≥ min_level".
-/// Shared by Transmute / Greater / Perfect Transmutation variants.
-fn add_one_mod_with_min(
+/// Used by the 0.5 variants of the Vaal "unpredictable values" outcome and
+/// of Sanctification, which per the 0.5 patch notes "multiply each modifier
+/// based on its current value" instead of randomising. The exact factor
+/// range is not published; `Confidence::Experimental`.
+pub(crate) fn multiply_explicit_values(
     item: &mut Item,
     ctx: &mut ApplyContext<'_>,
-    require_rarity: Rarity,
-    promote_to: Option<Rarity>,
-    max_slots: u8,
-    min_level: u32,
-    name: &'static str,
-) -> EngineResult<()> {
-    if !item.is_modifiable() {
-        return Err(EngineError::InvalidApplication(format!(
-            "{name} requires a modifiable item"
-        )));
+    lo: f64,
+    hi: f64,
+) {
+    for m in item.prefixes.iter_mut().chain(item.suffixes.iter_mut()) {
+        if m.is_fractured {
+            continue;
+        }
+        let factor = lo + ctx.rng.gen::<f64>() * (hi - lo);
+        for v in &mut m.values {
+            *v *= factor;
+        }
     }
-    if item.rarity != require_rarity {
-        return Err(EngineError::InvalidApplication(format!(
-            "{name} requires a {require_rarity:?}-rarity item"
-        )));
-    }
-    let affix = pick_open_affix(item, ctx.rng, max_slots)
-        .ok_or(EngineError::AffixSlotFull { affix_type: name })?;
-    let m = sample_eligible_mod(
-        ctx.registry,
-        ctx.base_registry,
-        item,
-        affix,
-        ctx.rng,
-        ctx.patch,
-        min_level,
-        BASIC_ORB_EXCLUDES,
-    )
-    .ok_or_else(|| EngineError::NoEligibleMods {
-        base: item.base.to_string(),
-        ilvl: item.ilvl,
-        affix_type: affix_label(affix),
-    })?;
-    if let Some(rar) = promote_to {
-        item.rarity = rar;
-    }
-    push_mod(item, roll_mod(m, ctx.rng));
-    Ok(())
 }
-
-/// Generic Chaos-with-min-level used by Greater/Perfect Chaos variants.
-/// Delegates to [`chaos_apply`] which already handles omens.
-fn chaos_with_min(
-    item: &mut Item,
-    ctx: &mut ApplyContext<'_>,
-    min_level: u32,
-    _name: &'static str,
-) -> EngineResult<()> {
-    chaos_apply(item, ctx, min_level)
-}
-
-/// Defines a Greater/Perfect tier currency that wraps `add_one_mod_with_min`.
-macro_rules! greater_perfect_add_currency {
-    (
-        $struct:ident,
-        $id:literal,
-        $disp:literal,
-        $require:expr,
-        $promote:expr,
-        $max_slots:expr,
-        $min_level:expr,
-        $valid_rarities:expr
-    ) => {
-        #[derive(Debug)]
-        pub struct $struct {
-            id: CurrencyId,
-        }
-        impl $struct {
-            pub fn new() -> Self {
-                Self {
-                    id: CurrencyId::from($id),
-                }
-            }
-        }
-        impl Default for $struct {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-        impl Currency for $struct {
-            fn id(&self) -> &CurrencyId {
-                &self.id
-            }
-            fn name(&self) -> &'static str {
-                $disp
-            }
-            fn valid_rarities(&self) -> crate::currency::RaritySet {
-                $valid_rarities
-            }
-            fn apply(
-                &self,
-                item: &mut Item,
-                ctx: &mut ApplyContext<'_>,
-            ) -> EngineResult<ApplyOutcome> {
-                add_one_mod_with_min(item, ctx, $require, $promote, $max_slots, $min_level, $disp)
-            }
-        }
-    };
-}
-
-/// Defines a Greater/Perfect tier Chaos.
-macro_rules! greater_perfect_chaos {
-    ($struct:ident, $id:literal, $disp:literal, $min_level:expr) => {
-        #[derive(Debug)]
-        pub struct $struct {
-            id: CurrencyId,
-        }
-        impl $struct {
-            pub fn new() -> Self {
-                Self {
-                    id: CurrencyId::from($id),
-                }
-            }
-        }
-        impl Default for $struct {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-        impl Currency for $struct {
-            fn id(&self) -> &CurrencyId {
-                &self.id
-            }
-            fn name(&self) -> &'static str {
-                $disp
-            }
-            fn valid_rarities(&self) -> crate::currency::RaritySet {
-                crate::currency::RaritySet::RARE
-            }
-            fn apply(
-                &self,
-                item: &mut Item,
-                ctx: &mut ApplyContext<'_>,
-            ) -> EngineResult<ApplyOutcome> {
-                chaos_with_min(item, ctx, $min_level, $disp)
-            }
-        }
-    };
-}
-
-// Transmutation -----------------------------------------------------------
-greater_perfect_add_currency!(
-    GreaterOrbOfTransmutation,
-    "GreaterOrbOfTransmutation",
-    "Greater Orb of Transmutation",
-    Rarity::Normal,
-    Some(Rarity::Magic),
-    1,
-    MIN_LEVEL_GREATER_TRANSMUTE,
-    crate::currency::RaritySet::NORMAL
-);
-greater_perfect_add_currency!(
-    PerfectOrbOfTransmutation,
-    "PerfectOrbOfTransmutation",
-    "Perfect Orb of Transmutation",
-    Rarity::Normal,
-    Some(Rarity::Magic),
-    1,
-    MIN_LEVEL_PERFECT_ALL,
-    crate::currency::RaritySet::NORMAL
-);
-
-// Augmentation ------------------------------------------------------------
-greater_perfect_add_currency!(
-    GreaterOrbOfAugmentation,
-    "GreaterOrbOfAugmentation",
-    "Greater Orb of Augmentation",
-    Rarity::Magic,
-    None,
-    1,
-    MIN_LEVEL_GREATER_AUGMENT,
-    crate::currency::RaritySet::MAGIC
-);
-greater_perfect_add_currency!(
-    PerfectOrbOfAugmentation,
-    "PerfectOrbOfAugmentation",
-    "Perfect Orb of Augmentation",
-    Rarity::Magic,
-    None,
-    1,
-    MIN_LEVEL_PERFECT_ALL,
-    crate::currency::RaritySet::MAGIC
-);
-
-// Regal -------------------------------------------------------------------
-greater_perfect_add_currency!(
-    GreaterRegalOrb,
-    "GreaterRegalOrb",
-    "Greater Regal Orb",
-    Rarity::Magic,
-    Some(Rarity::Rare),
-    3,
-    MIN_LEVEL_GREATER_REGAL,
-    crate::currency::RaritySet::MAGIC
-);
-greater_perfect_add_currency!(
-    PerfectRegalOrb,
-    "PerfectRegalOrb",
-    "Perfect Regal Orb",
-    Rarity::Magic,
-    Some(Rarity::Rare),
-    3,
-    MIN_LEVEL_PERFECT_ALL,
-    crate::currency::RaritySet::MAGIC
-);
-
-// Exalted -----------------------------------------------------------------
-greater_perfect_add_currency!(
-    GreaterExaltedOrb,
-    "GreaterExaltedOrb",
-    "Greater Exalted Orb",
-    Rarity::Rare,
-    None,
-    3,
-    MIN_LEVEL_GREATER_EXALT,
-    crate::currency::RaritySet::RARE
-);
-greater_perfect_add_currency!(
-    PerfectExaltedOrb,
-    "PerfectExaltedOrb",
-    "Perfect Exalted Orb",
-    Rarity::Rare,
-    None,
-    3,
-    MIN_LEVEL_PERFECT_ALL,
-    crate::currency::RaritySet::RARE
-);
-
-// Chaos -------------------------------------------------------------------
-greater_perfect_chaos!(
-    GreaterChaosOrb,
-    "GreaterChaosOrb",
-    "Greater Chaos Orb",
-    MIN_LEVEL_GREATER_CHAOS
-);
-greater_perfect_chaos!(
-    PerfectChaosOrb,
-    "PerfectChaosOrb",
-    "Perfect Chaos Orb",
-    MIN_LEVEL_PERFECT_ALL
-);
 
 // =========================================================================
 // Tests
@@ -1565,87 +731,14 @@ mod tests {
     use smallvec::smallvec;
 
     use super::*;
-    use crate::ids::{ModGroupId, ModId, TagId};
-    use crate::item::QualityKind;
-    use crate::mods::{ModDomain, ModFlags, ModGroup, SpawnWeight};
-    use crate::patch::{PatchRange, PatchVersion};
-
-    fn mk_mod(id: &str, group: &str, affix: AffixType, class: &str) -> ModDefinition {
-        ModDefinition {
-            id: ModId::from(id),
-            name: None,
-            mod_group: ModGroup(ModGroupId::from(group)),
-            affix_type: affix,
-            kind: ModKind::Explicit,
-            domain: ModDomain::Item,
-            tags: smallvec![],
-            concept_set: smallvec![],
-            spawn_weights: smallvec![SpawnWeight {
-                tag: TagId::from(class),
-                weight: 1
-            }],
-            stats: smallvec![],
-            required_level: 1,
-            allowed_item_classes: smallvec![ItemClassId::from(class)],
-            patch_range: PatchRange::ALL,
-            flags: ModFlags::empty(),
-            text_template: None,
-        }
-    }
-
-    fn fixture_normal_boots() -> Item {
-        Item {
-            // Per the placeholder convention in `class_for_item`, we use
-            // the class id as the base id in tests until BaseRegistry lands.
-            base: "Boots".into(),
-            ilvl: 82,
-            rarity: Rarity::Normal,
-            corrupted: false,
-            sanctified: false,
-            mirrored: false,
-            quality: 0,
-            quality_kind: QualityKind::Untagged,
-            implicits: smallvec![],
-            prefixes: smallvec![],
-            suffixes: smallvec![],
-            enchantments: smallvec![],
-            hidden_desecrated: None,
-            sockets: smallvec![],
-            hinekora_lock: None,
-        }
-    }
-
-    fn fixture_registry() -> ModRegistry {
-        ModRegistry::from_mods(
-            vec![
-                mk_mod(
-                    "MovementSpeed1",
-                    "MovementSpeed",
-                    AffixType::Prefix,
-                    "Boots",
-                ),
-                mk_mod(
-                    "MovementSpeed2",
-                    "MovementSpeed",
-                    AffixType::Prefix,
-                    "Boots",
-                ),
-                mk_mod("Life1", "Life", AffixType::Prefix, "Boots"),
-                mk_mod("FireRes1", "FireResistance", AffixType::Suffix, "Boots"),
-                mk_mod("ColdRes1", "ColdResistance", AffixType::Suffix, "Boots"),
-                mk_mod("Stamina1", "Stamina", AffixType::Suffix, "Boots"),
-            ],
-            vec![],
-        )
-    }
-
-    fn ctx<'a>(
-        registry: &'a ModRegistry,
-        rng: &'a mut Xoshiro256PlusPlus,
-        omens: &'a mut crate::omen::OmenSet,
-    ) -> ApplyContext<'a> {
-        ApplyContext::new_without_bases(registry, rng, PatchVersion::PATCH_0_4_0, omens)
-    }
+    use crate::currency::common::test_fixtures::{
+        ctx, fixture_normal_boots, fixture_registry, mk_mod_lvl,
+    };
+    use crate::ids::{ItemClassId, ModGroupId, ModId, TagId};
+    use crate::item::{AffixType, ModRoll};
+    use crate::mods::{ModDefinition, ModDomain, ModFlags, ModKind, SpawnWeight};
+    use crate::patch::PatchRange;
+    use crate::registry::ModRegistry;
 
     #[test]
     fn transmute_promotes_normal_to_magic_and_adds_one_mod() {
@@ -1960,6 +1053,7 @@ mod tests {
                     max: 200.0
                 }],
                 required_level: 1,
+                tier: None,
                 allowed_item_classes: smallvec![ItemClassId::from("Boots")],
                 patch_range: PatchRange::ALL,
                 flags: ModFlags::empty(),
@@ -1999,6 +1093,7 @@ mod tests {
                     max: 200.0
                 }],
                 required_level: 1,
+                tier: None,
                 allowed_item_classes: smallvec![ItemClassId::from("Boots")],
                 patch_range: PatchRange::ALL,
                 flags: ModFlags::empty(),
@@ -2036,235 +1131,6 @@ mod tests {
         item.corrupted = true;
         let r = DivineOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
-    }
-
-    // ---- Vaal --------------------------------------------------------------
-
-    #[test]
-    fn vaal_marks_item_corrupted() {
-        let reg = fixture_registry();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x1);
-        let mut omens = crate::omen::OmenSet::new();
-        let mut item = fixture_normal_boots();
-        item.rarity = Rarity::Rare;
-        VaalOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
-            .unwrap();
-        assert!(item.corrupted);
-    }
-
-    #[test]
-    fn vaal_rejects_already_corrupted() {
-        let reg = fixture_registry();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x2);
-        let mut omens = crate::omen::OmenSet::new();
-        let mut item = fixture_normal_boots();
-        item.corrupted = true;
-        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
-        assert!(matches!(r, Err(EngineError::ItemCorrupted)));
-    }
-
-    #[test]
-    fn vaal_rejects_sanctified_or_mirrored() {
-        let reg = fixture_registry();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x3);
-        let mut omens = crate::omen::OmenSet::new();
-        let mut item = fixture_normal_boots();
-        item.sanctified = true;
-        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
-        assert!(matches!(r, Err(EngineError::ItemSanctified)));
-
-        let mut item = fixture_normal_boots();
-        item.mirrored = true;
-        let r = VaalOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
-        assert!(matches!(r, Err(EngineError::InvalidApplication(_))));
-    }
-
-    #[test]
-    fn vaal_outcome_distribution_covers_all_six_branches() {
-        // Statistical: across 600 trials, every outcome variant should appear.
-        use std::collections::HashSet;
-        let mut seen: HashSet<u8> = HashSet::new();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x600);
-        let mut _omens = crate::omen::OmenSet::new();
-        for _ in 0..600 {
-            let outcome = sample_vaal_outcome(&mut rng, false);
-            seen.insert(outcome as u8);
-        }
-        assert_eq!(seen.len(), 6, "saw {} distinct outcomes", seen.len());
-    }
-
-    // ---- Greater / Perfect variants ----------------------------------------
-
-    fn fixture_tiered_registry() -> ModRegistry {
-        // Multiple prefix and suffix groups, each with mods at varied
-        // required_level so we can demonstrate min-mod-level filtering
-        // regardless of which affix the orb picks.
-        ModRegistry::from_mods(
-            vec![
-                // Prefixes - Life group
-                mk_mod_lvl("Life_T3", "Life", AffixType::Prefix, "Boots", 1),
-                mk_mod_lvl("Life_T2", "Life", AffixType::Prefix, "Boots", 40),
-                mk_mod_lvl("Life_T1", "Life", AffixType::Prefix, "Boots", 75),
-                // Prefixes - ES group
-                mk_mod_lvl("ES_T3", "ES", AffixType::Prefix, "Boots", 1),
-                mk_mod_lvl("ES_T1", "ES", AffixType::Prefix, "Boots", 75),
-                // Prefixes - Mana group
-                mk_mod_lvl("Mana_T3", "Mana", AffixType::Prefix, "Boots", 1),
-                mk_mod_lvl("Mana_T1", "Mana", AffixType::Prefix, "Boots", 75),
-                // Suffixes - FireRes group
-                mk_mod_lvl("FireRes_T3", "FireRes", AffixType::Suffix, "Boots", 1),
-                mk_mod_lvl("FireRes_T1", "FireRes", AffixType::Suffix, "Boots", 75),
-                // Suffixes - ColdRes group
-                mk_mod_lvl("ColdRes_T3", "ColdRes", AffixType::Suffix, "Boots", 1),
-                mk_mod_lvl("ColdRes_T1", "ColdRes", AffixType::Suffix, "Boots", 75),
-                // Suffixes - Stamina group (movement-speed-equivalent)
-                mk_mod_lvl("Stamina_T3", "Stamina", AffixType::Suffix, "Boots", 1),
-                mk_mod_lvl("Stamina_T1", "Stamina", AffixType::Suffix, "Boots", 75),
-            ],
-            vec![],
-        )
-    }
-
-    fn mk_mod_lvl(
-        id: &str,
-        group: &str,
-        affix: AffixType,
-        class: &str,
-        required_level: u32,
-    ) -> ModDefinition {
-        ModDefinition {
-            id: ModId::from(id),
-            name: None,
-            mod_group: ModGroup(ModGroupId::from(group)),
-            affix_type: affix,
-            kind: ModKind::Explicit,
-            domain: ModDomain::Item,
-            tags: smallvec![],
-            concept_set: smallvec![],
-            spawn_weights: smallvec![SpawnWeight {
-                tag: TagId::from(class),
-                weight: 1
-            }],
-            stats: smallvec![],
-            required_level,
-            allowed_item_classes: smallvec![ItemClassId::from(class)],
-            patch_range: PatchRange::ALL,
-            flags: ModFlags::empty(),
-            text_template: None,
-        }
-    }
-
-    #[test]
-    fn perfect_transmute_only_rolls_high_required_level_mods() {
-        // Perfect demands required_level >= 70. With our fixture, the only
-        // Life mod that qualifies is Life_T1 (req 75); Life_T2 (40) and
-        // Life_T3 (1) are filtered out.
-        let reg = fixture_tiered_registry();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9001);
-        let mut omens = crate::omen::OmenSet::new();
-        let mut item = fixture_normal_boots();
-        PerfectOrbOfTransmutation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
-            .unwrap();
-        // The single rolled mod must be one of the T1 (req >= 70) candidates.
-        let roll = item
-            .prefixes
-            .first()
-            .or_else(|| item.suffixes.first())
-            .unwrap();
-        assert!(roll.mod_id.as_str().ends_with("_T1"), "got {}", roll.mod_id);
-    }
-
-    #[test]
-    fn greater_regal_filters_below_min_level() {
-        // Greater Regal: min level 50. Life_T1 (75) and FireRes_T1 (75)
-        // qualify; nothing else does. With the seed below, we should still
-        // land on a high-tier mod.
-        let reg = fixture_tiered_registry();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9002);
-        let mut omens = crate::omen::OmenSet::new();
-        let mut item = fixture_normal_boots();
-        OrbOfTransmutation::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
-            .unwrap();
-        GreaterRegalOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
-            .unwrap();
-        assert_eq!(item.rarity, Rarity::Rare);
-        // Among the up-to-3 mods on the Rare, the Regal-added one must be a
-        // _T1. Since the Transmute step had no min-level constraint we can
-        // only assert *at least one* mod is a T1.
-        let any_t1 = item
-            .prefixes
-            .iter()
-            .chain(item.suffixes.iter())
-            .any(|m| m.mod_id.as_str().ends_with("_T1"));
-        assert!(any_t1, "expected at least one T1 mod after Greater Regal");
-    }
-
-    #[test]
-    fn perfect_exalt_filters_below_70() {
-        // Set up a Rare with one mod, then Perfect Exalt — the new mod
-        // must be required_level >= 70.
-        let reg = fixture_tiered_registry();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9003);
-        let mut omens = crate::omen::OmenSet::new();
-        let mut item = fixture_normal_boots();
-        item.rarity = Rarity::Rare;
-        item.prefixes.push(ModRoll {
-            mod_id: ModId::from("Life_T3"),
-            affix_type: AffixType::Prefix,
-            kind: ModKind::Explicit,
-            values: smallvec![],
-            is_fractured: false,
-        });
-        PerfectExaltedOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
-            .unwrap();
-        // The newly added mod (the LAST one in either prefixes or suffixes)
-        // must end with _T1 since that's the only required_level>=70 mod
-        // available given mod-group exclusivity (Life is occupied by T3).
-        let last = item
-            .suffixes
-            .last()
-            .or_else(|| item.prefixes.last())
-            .unwrap();
-        assert!(last.mod_id.as_str().ends_with("_T1"), "got {}", last.mod_id);
-    }
-
-    #[test]
-    fn perfect_chaos_replacement_is_high_tier() {
-        // Build a Rare with a T3 mod, then Perfect Chaos: the replacement
-        // mod must be required_level >= 70.
-        let reg = fixture_tiered_registry();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0x9004);
-        let mut omens = crate::omen::OmenSet::new();
-        let mut item = fixture_normal_boots();
-        item.rarity = Rarity::Rare;
-        item.prefixes.push(ModRoll {
-            mod_id: ModId::from("Life_T3"),
-            affix_type: AffixType::Prefix,
-            kind: ModKind::Explicit,
-            values: smallvec![],
-            is_fractured: false,
-        });
-        PerfectChaosOrb::new()
-            .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
-            .unwrap();
-        // After Chaos, the T3 mod is removed and a new high-level mod is added.
-        let any_t3 = item
-            .prefixes
-            .iter()
-            .chain(item.suffixes.iter())
-            .any(|m| m.mod_id.as_str().ends_with("_T3"));
-        let any_t1 = item
-            .prefixes
-            .iter()
-            .chain(item.suffixes.iter())
-            .any(|m| m.mod_id.as_str().ends_with("_T1"));
-        assert!(!any_t3, "Perfect Chaos should not leave a T3 mod");
-        assert!(any_t1, "Perfect Chaos should add a T1");
     }
 
     // ---- Omen interactions -------------------------------------------------

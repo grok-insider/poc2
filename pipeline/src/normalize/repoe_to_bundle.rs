@@ -1,8 +1,10 @@
 //! Normalize a `RepoeSnapshot` into typed bundle entities.
 //!
 //! What this does:
-//! - Maps `domain != "item"` mods out (we don't ship Map/Atlas/AbyssJewel
-//!   mod data in the gear-crafting bundle).
+//! - Keeps `domain == "item"` mods plus the 0.5 non-gear crafting pools
+//!   (Waystones via `area`, Precursor Tablets, Sanctum Relics, Life/Mana
+//!   Flasks + Charms via `flask`, Inscribed Ultimatum) — see
+//!   [`crafting_pool_domain`]. Monster/atlas/heist internals stay out.
 //! - Maps `release_state != "released"` bases to `Legacy` / `Unreleased`
 //!   (kept in the bundle so old items still parse).
 //! - Translates `generation_type` strings into [`AffixType`] + [`ModKind`].
@@ -101,7 +103,7 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
                 width: raw.inventory_width,
                 height: raw.inventory_height,
             },
-            release_state: parse_release_state(&raw.release_state),
+            release_state: derive_release_state(id, &raw.release_state),
             patch_range: PatchRange::ALL,
         });
         bases_kept += 1;
@@ -154,7 +156,33 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
     let tag_to_classes = build_tag_to_classes_index(&bundle.base_items);
     for (id, raw) in &snapshot.mods {
         let is_referenced_implicit = referenced_implicits.contains(id.as_str());
-        if raw.domain != "item" && !is_referenced_implicit {
+        // 0.5: the Jewel mod pool lives under domain "misc" in PoE2's
+        // export (tags `strjewel` / `dex_radius_jewel` / …). Keep those so
+        // jewel crafting (catalysts, Liquid/Ancient Emotions) has a
+        // registry pool; their `allowed_item_classes` resolve to Jewel via
+        // the tag→class map, so gear pools are unaffected.
+        let is_jewel_pool = raw.domain == "misc"
+            && (raw
+                .spawn_weights
+                .iter()
+                .any(|sw| sw.weight > 0 && sw.tag.contains("jewel"))
+                // Emotion-granted out-of-pool jewel mods (0.5): crafted
+                // (`CraftedJewel*`) and radius (`JewelRadius*`) lines carry
+                // weight 0 everywhere — they only enter items via Liquid /
+                // Potent / Ancient Emotions, but the engine still needs
+                // their definitions to roll values.
+                || id.starts_with("CraftedJewel")
+                || id.starts_with("JewelRadius"));
+        // 0.5 data-gap pools (waystones/tablets/relics/flasks/ultimatum):
+        // only their prefix/suffix mods are crafting-relevant — those
+        // domains also carry boss/monster internals we must not ship.
+        let pool_domain = crafting_pool_domain(&raw.domain)
+            .filter(|_| matches!(raw.generation_type.as_str(), "prefix" | "suffix"));
+        if raw.domain != "item"
+            && !is_jewel_pool
+            && !is_referenced_implicit
+            && pool_domain.is_none()
+        {
             mods_skipped += 1;
             continue;
         }
@@ -164,6 +192,13 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
             a
         } else if is_referenced_implicit {
             AffixType::Implicit
+        } else if let Some((a, _)) = super::alloy_fixups::alloy_affix_lookup(id) {
+            // RePoE-fork has shipped the 0.5 `Alloy*` mods with an empty
+            // generation_type; without this fallback they'd be dropped here
+            // and the alloy catalogue's targets would dangle. The curated
+            // poe2db table supplies the affix; `apply_alloy_fixups` later
+            // back-fills required_level.
+            a
         } else {
             mods_skipped += 1;
             continue;
@@ -191,7 +226,24 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
             })
             .collect::<SmallVec<_>>();
 
-        let allowed_classes = derive_allowed_classes(&spawn_weights, &tag_to_classes);
+        let allowed_classes = if pool_domain.is_some() {
+            // Data-gap surfaces: pinned class set, intersected with the
+            // classes the mod's own tags actually reach (a life-flask
+            // mod must not land on mana flasks). `default`-only mods
+            // span the whole surface.
+            let derived = derive_allowed_classes(&spawn_weights, &tag_to_classes);
+            let pinned = pool_domain_classes(&raw.domain);
+            let has_specific = spawn_weights
+                .iter()
+                .any(|sw| sw.weight > 0 && sw.tag.as_str() != "default");
+            pinned
+                .iter()
+                .filter(|c| !has_specific || derived.iter().any(|d| d.as_str() == **c))
+                .map(|c| ItemClassId::from(*c))
+                .collect::<SmallVec<_>>()
+        } else {
+            derive_allowed_classes(&spawn_weights, &tag_to_classes)
+        };
         let stats = raw
             .stats
             .iter()
@@ -216,12 +268,21 @@ pub fn normalize_repoe(snapshot: &RepoeSnapshot, bundle: &mut Bundle) -> Pipelin
             mod_group: ModGroup(ModGroupId::from(group.as_str())),
             affix_type: affix,
             kind,
-            domain: ModDomain::Item,
+            domain: if is_jewel_pool {
+                ModDomain::Jewel
+            } else if let Some(d) = pool_domain {
+                d
+            } else {
+                ModDomain::Item
+            },
             tags,
             concept_set: SmallVec::new(), // populated by mod analyzer (M2.7)
             spawn_weights,
             stats,
             required_level: raw.required_level,
+            // Tier ordinal is derived post-hoc by `assign_tier_ordinals`
+            // after all mods are loaded (it needs the full group ladder).
+            tier: None,
             allowed_item_classes: allowed_classes,
             patch_range: PatchRange::ALL,
             flags,
@@ -337,7 +398,9 @@ fn classify_tag(id: &str) -> TagCategory {
 
 fn is_gear_class(class: &str) -> bool {
     // Currencies are also "items" in RePoE; we filter them out since they
-    // don't roll mods. Heuristic.
+    // don't roll mods. Heuristic. NOTE: "Map" (= PoE2 Waystones, 16 tier
+    // bases) is deliberately KEPT — waystones craft with regular currency
+    // and their mod pool ships since the 0.5 data-gap pass.
     !class.is_empty()
         && !matches!(
             class,
@@ -346,7 +409,6 @@ fn is_gear_class(class: &str) -> bool {
                 | "DelveStackableSocketableCurrency"
                 | "DivinationCard"
                 | "QuestItem"
-                | "Map"
                 | "MapFragment"
                 | "Microtransaction"
                 | "Heist"
@@ -357,6 +419,62 @@ fn is_gear_class(class: &str) -> bool {
                 | "MiscMapItem"
                 | "Incubator"
         )
+}
+
+/// 0.5 data-gap ingestion: non-gear crafting surfaces whose mod pools
+/// RePoE exports and poe2db documents. Maps a RePoE mod `domain` to the
+/// engine [`ModDomain`] it ships under (`None` = not a crafting pool we
+/// carry). Counts cross-checked against poe2db at ingestion time:
+/// Waystones ~109, Precursor Tablets 83, Relics ~139, Life/Mana Flasks
+/// ~57, Charms (UtilityFlask) ~27, Inscribed Ultimatum 31.
+fn crafting_pool_domain(domain: &str) -> Option<ModDomain> {
+    match domain {
+        // PoE2 Waystones live under RePoE's `area` domain, spawning on
+        // the `map`/`map_key_*` tags the Map-class bases carry.
+        "area" => Some(ModDomain::Map),
+        // Metadata-only catch-all: pool isolation comes from the pinned
+        // `allowed_item_classes` (see `pool_domain_classes`).
+        "tablet" | "sanctum_relic" | "flask" | "ultimatum_key" => Some(ModDomain::Misc),
+        _ => None,
+    }
+}
+
+/// The item classes a data-gap pool's mods are pinned to. In-game these
+/// domains isolate by CRAFTING DOMAIN, which the engine doesn't model —
+/// and many surface mods spawn on the `default` tag with positive
+/// weight, which the tag→class derivation would resolve to EVERY class
+/// (85 relic/ultimatum mods leaked into the Ring pool in the first
+/// build). Pinning the allowed classes at ingestion restores the
+/// in-game isolation both ways (item-domain mods carry `default`
+/// weight 0, so nothing leaks in).
+fn pool_domain_classes(domain: &str) -> &'static [&'static str] {
+    match domain {
+        "area" => &["Map"],
+        "tablet" => &["TowerAugmentation"],
+        "sanctum_relic" => &["Relic", "SanctumSpecialRelic"],
+        "flask" => &["LifeFlask", "ManaFlask", "UtilityFlask"],
+        "ultimatum_key" => &["UltimatumKey"],
+        _ => &[],
+    }
+}
+
+/// Release state for a base, with the 0.5 unique-runeforging override.
+///
+/// poe2db /us/Runeforging "Unique Runeforging /308": "Unique Verisium
+/// Runeforging" upgrades unique items into "Runemastered <name>" variants,
+/// and GGG models each as a separate base whose metadata id contains
+/// "VerisiumUnique" (e.g.
+/// `Metadata/Items/Amulets/FourAmuletUnique1VerisiumUnique3`, name
+/// "Runemastered Veridical Chain"). RePoE-fork exports them
+/// `release_state="released"`, which leaks ~274 unique bases into the
+/// craftable base lists — these are runeforged *unique* variants, not
+/// craftable bases, so they are forced to `Unique` regardless of the raw
+/// state.
+fn derive_release_state(base_id: &str, raw_state: &str) -> ReleaseState {
+    if base_id.contains("VerisiumUnique") {
+        return ReleaseState::Unique;
+    }
+    parse_release_state(raw_state)
 }
 
 fn parse_release_state(s: &str) -> ReleaseState {
@@ -648,6 +766,16 @@ fn class_caps(class: &str) -> ClassCaps {
 }
 
 fn human_class_name(id: &str) -> String {
+    // In-game display names where RePoE's class id diverges from what
+    // players see (the 0.5 non-gear crafting surfaces).
+    match id {
+        "Map" => return "Waystone".into(),
+        "TowerAugmentation" => return "Precursor Tablet".into(),
+        "UltimatumKey" => return "Inscribed Ultimatum".into(),
+        // PoE2 belt charms ship under the UtilityFlask class.
+        "UtilityFlask" => return "Charm".into(),
+        _ => {}
+    }
     // Insert spaces before capital letters in CamelCase.
     let mut out = String::with_capacity(id.len() + 4);
     for (i, c) in id.chars().enumerate() {
@@ -732,6 +860,34 @@ mod tests {
             Some(AffixType::Implicit)
         );
         assert_eq!(parse_generation_type_to_affix("monster"), None);
+    }
+
+    #[test]
+    fn verisium_unique_bases_forced_to_unique() {
+        // Runeforged unique variants override whatever RePoE exports.
+        assert_eq!(
+            derive_release_state(
+                "Metadata/Items/Amulets/FourAmuletUnique1VerisiumUnique3",
+                "released"
+            ),
+            ReleaseState::Unique
+        );
+        assert_eq!(
+            derive_release_state(
+                "Metadata/Items/Weapons/OneHandWeapons/OneHandMaces/FourOneHandMace13VerisiumUnique1",
+                "unreleased"
+            ),
+            ReleaseState::Unique
+        );
+        // Ordinary bases keep the raw release_state mapping.
+        assert_eq!(
+            derive_release_state("Metadata/Items/Amulets/Amulet1", "released"),
+            ReleaseState::Released
+        );
+        assert_eq!(
+            derive_release_state("Metadata/Items/Amulets/Amulet2", "unique_only"),
+            ReleaseState::Unique
+        );
     }
 
     #[test]

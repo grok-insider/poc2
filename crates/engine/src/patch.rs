@@ -220,6 +220,45 @@ impl PatchRange {
     }
 }
 
+/// Which league ruleset is in effect.
+///
+/// Some items function in **Standard** but not in the current trade /
+/// challenge league. Notable 0.5 example: the Recombinator and the Omen of
+/// Corruption / Homogenising omens are Standard-only — they still work on
+/// migrated characters but cannot be used in the active Runes of Aldur
+/// challenge league. The advisor must not recommend Standard-only items when
+/// the user is playing the challenge league.
+///
+/// Carried on [`crate::currency::ApplyContext`] alongside [`PatchVersion`]
+/// so the same engine binary evaluates both rulesets. Hardcore variants
+/// share crafting rules with their softcore parents, so we only distinguish
+/// `Standard` vs `Challenge` for gating purposes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum League {
+    /// Permanent league; legacy items (Recombinator, Corruption omen) still
+    /// function.
+    Standard,
+    /// Current temporary challenge league (Runes of Aldur in 0.5). This is
+    /// the default the advisor assumes — it is the trade-relevant ruleset.
+    #[default]
+    Challenge,
+}
+
+impl League {
+    /// The league the advisor assumes by default (the current challenge
+    /// league). Items disabled in the challenge league are not recommended.
+    pub const fn current() -> Self {
+        Self::Challenge
+    }
+
+    /// True when legacy / Standard-only items (Recombinator, Omen of
+    /// Corruption, Homogenising omens in 0.5) are usable.
+    pub const fn allows_legacy_items(self) -> bool {
+        matches!(self, Self::Standard)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,5 +294,31 @@ mod tests {
         let r = PatchRange::between(PatchVersion::PATCH_0_4_0, PatchVersion::PATCH_0_5_0);
         assert!(r.contains("0.4.5".parse().unwrap()));
         assert!(!r.contains("0.6.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn league_default_is_challenge() {
+        assert_eq!(League::default(), League::Challenge);
+        assert_eq!(League::current(), League::Challenge);
+    }
+
+    #[test]
+    fn league_legacy_gate() {
+        assert!(League::Standard.allows_legacy_items());
+        assert!(!League::Challenge.allows_legacy_items());
+    }
+
+    #[test]
+    fn league_serde_round_trips() {
+        for l in [League::Standard, League::Challenge] {
+            let j = serde_json::to_string(&l).unwrap();
+            let back: League = serde_json::from_str(&j).unwrap();
+            assert_eq!(back, l);
+        }
+        // Confirm snake_case wire form.
+        assert_eq!(
+            serde_json::to_string(&League::Challenge).unwrap(),
+            "\"challenge\""
+        );
     }
 }

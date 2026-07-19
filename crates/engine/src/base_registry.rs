@@ -42,6 +42,18 @@ pub struct BaseRegistry {
 /// code constructs a populated registry via [`BaseRegistry::from_bases`].
 pub static EMPTY: LazyLock<BaseRegistry> = LazyLock::new(BaseRegistry::default);
 
+/// Heuristic: does the string look like a PascalCase item-class id
+/// (e.g., "BodyArmour") rather than a metadata path (e.g.,
+/// "Metadata/Items/...") or some other identifier? Decides when the
+/// legacy `Item.base`-is-the-class-id placeholder is recognisable
+/// enough for [`BaseRegistry::resolve_item_class_opt`] to trust.
+fn is_pascal_case_class_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && !s.contains('/')
+        && s.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 impl BaseRegistry {
     /// Build a registry from a list of base definitions.
     ///
@@ -93,6 +105,43 @@ impl BaseRegistry {
     /// not registered.
     pub fn tags_of(&self, id: &BaseTypeId) -> &[TagId] {
         self.get(id).map_or(&[][..], |b| &b.tags[..])
+    }
+
+    /// Compute an item's class from its base when the resolution is
+    /// trustworthy: a registry hit via [`Self::class_of`], or a `base`
+    /// string in the legacy PascalCase class-id-placeholder shape that
+    /// fixtures stuff into `Item.base`. Returns `None` for an
+    /// unregistered metadata-path base, so callers can choose between
+    /// fail-open gating (`Bone::can_apply_to`) and the warned fallback
+    /// of [`Self::resolve_item_class`]. Every class-from-base decision
+    /// in the workspace routes through here so there is exactly one
+    /// resolution semantics.
+    pub fn resolve_item_class_opt(&self, item: &crate::item::Item) -> Option<ItemClassId> {
+        if let Some(class) = self.class_of(&item.base) {
+            return Some(class.clone());
+        }
+        let base = item.base.as_str();
+        is_pascal_case_class_id(base).then(|| ItemClassId::from(base))
+    }
+
+    /// Compute an item's class from its base (M14.2).
+    ///
+    /// Resolves via [`Self::resolve_item_class_opt`]; an unresolvable
+    /// base (a metadata path absent from the registry) falls back to
+    /// `ItemClassId::from(item.base.as_str())` with a `tracing::warn`,
+    /// since that class almost certainly matches nothing downstream.
+    /// The fallback is preserved through the v3 transitional period;
+    /// the v3 hard-reset bundle migration (M14.7) eliminates the need
+    /// for it by guaranteeing every imported item carries a real
+    /// `BaseTypeId`.
+    pub fn resolve_item_class(&self, item: &crate::item::Item) -> ItemClassId {
+        self.resolve_item_class_opt(item).unwrap_or_else(|| {
+            tracing::warn!(
+                base = %item.base,
+                "unresolved item base; treating the base id as its item class"
+            );
+            ItemClassId::from(item.base.as_str())
+        })
     }
 
     /// All base ids belonging to the given item class.
@@ -164,6 +213,91 @@ mod tests {
     fn empty_static_is_truly_empty() {
         assert!(EMPTY.is_empty());
         assert_eq!(EMPTY.len(), 0);
+    }
+
+    #[test]
+    fn resolve_item_class_prefers_registry_then_falls_back_to_base_string() {
+        use crate::item::{Item, QualityKind, Rarity};
+
+        let mk_item = |base: &str| Item {
+            base: BaseTypeId::from(base),
+            ilvl: 82,
+            rarity: Rarity::Normal,
+            corrupted: false,
+            sanctified: false,
+            mirrored: false,
+            quality: 0,
+            quality_kind: QualityKind::Untagged,
+            implicits: smallvec![],
+            prefixes: smallvec![],
+            suffixes: smallvec![],
+            enchantments: smallvec![],
+            hidden_desecrated: None,
+            sockets: smallvec![],
+            hinekora_lock: None,
+        };
+
+        let r = BaseRegistry::from_bases(vec![mk_base("Wanderer_Shoes", "Boots", &[])]);
+        // Registered base resolves through the registry.
+        assert_eq!(
+            r.resolve_item_class(&mk_item("Wanderer_Shoes")),
+            ItemClassId::from("Boots")
+        );
+        // Unregistered base falls back to the class-id-placeholder semantics.
+        assert_eq!(
+            r.resolve_item_class(&mk_item("BodyArmour")),
+            ItemClassId::from("BodyArmour")
+        );
+        // Unregistered metadata path: same fallback (with a warn).
+        assert_eq!(
+            r.resolve_item_class(&mk_item("Metadata/Items/Armours/BodyArmours/FourBodyInt3")),
+            ItemClassId::from("Metadata/Items/Armours/BodyArmours/FourBodyInt3")
+        );
+    }
+
+    #[test]
+    fn resolve_item_class_opt_distinguishes_legacy_ids_from_metadata_paths() {
+        use crate::item::{Item, QualityKind, Rarity};
+
+        let mk_item = |base: &str| Item {
+            base: BaseTypeId::from(base),
+            ilvl: 82,
+            rarity: Rarity::Normal,
+            corrupted: false,
+            sanctified: false,
+            mirrored: false,
+            quality: 0,
+            quality_kind: QualityKind::Untagged,
+            implicits: smallvec![],
+            prefixes: smallvec![],
+            suffixes: smallvec![],
+            enchantments: smallvec![],
+            hidden_desecrated: None,
+            sockets: smallvec![],
+            hinekora_lock: None,
+        };
+
+        let r = BaseRegistry::from_bases(vec![mk_base(
+            "Metadata/Items/Armours/BodyArmours/FourBodyInt3",
+            "BodyArmour",
+            &[],
+        )]);
+        // Registry hit wins regardless of base shape.
+        assert_eq!(
+            r.resolve_item_class_opt(&mk_item("Metadata/Items/Armours/BodyArmours/FourBodyInt3")),
+            Some(ItemClassId::from("BodyArmour"))
+        );
+        // Legacy PascalCase placeholder is trusted.
+        assert_eq!(
+            r.resolve_item_class_opt(&mk_item("BodyArmour")),
+            Some(ItemClassId::from("BodyArmour"))
+        );
+        // Unregistered metadata path is not resolvable.
+        assert_eq!(
+            r.resolve_item_class_opt(&mk_item("Metadata/Items/Rings/Ring1")),
+            None
+        );
+        assert_eq!(EMPTY.resolve_item_class_opt(&mk_item("Metadata/X")), None);
     }
 
     #[test]

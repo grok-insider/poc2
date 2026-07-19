@@ -91,6 +91,28 @@ pub struct Bundle {
     pub bones: BundleSection,
     #[serde(default)]
     pub catalysts: BundleSection,
+    /// Verisium Alloys (PoE2 0.5 "Return of the Ancients"). Data-driven like
+    /// essences/catalysts: each entry binds an alloy currency id + display
+    /// name to the crafted `engine_mod_id` it grants. `#[serde(default)]` so
+    /// pre-0.5 bundles (which carry no alloys) round-trip unchanged.
+    #[serde(default)]
+    pub alloys: BundleSection,
+    /// Distilled Emotions (PoE2 0.5) — Liquid / Potent / Ancient Emotions
+    /// that replace a random mod on a Rare jewel with a guaranteed crafted
+    /// modifier, keyed by jewel base ("Ruby" / "Time-Lost Sapphire" / …).
+    /// Same degrade-gracefully contract as `alloys`.
+    #[serde(default)]
+    pub emotions: BundleSection,
+    /// Genesis Tree (PoE2 0.5 "Return of the Ancients") — the Breach-attached
+    /// "Brequel" crafting tree. UI-only advisor knowledge: entries are typed
+    /// by a `"type"` discriminator — `"womb"` (the five branches + Wombgift
+    /// metadata), `"node"` (one allocatable passive with computed layout
+    /// position, edges, and human-readable description), and `"preset"`
+    /// (curated per-goal node allocations with source citations). The engine
+    /// never simulates births; the WASM `genesisTree` command serves this
+    /// straight to the web UI. `#[serde(default)]` keeps older bundles valid.
+    #[serde(default)]
+    pub genesis: BundleSection,
 
     // Cross-cutting -------------------------------------------------------
     /// `stat_id → translation template`. Keys mirror RePoE-fork's `stats[].id`.
@@ -134,6 +156,9 @@ impl Bundle {
             essences: BundleSection::default(),
             bones: BundleSection::default(),
             catalysts: BundleSection::default(),
+            alloys: BundleSection::default(),
+            emotions: BundleSection::default(),
+            genesis: BundleSection::default(),
             stat_translations: indexmap::IndexMap::new(),
             weights: Vec::new(),
             concept_map: ConceptMap::default(),
@@ -195,25 +220,85 @@ impl Bundle {
     /// Greater / `Greater` / `Perfect` / `Corrupted`). Mod target uses
     /// the `engine_mod_id` field embedded in each tier entry.
     pub fn essence_catalogue(&self) -> Vec<poc2_engine::Essence> {
+        // Mod-id → allowed classes index, used to filter aggregate-label
+        // expansions ("Jewellery", "One-Handed Weapons") down to classes the
+        // target mod can actually carry.
+        let allowed_by_mod: std::collections::HashMap<&str, &[poc2_engine::ids::ItemClassId]> =
+            self.mods
+                .iter()
+                .map(|m| (m.id.as_str(), m.allowed_item_classes.as_slice()))
+                .collect();
+
         let mut out = Vec::new();
         for entry in &self.essences.entries {
             let Some(name) = entry.get("name").and_then(|v| v.as_str()) else {
                 continue;
             };
+            // The CoE source table mixes Verisium Alloys (and other
+            // remove-add materials) into the essence rows. Those ship via
+            // [`Self::alloy_catalogue`] with alloy apply semantics —
+            // ingesting them here would fabricate pseudo-essences with
+            // garbage ids (e.g. "Swift Alloy" → Normal-quality essence)
+            // that the resolver can never resolve but that essence-based
+            // reachability checks (corpus audit) wrongly count.
+            if !name.contains("Essence") {
+                continue;
+            }
             let corrupt = entry
                 .get("corrupt")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let quality = quality_from_name(name, corrupt);
-            // Find the first tier group with at least one entry, take
-            // the highest-ilvl mod id.
-            let target_mod = entry
-                .get("tier_groups")
-                .and_then(|v| v.as_array())
-                .and_then(|groups| groups.iter().find_map(extract_target_mod_id));
-            let Some(target_mod) = target_mod else {
+            // One EssenceTarget per (class, attribute-pool, mod): each CoE
+            // tier-group label names a class scope (possibly an aggregate or
+            // an attribute split); the group's highest-ilvl tier is the
+            // granted mod for that scope.
+            let mut targets: Vec<poc2_engine::EssenceTarget> = Vec::new();
+            if let Some(groups) = entry.get("tier_groups").and_then(|v| v.as_array()) {
+                for group in groups {
+                    let Some(label) = group.get("label").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    let Some(mod_id) = extract_target_mod_id(group) else {
+                        continue;
+                    };
+                    let (classes, pool) = essence_label_scope(label);
+                    if classes.is_empty() {
+                        tracing::warn!(
+                            essence = name,
+                            label,
+                            "unknown essence tier-group label — scope skipped"
+                        );
+                        continue;
+                    }
+                    let allowed = allowed_by_mod.get(mod_id.as_str()).copied();
+                    for class in classes {
+                        let class = poc2_engine::ids::ItemClassId::from(class);
+                        // Aggregate labels over-approximate; intersect with
+                        // the mod's own allowed classes when known.
+                        if let Some(allowed) = allowed {
+                            if !allowed.is_empty() && !allowed.contains(&class) {
+                                continue;
+                            }
+                        }
+                        let dup = targets.iter().any(|t| {
+                            t.class == class
+                                && t.attribute_pool == pool
+                                && t.mod_id.as_str() == mod_id
+                        });
+                        if !dup {
+                            targets.push(poc2_engine::EssenceTarget {
+                                class,
+                                attribute_pool: pool,
+                                mod_id: poc2_engine::ids::ModId::from(mod_id.as_str()),
+                            });
+                        }
+                    }
+                }
+            }
+            if targets.is_empty() {
                 continue;
-            };
+            }
             let id = format!(
                 "{}{}",
                 quality_prefix(quality),
@@ -232,11 +317,8 @@ impl Bundle {
             );
             // Use a Box::leak'd display name since Engine::Essence wants &'static str.
             let display: &'static str = Box::leak(name.to_string().into_boxed_str());
-            out.push(poc2_engine::Essence::new(
-                id,
-                display,
-                quality,
-                poc2_engine::ids::ModId::from(target_mod),
+            out.push(poc2_engine::Essence::with_class_targets(
+                id, display, quality, targets,
             ));
         }
         out
@@ -288,11 +370,116 @@ impl Bundle {
         }
         out
     }
+
+    /// Extract the bundle's Verisium Alloy catalogue as a typed list of
+    /// engine [`poc2_engine::Alloy`]s ready to seed a
+    /// [`poc2_engine::DefaultCurrencyResolver`] via `with_alloys`.
+    ///
+    /// Two entry shapes are accepted:
+    /// - **v2 (class-targeted, production):** `{ id, name, targets: [{ class,
+    ///   engine_mod_id }] }` — real alloys grant a *different* crafted mod per
+    ///   item class (poe2db per-alloy tables).
+    /// - **v1 (legacy single-target):** `{ id, name, engine_mod_id }`.
+    ///
+    /// Malformed entries are skipped (a partial bundle degrades to "this
+    /// alloy can't be simulated yet" rather than crashing). The engine still
+    /// enforces the 0.5+ patch gate at apply time, so seeding the catalogue
+    /// on a pre-0.5 bundle is harmless.
+    pub fn alloy_catalogue(&self) -> Vec<poc2_engine::Alloy> {
+        let mut out = Vec::new();
+        for entry in &self.alloys.entries {
+            let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or(id);
+            if let Some(targets) = entry.get("targets").and_then(|v| v.as_array()) {
+                let class_targets: Vec<(poc2_engine::ids::ItemClassId, poc2_engine::ids::ModId)> =
+                    targets
+                        .iter()
+                        .filter_map(|t| {
+                            let class = t.get("class").and_then(|v| v.as_str())?;
+                            let m = t.get("engine_mod_id").and_then(|v| v.as_str())?;
+                            Some((
+                                poc2_engine::ids::ItemClassId::from(class),
+                                poc2_engine::ids::ModId::from(m),
+                            ))
+                        })
+                        .collect();
+                if class_targets.is_empty() {
+                    continue;
+                }
+                out.push(poc2_engine::Alloy::with_class_targets(
+                    id,
+                    name.to_string(),
+                    class_targets,
+                ));
+            } else if let Some(target_mod) = entry.get("engine_mod_id").and_then(|v| v.as_str()) {
+                out.push(poc2_engine::Alloy::new(
+                    id,
+                    name.to_string(),
+                    poc2_engine::ids::ModId::from(target_mod),
+                ));
+            }
+        }
+        out
+    }
+
+    /// Extract the bundle's Distilled Emotion catalogue (Liquid / Potent /
+    /// Ancient Emotions, 0.5) as base-targeted engine
+    /// [`poc2_engine::Alloy`]s — emotions reuse the alloy remove-then-add
+    /// crafted-mod mechanic, keyed by jewel base name instead of class.
+    ///
+    /// Targets whose `engine_mod_id` is `null` (mod not exported upstream
+    /// yet) are skipped; an emotion with zero bound targets is omitted.
+    pub fn emotion_catalogue(&self) -> Vec<poc2_engine::Alloy> {
+        let mut out = Vec::new();
+        for entry in &self.emotions.entries {
+            let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or(id);
+            let Some(targets) = entry.get("targets").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            let base_targets: Vec<(String, poc2_engine::ids::ModId)> = targets
+                .iter()
+                .filter_map(|t| {
+                    let base = t.get("base").and_then(|v| v.as_str())?;
+                    let m = t.get("engine_mod_id").and_then(|v| v.as_str())?;
+                    Some((base.to_string(), poc2_engine::ids::ModId::from(m)))
+                })
+                .collect();
+            if base_targets.is_empty() {
+                continue;
+            }
+            out.push(poc2_engine::Alloy::with_base_targets(
+                id,
+                name.to_string(),
+                base_targets,
+            ));
+        }
+        out
+    }
 }
 
-/// Heuristically infer essence quality from its name.
+/// The six Vaal-corrupted essences (poe2db
+/// `Metadata/Items/Currency/CurrencyCorruptedEssence*`; remove-a-random-mod
+/// then add on RARE items). CoE exports them with `corrupt == "0"`, so
+/// classification must key on this name set — the flag alone under-reports.
+const CORRUPTED_ESSENCE_NAMES: [&str; 6] = [
+    "Essence of the Abyss",
+    "Essence of Delirium",
+    "Essence of Horror",
+    "Essence of Hysteria",
+    "Essence of Insanity",
+    "Essence of the Breach",
+];
+
+/// Heuristically infer essence quality from its name. The CoE `corrupt`
+/// flag is kept as an additional signal, but the corrupted set is matched
+/// by name (see [`CORRUPTED_ESSENCE_NAMES`]).
 fn quality_from_name(name: &str, corrupt: bool) -> poc2_engine::EssenceQuality {
-    if corrupt {
+    if corrupt || CORRUPTED_ESSENCE_NAMES.contains(&name) {
         return poc2_engine::EssenceQuality::Corrupted;
     }
     if name.starts_with("Lesser ") {
@@ -319,6 +506,140 @@ fn quality_prefix(q: poc2_engine::EssenceQuality) -> &'static str {
     }
 }
 
+/// Map a CoE essence tier-group label to engine item classes + an optional
+/// attribute-pool refinement.
+///
+/// Label shapes observed in the live data: exact classes (`"Bow"`,
+/// `"Warstaff"`), pluralised classes (`"Helmets"`, `"Jewels"`), attribute
+/// splits (`"Body Armour (STR/INT)"`), element-flavoured weapon families
+/// that share one class (`"Fire Wand"`, `"Ice Staff"`), and aggregates
+/// (`"Jewellery"`, `"Offhands"`, `"One-Handed Weapons"`). Unknown labels
+/// return an empty class list (skipped by the caller).
+fn essence_label_scope(label: &str) -> (Vec<&'static str>, Option<poc2_engine::AttributePool>) {
+    use poc2_engine::AttributePool as P;
+    // CoE files dex/int "shields" under the Shield umbrella, but PoE2
+    // models them as separate item classes: Bucklers (DEX) and Foci (INT).
+    match label {
+        "Shield (DEX)" => return (vec!["Buckler"], None),
+        "Shield (INT)" => return (vec!["Focus"], None),
+        _ => {}
+    }
+    let (core, pool) = match label.rfind(" (") {
+        Some(i) if label.ends_with(')') => {
+            let pool = match &label[i + 2..label.len() - 1] {
+                "STR" => Some(P::Str),
+                "DEX" => Some(P::Dex),
+                "INT" => Some(P::Int),
+                "STR/DEX" => Some(P::StrDex),
+                "STR/INT" => Some(P::StrInt),
+                "DEX/INT" => Some(P::DexInt),
+                _ => None,
+            };
+            // Unrecognized parenthetical → treat the whole label as core.
+            if pool.is_some() {
+                (&label[..i], pool)
+            } else {
+                (label, None)
+            }
+        }
+        _ => (label, None),
+    };
+    // Element-flavoured wand/staff families collapse onto their class.
+    let core = core
+        .strip_prefix("Fire ")
+        .or_else(|| core.strip_prefix("Ice "))
+        .or_else(|| core.strip_prefix("Lightning "))
+        .or_else(|| core.strip_prefix("Chaos "))
+        .or_else(|| core.strip_prefix("Physical "))
+        .filter(|rest| matches!(*rest, "Wand" | "Staff"))
+        .unwrap_or(core);
+    // "Time-Lost Ruby" etc. collapse onto the plain jewel base name.
+    let core = core.strip_prefix("Time-Lost ").unwrap_or(core);
+    let classes: Vec<&'static str> = match core {
+        // "Grasping Mail" (0.5 Abyssal body armour) is its own CoE base
+        // row but shares the BodyArmour class.
+        "Body Armour" | "Body Armours" | "Grasping Mail" => vec!["BodyArmour"],
+        "Helmet" | "Helmets" => vec!["Helmet"],
+        "Boots" => vec!["Boots"],
+        "Gloves" => vec!["Gloves"],
+        "Bow" | "Bows" => vec!["Bow"],
+        "Crossbow" | "Crossbows" => vec!["Crossbow"],
+        "Two Hand Sword" => vec!["TwoHandSword"],
+        "Two Hand Axe" => vec!["TwoHandAxe"],
+        "Two Hand Mace" => vec!["TwoHandMace"],
+        "Warstaff" | "Quarterstaff" => vec!["Warstaff"],
+        "Staff" | "Staves" => vec!["Staff"],
+        "Wand" | "Wands" => vec!["Wand"],
+        "Sceptre" | "Sceptres" => vec!["Sceptre"],
+        "Spear" | "Spears" => vec!["Spear"],
+        "Flail" | "Flails" => vec!["Flail"],
+        "One Hand Axe" => vec!["OneHandAxe"],
+        "One Hand Mace" => vec!["OneHandMace"],
+        "One Hand Sword" => vec!["OneHandSword"],
+        "Claw" | "Claws" => vec!["Claw"],
+        "Dagger" | "Daggers" => vec!["Dagger"],
+        "Talisman" | "Talismans" => vec!["Talisman"],
+        "Focus" | "Foci" => vec!["Focus"],
+        // Concrete jewel bases (Ruby/Emerald/Sapphire, plus Time-Lost
+        // variants via the prefix strip above) share the Jewel class.
+        "Jewel" | "Jewels" | "Ruby" | "Emerald" | "Sapphire" => vec!["Jewel"],
+        "Quiver" | "Quivers" => vec!["Quiver"],
+        "Ring" | "Rings" => vec!["Ring"],
+        "Amulet" | "Amulets" => vec!["Amulet"],
+        "Belt" | "Belts" => vec!["Belt"],
+        "Shield" | "Shields" => vec!["Shield"],
+        "Buckler" | "Bucklers" => vec!["Buckler"],
+        "Life Flask" | "Life Flasks" => vec!["LifeFlask"],
+        "Mana Flask" | "Mana Flasks" => vec!["ManaFlask"],
+        "Jewellery" => vec!["Ring", "Amulet", "Belt"],
+        "Offhands" => vec!["Shield", "Buckler", "Focus"],
+        "One-Handed Weapons" => vec![
+            "OneHandSword",
+            "OneHandAxe",
+            "OneHandMace",
+            "Claw",
+            "Dagger",
+            "Wand",
+            "Sceptre",
+            "Spear",
+            "Flail",
+        ],
+        // Mirrors CoE bgroup 7 membership (Talisman is filed under
+        // Two-Handed there); over-approximation is safe — the catalogue
+        // intersects with each mod's allowed classes.
+        "Two-Handed Weapons" => vec![
+            "TwoHandSword",
+            "TwoHandAxe",
+            "TwoHandMace",
+            "Warstaff",
+            "Staff",
+            "Bow",
+            "Crossbow",
+            "Talisman",
+        ],
+        "Flasks" => vec!["LifeFlask", "ManaFlask"],
+        // No craftable mod pools for these classes yet (bundle ships no
+        // flask/charm/tablet/waystone domains) — map them anyway; the engine
+        // simply never builds items of these classes today.
+        "Charm" | "Charms" => vec!["UtilityFlask"],
+        "Tablets" => vec!["TowerAugmentation"],
+        // Waystone tier rows ("Low Tier (1-5)" / … / "Uber Tier"): the
+        // "(1-5)" parenthetical is not an attribute pool, so the full label
+        // reaches this match unchanged.
+        "Low Tier (1-5)" | "Mid Tier (6-10)" | "Top Tier (11-15)" | "Uber Tier" | "Waystones" => {
+            vec!["Waystone"]
+        }
+        // "Precursor Tablet" plus its flavoured rows (Breach/Ritual/…).
+        c if c.ends_with("Precursor Tablet") => vec!["TowerAugmentation"],
+        _ => vec![],
+    };
+    (classes, pool)
+}
+
+/// Known limitation: "Essence of the Abyss" tiers carry TWO engine mods per
+/// class (`EssenceAbyssPrefix` + `EssenceAbyssSuffix` — together "Mark of
+/// the Abyssal Lord"), but this picks a single mod per group, dropping one
+/// half of the pair. Lifting this needs `EssenceTarget` to grant a mod SET.
 fn extract_target_mod_id(group: &serde_json::Value) -> Option<String> {
     let tiers = group.get("tiers").and_then(|v| v.as_array())?;
     // Pick the highest-ilvl tier — proxy for the most representative mod.
@@ -409,27 +730,29 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v1_bundle_is_rejected_with_rebuild_guidance() {
-        // M14.7a — bundles built against schema v1 must error with a
-        // message pointing at the rebuild command. The desktop loader
-        // matches on this error to surface a structured "rebuild bundle"
-        // hint to the user.
-        let mut b = Bundle::empty(PatchVersion::PATCH_0_4_0, "test@legacy_v1");
-        b.header.schema_version = 1;
+    fn legacy_bundle_is_rejected_with_rebuild_guidance() {
+        // M14.7a / P6 — a bundle built against the previous schema version
+        // must error with a message pointing at the rebuild command. The
+        // desktop loader matches on this error to surface a structured
+        // "rebuild bundle" hint to the user. Parameterized on the current
+        // schema so it survives future version bumps.
+        let prev = crate::BUNDLE_SCHEMA_VERSION - 1;
+        let mut b = Bundle::empty(PatchVersion::PATCH_0_4_0, "test@legacy");
+        b.header.schema_version = prev;
         let err = b.validate().unwrap_err();
         let msg = err.to_string();
         assert!(
             matches!(
                 err,
-                DataError::SchemaVersionMismatch {
-                    bundle: 1,
-                    expected: 2
-                }
+                DataError::SchemaVersionMismatch { bundle, expected }
+                    if bundle == prev && expected == crate::BUNDLE_SCHEMA_VERSION
             ),
-            "expected SchemaVersionMismatch{{1, 2}}; got {err:?}"
+            "expected SchemaVersionMismatch{{{prev}, {}}}; got {err:?}",
+            crate::BUNDLE_SCHEMA_VERSION
         );
         assert!(
-            msg.contains("v1") && msg.contains("v2"),
+            msg.contains(&format!("v{prev}"))
+                && msg.contains(&format!("v{}", crate::BUNDLE_SCHEMA_VERSION)),
             "error message should mention both versions; got {msg}"
         );
         assert!(
@@ -460,5 +783,209 @@ mod tests {
         // Time-of-day exactness
         assert_eq!(iso8601_from_unix(86_399), "1970-01-01T23:59:59Z");
         assert_eq!(iso8601_from_unix(86_400), "1970-01-02T00:00:00Z");
+    }
+
+    // -----------------------------------------------------------------
+    // 0.5 — essence quality + tier-group label scope
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn corrupted_essences_classify_by_name_despite_clear_flag() {
+        // CoE exports the six corrupted essences with corrupt == "0"; the
+        // name set must force Corrupted regardless.
+        for name in [
+            "Essence of the Abyss",
+            "Essence of Delirium",
+            "Essence of Horror",
+            "Essence of Hysteria",
+            "Essence of Insanity",
+            "Essence of the Breach",
+        ] {
+            assert_eq!(
+                quality_from_name(name, false),
+                poc2_engine::EssenceQuality::Corrupted,
+                "{name} must classify as Corrupted with flag unset"
+            );
+        }
+        // The flag stays an additional signal for any future export fix.
+        assert_eq!(
+            quality_from_name("Essence of the Abyss", true),
+            poc2_engine::EssenceQuality::Corrupted
+        );
+    }
+
+    #[test]
+    fn quality_from_name_prefix_ladder_unchanged() {
+        use poc2_engine::EssenceQuality as Q;
+        assert_eq!(
+            quality_from_name("Lesser Essence of Flames", false),
+            Q::Lesser
+        );
+        assert_eq!(quality_from_name("Essence of Flames", false), Q::Normal);
+        assert_eq!(
+            quality_from_name("Greater Essence of Flames", false),
+            Q::Greater
+        );
+        assert_eq!(
+            quality_from_name("Perfect Essence of Flames", false),
+            Q::Perfect
+        );
+        assert_eq!(quality_from_name("Essence of Flames", true), Q::Corrupted);
+    }
+
+    #[test]
+    fn essence_label_scope_covers_all_live_coe_base_labels() {
+        // Full set of bases[].name_base labels that flow through essence
+        // tier groups in the live CoE snapshot (poec_clean.json) now that
+        // the bases-before-bgroups join is in place. Every label must map
+        // to at least one engine class.
+        let live_labels = [
+            "Amulet",
+            "Belt",
+            "Body Armour (DEX)",
+            "Body Armour (DEX/INT)",
+            "Body Armour (INT)",
+            "Body Armour (STR)",
+            "Body Armour (STR/DEX)",
+            "Body Armour (STR/INT)",
+            "Boots (DEX)",
+            "Boots (DEX/INT)",
+            "Boots (INT)",
+            "Boots (STR)",
+            "Boots (STR/DEX)",
+            "Boots (STR/INT)",
+            "Bow",
+            "Chaos Staff",
+            "Chaos Wand",
+            "Crossbow",
+            "Dagger",
+            "Fire Staff",
+            "Fire Wand",
+            "Flail",
+            "Focus",
+            "Gloves (DEX)",
+            "Gloves (DEX/INT)",
+            "Gloves (INT)",
+            "Gloves (STR)",
+            "Gloves (STR/DEX)",
+            "Gloves (STR/INT)",
+            "Helmet (DEX)",
+            "Helmet (DEX/INT)",
+            "Helmet (INT)",
+            "Helmet (STR)",
+            "Helmet (STR/DEX)",
+            "Helmet (STR/INT)",
+            "Ice Staff",
+            "Ice Wand",
+            "Lightning Staff",
+            "Lightning Wand",
+            "One Hand Axe",
+            "One Hand Mace",
+            "One Hand Sword",
+            "Physical Staff",
+            "Physical Wand",
+            "Quiver",
+            "Ring",
+            "Sceptre",
+            "Shield (DEX)",
+            "Shield (STR)",
+            "Shield (STR/DEX)",
+            "Shield (STR/INT)",
+            "Spear",
+            "Staff",
+            "Talisman",
+            "Two Hand Axe",
+            "Two Hand Mace",
+            "Two Hand Sword",
+            "Wand",
+            "Warstaff",
+        ];
+        for label in live_labels {
+            let (classes, _) = essence_label_scope(label);
+            assert!(
+                !classes.is_empty(),
+                "label {label:?} resolved to no classes"
+            );
+        }
+    }
+
+    #[test]
+    fn essence_label_scope_attribute_and_niche_bases() {
+        use poc2_engine::AttributePool as P;
+        // Attribute-split bases carry the pool refinement.
+        assert_eq!(
+            essence_label_scope("Shield (STR)"),
+            (vec!["Shield"], Some(P::Str))
+        );
+        assert_eq!(
+            essence_label_scope("Body Armour (DEX/INT)"),
+            (vec!["BodyArmour"], Some(P::DexInt))
+        );
+        // Element-flavoured weapon rows collapse onto their class.
+        assert_eq!(essence_label_scope("Chaos Wand"), (vec!["Wand"], None));
+        assert_eq!(essence_label_scope("Ice Staff"), (vec!["Staff"], None));
+        // Remaining bases-table rows (not in essence tiers today, but the
+        // join can surface them): jewels, charms, tablets, flasks, waystone
+        // tiers, Grasping Mail.
+        assert_eq!(essence_label_scope("Ruby"), (vec!["Jewel"], None));
+        assert_eq!(
+            essence_label_scope("Time-Lost Emerald"),
+            (vec!["Jewel"], None)
+        );
+        assert_eq!(essence_label_scope("Charm"), (vec!["UtilityFlask"], None));
+        assert_eq!(
+            essence_label_scope("Grasping Mail"),
+            (vec!["BodyArmour"], None)
+        );
+        assert_eq!(essence_label_scope("Life Flask"), (vec!["LifeFlask"], None));
+        assert_eq!(essence_label_scope("Mana Flask"), (vec!["ManaFlask"], None));
+        assert_eq!(
+            essence_label_scope("Precursor Tablet"),
+            (vec!["TowerAugmentation"], None)
+        );
+        assert_eq!(
+            essence_label_scope("Delirium Precursor Tablet"),
+            (vec!["TowerAugmentation"], None)
+        );
+        assert_eq!(
+            essence_label_scope("Low Tier (1-5)"),
+            (vec!["Waystone"], None)
+        );
+        assert_eq!(essence_label_scope("Uber Tier"), (vec!["Waystone"], None));
+        // bgroup-fallback aggregates resolve too.
+        assert_eq!(essence_label_scope("Waystones"), (vec!["Waystone"], None));
+        assert_eq!(
+            essence_label_scope("Flasks"),
+            (vec!["LifeFlask", "ManaFlask"], None)
+        );
+        assert!(essence_label_scope("Two-Handed Weapons")
+            .0
+            .contains(&"TwoHandSword"));
+        // Genuinely unknown labels stay empty (logged + skipped by caller).
+        assert_eq!(essence_label_scope("Mystery Box"), (vec![], None));
+    }
+
+    #[test]
+    fn essence_catalogue_classifies_corrupted_by_name() {
+        let mut b = Bundle::empty(PatchVersion::PATCH_0_4_0, "test@0000000");
+        b.essences.entries.push(serde_json::json!({
+            "id": "999",
+            "name": "Essence of Insanity",
+            "corrupt": false,
+            "tooltip": [],
+            "tier_groups": [{
+                "base_group_id": "3",
+                "label": "Belt",
+                "tiers": [{"mod_id": "6", "engine_mod_id": "EssenceInsanityBelt1", "ilvl": "1"}],
+            }],
+        }));
+        let catalogue = b.essence_catalogue();
+        assert_eq!(catalogue.len(), 1);
+        let e = &catalogue[0];
+        assert_eq!(e.quality, poc2_engine::EssenceQuality::Corrupted);
+        assert_eq!(e.id.as_str(), "CorruptedEssenceOfInsanity");
+        assert_eq!(e.class_targets.len(), 1);
+        assert_eq!(e.class_targets[0].class.as_str(), "Belt");
+        assert_eq!(e.class_targets[0].mod_id.as_str(), "EssenceInsanityBelt1");
     }
 }

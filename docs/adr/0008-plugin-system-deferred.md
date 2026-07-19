@@ -4,10 +4,20 @@
   original "deferred to v1.1" decision.
 - Original date: 2026-04-26
 - Revision date: 2026-04 (Phase F implementation)
+- **Current wiring note (2026-07):** the SDK (`crates/plugin-sdk`) and
+  wasmtime host (`crates/plugin-host`) shipped and are tested, using a
+  **raw-Wasm `(ptr, len)` ABI** (the Component Model remains future
+  work, despite the v1 title below). The app-side re-wire is governed by
+  [ADR-0014](0014-plugin-rewire-browser-host.md): a **browser-side JS
+  host** — phase 1 (strategy/rule emission via `Engine.setPluginContent`
+  + Settings → Plugins) is live; phase 2 (custom predicates +
+  recommendation emitters during planning) is pending, so
+  `plugin_dispatch` is still `None` and `ItemPredicate::Custom`
+  evaluates to false.
 
 ## Decision
 
-Ship a **Wasm Component Model plugin SDK** in v1.0 covering:
+Ship a **Wasm plugin SDK** in v1.0 covering:
 
 1. **Custom predicates** — plugins extend `ItemPredicate` with the
    new `Custom { plugin_id, name, args }` variant. Strategies + rules

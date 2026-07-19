@@ -7,6 +7,9 @@
 //! synthesized `PoeScoutSnapshot` payloads. Live poe2scout integration
 //! is covered by the unit tests inside `crates/market/src/prices.rs`.
 
+// The cache module only exists with the `net` feature.
+#![cfg(feature = "net")]
+
 use std::collections::HashMap;
 use std::time::Duration;
 

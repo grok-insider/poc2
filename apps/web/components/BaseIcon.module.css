@@ -1,0 +1,21 @@
+.icon {
+  display: block;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.fallback {
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+  color: currentColor;
+  flex: 0 0 auto;
+}

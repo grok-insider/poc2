@@ -75,7 +75,7 @@ kind = "guidance"
 [[rule]]
 id = "R360-quality-jewelry-before-listing"
 category = "pricing"
-explanation = "Quality multiplies the sell price; breach rings can reach 40% / 68% chaos res with quality."
+explanation = "Quality multiplies the sell price; quality on rings/amulets is capped at 20% (Breach Ring bases extend the cap — poe2db quality.html)."
 source = "/docs/34 §7.3 (AOEAH-GMC)"
 confidence = "community"
 
@@ -89,7 +89,7 @@ all = [
 ]
 
 [[rule.then]]
-note = "Pre-listing tip: apply matching catalysts to bring quality to 20% (or 40% via Adaptive Catalyst from breach) BEFORE listing. Catalyst-quality multiplies the matching-tag mod values."
+note = "Pre-listing tip: apply matching catalysts to bring quality to 20% BEFORE listing (Adaptive is the attribute catalyst; +5%/use like all others). Catalyst-quality multiplies the matching-tag mod values."
 priority = 70
 tag = "meta"
 [rule.then.action]

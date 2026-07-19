@@ -70,6 +70,7 @@ fn es_prefix_mod(id: &str) -> ModDefinition {
             max: 200.0,
         }],
         required_level: 70,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
         patch_range: PatchRange::ALL,
         flags: ModFlags::empty(),
@@ -97,6 +98,7 @@ fn fr_suffix_mod(id: &str) -> ModDefinition {
             max: 45.0,
         }],
         required_level: 65,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
         patch_range: PatchRange::ALL,
         flags: ModFlags::empty(),
@@ -134,6 +136,48 @@ fn es_target_goal() -> Goal {
     }
 }
 
+/// A goal satisfied by an item carrying `es` EnergyShield prefixes and `fr`
+/// FireResistance suffixes. Tier-fix (Divine/Fracture) only fires once the item
+/// already meets the goal target, so these tests use a goal matched to their
+/// built-item fixture to exercise the legitimate "polish the values" path.
+fn es_goal(es: u8, fr: u8) -> Goal {
+    let mut prefixes = vec![];
+    if es > 0 {
+        prefixes.push(TargetSpec {
+            concept: Some(ConceptId::from("EnergyShield")),
+            concept_any: vec![],
+            affix: Some(AffixType::Prefix),
+            count: es,
+            min_tier: Some(1),
+            allow_hybrid: true,
+        });
+    }
+    let mut suffixes = vec![];
+    if fr > 0 {
+        suffixes.push(TargetSpec {
+            concept: Some(ConceptId::from("FireResistance")),
+            concept_any: vec![],
+            affix: Some(AffixType::Suffix),
+            count: fr,
+            min_tier: Some(1),
+            allow_hybrid: true,
+        });
+    }
+    Goal {
+        target: poc2_strategies::Target {
+            prefixes,
+            suffixes,
+            constraints: vec![],
+        },
+        abandon_criteria: vec![],
+        budget: DivEquiv {
+            min: 40.0,
+            expected: 100.0,
+            max: 200.0,
+        },
+    }
+}
+
 // Kept for the future "deterministic ES chain rediscovery" test once a
 // dedicated `es-body-armour-deterministic.toml` strategy lands in
 // `crates/strategies/strategies/`. The current tests exercise the v2
@@ -157,6 +201,7 @@ fn run_plan(item: Item, registry: ModRegistry, risk: f64) -> Vec<poc2_advisor::R
         valuator: &valuator,
         stash: &stash,
         patch: PatchVersion::PATCH_0_4_0,
+        league: poc2_engine::patch::League::current(),
         plugin_dispatch: None,
         base_registry: None,
         trained_models: None,
@@ -267,7 +312,7 @@ fn b2_tier_fix_emits_fracture_on_max_rolled_keeper_with_4_mods() {
     let strategies = StrategyRegistry::default();
     let resolver = DefaultCurrencyResolver::new();
     let stash = Stash::unlimited();
-    let goal = es_target_goal();
+    let goal = es_goal(2, 1); // item carries 2 ES + 2 FR — satisfies the goal
     let ctx = PredicateContext::new(&registry).with_stash(&stash);
     let cands = generate_candidates_with_goal(
         &item,
@@ -277,8 +322,10 @@ fn b2_tier_fix_emits_fracture_on_max_rolled_keeper_with_4_mods() {
         &resolver,
         &stash,
         PatchVersion::PATCH_0_4_0,
+        poc2_engine::patch::League::current(),
         Some(&goal),
         &registry,
+        None,
     );
     let has_fracture = cands.iter().any(|c| match &c.action {
         poc2_advisor::AdvisorAction::ApplyCurrency { currency, .. } => {
@@ -314,7 +361,7 @@ fn b2_tier_fix_emits_divine_on_sub_max_keeper() {
     let strategies = StrategyRegistry::default();
     let resolver = DefaultCurrencyResolver::new();
     let stash = Stash::unlimited();
-    let goal = es_target_goal();
+    let goal = es_goal(1, 0); // item carries 1 ES keeper — satisfies the goal
     let ctx = PredicateContext::new(&registry).with_stash(&stash);
     let cands = generate_candidates_with_goal(
         &item,
@@ -324,8 +371,10 @@ fn b2_tier_fix_emits_divine_on_sub_max_keeper() {
         &resolver,
         &stash,
         PatchVersion::PATCH_0_4_0,
+        poc2_engine::patch::League::current(),
         Some(&goal),
         &registry,
+        None,
     );
     let has_divine = cands.iter().any(|c| match &c.action {
         poc2_advisor::AdvisorAction::ApplyCurrency { currency, .. } => {
@@ -336,6 +385,57 @@ fn b2_tier_fix_emits_divine_on_sub_max_keeper() {
     assert!(
         has_divine,
         "B.2: Divine candidate must be emitted for sub-max keeper. Got: {:?}",
+        cands.iter().map(|c| &c.action).collect::<Vec<_>>()
+    );
+}
+
+/// Tier-fix gate: a partial item (one sub-max keeper, but a multi-mod goal it
+/// does NOT yet satisfy) must NOT get a premature Divine/Fracture — building
+/// toward the target takes priority. Mirrors the reported "Magic body armour →
+/// premature Divine" bug.
+#[test]
+fn b2_tier_fix_suppressed_until_goal_satisfied() {
+    use poc2_advisor::candidate::generate_candidates_with_goal;
+    use poc2_strategies::PredicateContext;
+
+    let registry = ModRegistry::from_mods(vec![es_prefix_mod("ES_Tier1")], vec![]);
+    let mut item = body_armour(Rarity::Magic);
+    item.prefixes.push(ModRoll {
+        mod_id: ModId::from("ES_Tier1"),
+        affix_type: AffixType::Prefix,
+        kind: ModKind::Explicit,
+        values: smallvec![120.0], // sub-max — would trigger Divine without the gate
+        is_fractured: false,
+    });
+
+    let rules = RuleSet::from_rules(poc2_rules::seed_rules());
+    let strategies = StrategyRegistry::default();
+    let resolver = DefaultCurrencyResolver::new();
+    let stash = Stash::unlimited();
+    let goal = es_target_goal(); // needs 3 ES + 1 FR — the 1-mod item is NOT built
+    let ctx = PredicateContext::new(&registry).with_stash(&stash);
+    let cands = generate_candidates_with_goal(
+        &item,
+        &ctx,
+        &rules,
+        &strategies,
+        &resolver,
+        &stash,
+        PatchVersion::PATCH_0_4_0,
+        poc2_engine::patch::League::current(),
+        Some(&goal),
+        &registry,
+        None,
+    );
+    let has_tier_fix = cands.iter().any(|c| match &c.action {
+        poc2_advisor::AdvisorAction::ApplyCurrency { currency, .. } => {
+            currency.as_str() == "DivineOrb" || currency.as_str() == "FracturingOrb"
+        }
+        _ => false,
+    });
+    assert!(
+        !has_tier_fix,
+        "tier-fix must be suppressed on a partial item (goal not satisfied). Got: {:?}",
         cands.iter().map(|c| &c.action).collect::<Vec<_>>()
     );
 }
@@ -383,8 +483,10 @@ fn b7_real_strategy_es_body_armour_emits_perfect_transmute_at_depth_1() {
         &resolver,
         &stash,
         PatchVersion::PATCH_0_4_0,
+        poc2_engine::patch::League::current(),
         Some(&goal),
         &registry,
+        None,
     );
 
     let strategy_cand = cands.iter().find(|c| {
@@ -448,6 +550,8 @@ fn b6_omen_aware_reveals_appear_when_hidden_desecrated_present() {
         bone_size: poc2_engine::BoneSize::Preserved,
         bone_subtype: poc2_engine::BoneSubtype::Rib,
         abyss_lord: Some(poc2_engine::AbyssLord::Amanamu),
+        min_mod_level: 0,
+        otherworldly: false,
     });
     item.prefixes.push(ModRoll {
         mod_id: ModId::from("ES_Tier1"),
@@ -471,8 +575,10 @@ fn b6_omen_aware_reveals_appear_when_hidden_desecrated_present() {
         &resolver,
         &stash,
         PatchVersion::PATCH_0_4_0,
+        poc2_engine::patch::League::current(),
         Some(&goal),
         &registry,
+        None,
     );
     let any_reveal_with_bone_and_omen = cands.iter().any(|c| {
         matches!(
@@ -495,4 +601,117 @@ fn b6_omen_aware_reveals_appear_when_hidden_desecrated_present() {
             })
             .collect::<Vec<_>>()
     );
+}
+
+/// Honest P(reach goal): the display metrics describe the user's CURRENT item.
+/// A Magic body armour carrying one ES prefix satisfies the ES spec of an
+/// `es_goal(1, 1)` (1 ES + 1 FR) but not the FR spec → `goal_progress == 0.5`,
+/// and the headline `expected_prob` (reliability × that closeness) is a LOW,
+/// honest number — not the old ~90% raw step-execution probability — bounded by
+/// `expected_prob <= goal_progress`.
+#[test]
+fn honest_expected_prob_reflects_current_item_progress() {
+    let registry = ModRegistry::from_mods(
+        vec![es_prefix_mod("ES_Tier1"), fr_suffix_mod("FR_Tier1")],
+        vec![],
+    );
+    let mut item = body_armour(Rarity::Magic);
+    item.prefixes.push(ModRoll {
+        mod_id: ModId::from("ES_Tier1"),
+        affix_type: AffixType::Prefix,
+        kind: ModKind::Explicit,
+        values: smallvec![150.0],
+        is_fractured: false,
+    });
+
+    let strategies = StrategyRegistry::default();
+    let rules = RuleSet::from_rules(poc2_rules::seed_rules());
+    let resolver = DefaultCurrencyResolver::new();
+    let valuator = Valuator::default();
+    let stash = Stash::unlimited();
+    let input = PlanInput {
+        item,
+        goal: es_goal(1, 1), // 1 ES + 1 FR spec; the single ES satisfies the ES spec
+        rules: &rules,
+        strategies: &strategies,
+        registry: &registry,
+        resolver: &resolver,
+        valuator: &valuator,
+        stash: &stash,
+        patch: PatchVersion::PATCH_0_4_0,
+        league: poc2_engine::patch::League::current(),
+        plugin_dispatch: None,
+        base_registry: None,
+        trained_models: None,
+        config: BeamConfig {
+            width: 6,
+            depth: 4,
+            risk: 0.5,
+            top_n: 5,
+            seed: 0,
+            mc_samples: 1,
+            weights: ScoringWeights::default(),
+            trained_uplift_weight: 1000.0,
+        },
+    };
+    let recs = plan(&input);
+    let top = recs.first().expect("planner returned no recommendation");
+    assert!(
+        (top.goal_progress - 0.5).abs() < 1e-9,
+        "current item satisfies 1 of 2 specs → goal_progress 0.5, got {}",
+        top.goal_progress
+    );
+    assert!(
+        top.expected_prob <= top.goal_progress + 1e-9,
+        "expected_prob (reliability × closeness) must not exceed goal_progress; \
+         prob={} progress={}",
+        top.expected_prob,
+        top.goal_progress
+    );
+    assert!(
+        top.expected_prob < 0.9,
+        "headline P(reach goal) must be honest (not the old ~90% step-prob), got {}",
+        top.expected_prob
+    );
+}
+
+/// The flip side: an item that already satisfies the goal reports full progress
+/// (`goal_progress == 1.0`, `expected_prob == 1.0`) and the planner stops.
+#[test]
+fn satisfied_goal_reports_full_progress_and_stop() {
+    let registry = ModRegistry::from_mods(
+        vec![
+            es_prefix_mod("ES_T1"),
+            es_prefix_mod("ES_T2"),
+            es_prefix_mod("ES_T3"),
+            fr_suffix_mod("FR_T1"),
+        ],
+        vec![],
+    );
+    let mut item = body_armour(Rarity::Rare);
+    for id in ["ES_T1", "ES_T2", "ES_T3"] {
+        item.prefixes.push(ModRoll {
+            mod_id: ModId::from(id),
+            affix_type: AffixType::Prefix,
+            kind: ModKind::Explicit,
+            values: smallvec![150.0],
+            is_fractured: false,
+        });
+    }
+    item.suffixes.push(ModRoll {
+        mod_id: ModId::from("FR_T1"),
+        affix_type: AffixType::Suffix,
+        kind: ModKind::Explicit,
+        values: smallvec![40.0],
+        is_fractured: false,
+    });
+    let recs = run_plan(item, registry, 0.5);
+    let top = recs.first().expect("planner returned no recommendation");
+    assert_eq!(top.goal_progress, 1.0, "satisfied goal ⇒ full progress");
+    assert!(
+        (top.expected_prob - 1.0).abs() < 1e-9,
+        "satisfied goal ⇒ P(reach goal) == 1.0, got {}",
+        top.expected_prob
+    );
+    assert!(matches!(top.action, poc2_advisor::AdvisorAction::Stop));
 }

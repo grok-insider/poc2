@@ -16,15 +16,19 @@
 #![allow(clippy::too_many_lines)]
 
 pub mod build;
+pub mod diff;
 pub mod error;
 pub mod http;
 pub mod normalize;
 pub mod sources;
+pub mod watch;
 
 pub use build::{build_bundle, BuildOptions};
+pub use diff::{diff_bundles, render_markdown, BundleDiff, SectionDelta};
 pub use error::{PipelineError, PipelineResult};
 pub use normalize::coe_to_bundle::{
     load_coe_aliases, render_alias_suggestions_toml, suggest_aliases_for_unmatched,
     unmatched_coe_mods, AliasCandidate, AliasSuggestion, CoeAlias, CoeAliasTable, JoinReport,
     MapStrategy, SuggestionSource,
 };
+pub use watch::{check as watch_check, UpstreamState, WatchReport};

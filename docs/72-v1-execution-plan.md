@@ -1,5 +1,11 @@
 # v1.0 Execution Plan
 
+> **HISTORICAL — superseded.** v1.0 shipped (all phases A–G completed);
+> the Tauri 2 + Svelte 5 app, NixOS-only scope, and Tauri commands this
+> plan references were later replaced by the web/WASM app + Electron
+> shell (ADR-0010). Unchecked boxes below are stale, not open work — see
+> [`70-roadmap.md`](70-roadmap.md) for current status.
+
 > Companion to [`70-roadmap.md`](70-roadmap.md). This document tracks the
 > phase-level execution of the remaining work to v1.0. Each section gets
 > a checkbox per deliverable; commits tick them as work lands.

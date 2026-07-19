@@ -1,0 +1,49 @@
+.dock {
+  grid-area: dock;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  z-index: 20;
+}
+.ledger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.risk {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.bars {
+  display: inline-flex;
+  gap: 3px;
+  align-items: flex-end;
+}
+.bars i {
+  width: 5px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  display: inline-block;
+}
+.bars[data-risk="low"] i:nth-child(1),
+.bars[data-risk="low"] i:nth-child(2) {
+  background: var(--success);
+}
+.bars[data-risk="medium"] i:nth-child(1),
+.bars[data-risk="medium"] i:nth-child(2) {
+  background: var(--warn);
+}
+.bars[data-risk="high"] i:nth-child(1) {
+  background: var(--danger);
+}

@@ -1,7 +1,19 @@
 # ADR-0001 — Tech stack: Tauri 2 + Rust + Svelte 5
 
-- Status: Accepted
+- Status: **Frontend superseded** (Rust-core decisions stand)
 - Date: 2026-04-26
+- Superseded note (2026-06): the desktop **frontend** stack here (Tauri 2 +
+  Svelte 5 + Vite + **pnpm**) was replaced by a Next.js 16 + React 19 web app
+  that runs the engine in WebAssembly, with **Bun** as the package manager
+  (run from the repo root). The trigger was exactly the WebKitGTK-under-Hyprland
+  rendering quirk noted in "Consequences → Negative" below (the app became
+  effectively unclickable). The Rust-core decisions (Rust 2021, MSRV 1.82,
+  Rust-side engine/IO) are unchanged. See `CHANGELOG.md` `[Unreleased]` and
+  `AGENTS.md`.
+- Amendment (2026-06-10): the options table below rejected Electron citing
+  "no Rust integration" — that objection is moot now the engine ships as
+  WASM. [ADR-0010](0010-desktop-shell-electron-cross-platform.md) adopts
+  Electron for the desktop shell around the web app.
 
 ## Context
 

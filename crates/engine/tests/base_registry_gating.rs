@@ -71,6 +71,7 @@ fn mk_prefix_mod(id: &str, group: &str) -> ModDefinition {
         }],
         stats: smallvec![],
         required_level: 1,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
         patch_range: PatchRange::ALL,
         flags: ModFlags::empty(),

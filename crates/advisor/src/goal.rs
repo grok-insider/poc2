@@ -108,7 +108,25 @@ pub fn should_abandon_with_ctx(goal: &Goal, item: &Item, ctx: &PredicateContext<
 }
 
 /// Is a single [`TargetSpec`] satisfied by a slot's mods?
-fn spec_satisfied(spec: &TargetSpec, slot: &[ModRoll], registry: &ModRegistry) -> bool {
+///
+/// `pub(crate)` because [`crate::featurize::target_match_bitmap`] uses the
+/// SAME predicate per spec: `FeatureVec.target_match` bit `i` means "spec
+/// `i` fully satisfied" (count-aware), so the bitmap-based terminal
+/// predicates used in training agree exactly with [`is_satisfied`]
+/// (modulo `target.constraints`, which the bitmap cannot carry).
+pub(crate) fn spec_satisfied(spec: &TargetSpec, slot: &[ModRoll], registry: &ModRegistry) -> bool {
+    spec.count == 0 || spec_match_count(spec, slot, registry) >= spec.count
+}
+
+/// How many mods in `slot` match the spec's concept set (honouring
+/// `affix` and `allow_hybrid`), saturating at `u8::MAX`.
+///
+/// The count feeds two consumers: [`spec_satisfied`] (`matches >= count`)
+/// and [`crate::featurize`]'s per-spec progress encoding
+/// (`FeatureVec.extra_flags`), which lets the trained policy distinguish
+/// "1 of 3 resistances landed" from "2 of 3" — states that are otherwise
+/// identical in the satisfaction bitmap.
+pub(crate) fn spec_match_count(spec: &TargetSpec, slot: &[ModRoll], registry: &ModRegistry) -> u8 {
     // Build the candidate concept set.
     let mut concepts: Vec<&ConceptId> = Vec::new();
     if let Some(c) = &spec.concept {
@@ -143,13 +161,10 @@ fn spec_satisfied(spec: &TargetSpec, slot: &[ModRoll], registry: &ModRegistry) -
         }
         let hits = def.concept_set.iter().any(|c| concepts.contains(&c));
         if hits {
-            matches += 1;
-            if matches >= spec.count {
-                return true;
-            }
+            matches = matches.saturating_add(1);
         }
     }
-    spec.count == 0 || matches >= spec.count
+    matches
 }
 
 #[cfg(test)]
@@ -196,6 +211,7 @@ mod tests {
                 max: 80.0
             }],
             required_level: 75,
+            tier: None,
             allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
             patch_range: PatchRange::ALL,
             flags,

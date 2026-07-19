@@ -220,6 +220,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: None,
+            min_mod_level: 0,
+            otherworldly: false,
         });
         FracturingOrb::new()
             .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
@@ -251,6 +253,8 @@ mod tests {
                 bone_size: BoneSize::Preserved,
                 bone_subtype: BoneSubtype::Rib,
                 abyss_lord: None,
+                min_mod_level: 0,
+                otherworldly: false,
             });
             FracturingOrb::new()
                 .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
@@ -280,6 +284,8 @@ mod tests {
                 bone_size: BoneSize::Preserved,
                 bone_subtype: BoneSubtype::Rib,
                 abyss_lord: None,
+                min_mod_level: 0,
+                otherworldly: false,
             });
             FracturingOrb::new()
                 .apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens))
@@ -322,6 +328,8 @@ mod tests {
             bone_size: BoneSize::Preserved,
             bone_subtype: BoneSubtype::Rib,
             abyss_lord: Some(AbyssLord::Kurgal),
+            min_mod_level: 0,
+            otherworldly: false,
         });
         let r = FracturingOrb::new().apply(&mut item, &mut ctx(&reg, &mut rng, &mut omens));
         assert!(matches!(r, Err(EngineError::FractureHiddenMod)));

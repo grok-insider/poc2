@@ -270,3 +270,80 @@ fn apply_rejects_illegal_class_via_registry() {
         "Cranium on BodyArmour should error; got {r:?}"
     );
 }
+
+// -------------------------------------------------------------------------
+// Apply-time gating across every Collarbone jewellery class (complements the
+// `can_apply_to`-only `collarbone_class_gate_table`).
+// -------------------------------------------------------------------------
+
+#[test]
+fn collarbone_accepted_on_jewellery_classes() {
+    // Exact strings come from BoneSubtype::Collarbone.valid_classes().
+    assert_eq!(
+        BoneSubtype::Collarbone.valid_classes(),
+        &["Ring", "Amulet", "Belt", "Talisman"]
+    );
+    let registry = ModRegistry::from_mods(vec![], vec![]);
+    for class in BoneSubtype::Collarbone.valid_classes() {
+        let bone = Bone::new(BoneSize::Preserved, BoneSubtype::Collarbone);
+        let mut item = item_with_base(class);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
+        let mut omens = OmenSet::new();
+        let r = apply_currency(&bone, &mut item, &registry, &mut rng, PATCH, &mut omens);
+        assert!(
+            r.is_ok(),
+            "Preserved Collarbone should apply on {class}; got {r:?}"
+        );
+        assert!(
+            item.hidden_desecrated.is_some(),
+            "Collarbone must seed a hidden slot on {class}"
+        );
+    }
+}
+
+// -------------------------------------------------------------------------
+// Single-lord consumption: two distinct lord omens active, exactly one is
+// burned by a successful Jawbone apply on a weapon; the other remains.
+// -------------------------------------------------------------------------
+
+#[test]
+fn two_lord_omens_one_consumed_one_remains() {
+    let registry = ModRegistry::from_mods(vec![], vec![]);
+    let bone = Bone::new(BoneSize::Preserved, BoneSubtype::Jawbone);
+    let mut item = item_with_base("OneHandSword");
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(0);
+
+    let mut omens = OmenSet::new();
+    omens.push(Omen::blackblooded()); // Kurgal
+    omens.push(Omen::liege()); // Amanamu
+    assert_eq!(omens.len(), 2, "two distinct lord omens active");
+
+    let r = apply_currency(&bone, &mut item, &registry, &mut rng, PATCH, &mut omens);
+    assert!(
+        r.is_ok(),
+        "Jawbone on a weapon with a lord omen should succeed; got {r:?}"
+    );
+
+    // Exactly one abyss_lord set on the freshly-seeded slot.
+    let slot = item
+        .hidden_desecrated
+        .as_ref()
+        .expect("apply must seed a hidden desecrated slot");
+    assert!(
+        slot.abyss_lord.is_some(),
+        "the consumed lord omen must tag the slot with an abyss lord"
+    );
+
+    // Exactly one lord omen consumed; the other remains in the active set.
+    assert_eq!(
+        omens.len(),
+        1,
+        "exactly one of the two lord omens must be consumed"
+    );
+    // And the survivor is still an active lord-targeting omen.
+    assert_eq!(
+        omens.iter().count(),
+        1,
+        "one lord omen should remain active"
+    );
+}

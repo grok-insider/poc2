@@ -1,11 +1,11 @@
 //! Phase E coverage regression for the bundle's mod registry.
 //!
-//! These tests assert the *minimum* number of desecrated and Vaal-corruption
-//! mods land in `bundle.mods` for each gear class enumerated in
-//! `docs/80-crafter-helper-v2-plan.md` §5.E.3. The advisor relies on these
-//! pools when planning omen-aware desecrate flows and when scoring Vaal
-//! corruption candidates; a regression that drops the pool would silently
-//! shrink the recommendation set.
+//! These tests assert the *minimum* number of desecrated mods that land in
+//! `bundle.mods` for each gear class (floors regenerated from poe2db's 0.5
+//! per-class tables), and that the retired Vaal-implicit fixture stays
+//! empty. The advisor relies on the desecrated pools when planning
+//! omen-aware desecrate flows; a regression that drops a pool would
+//! silently shrink the recommendation set.
 //!
 //! ## Why this lives in `pipeline/tests/` (not `crates/data/tests/`)
 //!
@@ -54,30 +54,55 @@ fn body_armour_has_minimum_desecrated_coverage() {
     );
 }
 
+/// The Vaal-implicit fixture is retired (0.5 "Return of the Ancients"):
+/// its 13 VaalImplicit_* entries were fabricated. The real corruption
+/// pool (`Corruption*` mods) ships via RePoE-fork, so a fixture-only
+/// bundle must contain zero Corrupted-kind mods — anything else means a
+/// fabricated implicit re-entered through the fixture path.
 #[test]
-fn body_armour_has_minimum_vaal_implicit_coverage() {
+fn vaal_implicit_fixture_is_retired() {
     let bundle = fixture_only_bundle();
-    let class = ItemClassId::from("BodyArmour");
-    let count = bundle.count_mods_by_kind_for_class(&class, ModKind::Corrupted);
-    assert!(
-        count >= 9,
-        "BodyArmour Vaal implicit coverage too low: got {count}, want ≥ 9"
+    let count = bundle
+        .mods
+        .iter()
+        .filter(|m| m.kind == ModKind::Corrupted)
+        .count();
+    assert_eq!(
+        count, 0,
+        "fixture-only bundle must carry no Corrupted mods, got {count}"
     );
 }
 
-/// The plan calls for symmetric coverage tests on the other gear classes
-/// the v2 spec lists. Numbers are conservative minimums sourced from
-/// poe2db's published Desecrated_Modifiers tables.
+/// Coverage floor per gear class, set to the exact distinct-mod counts
+/// regenerated from poe2db's 0.5 per-class Desecrated Modifiers tables
+/// (equipment pool = the global "Desecrated Mods /196" page; Jewel = the
+/// separate ilvl-1 "Lightless" pool). A drop below any floor means the
+/// fixture lost real pool entries.
 #[test]
 fn gear_class_desecrated_coverage_meets_minimums() {
     let bundle = fixture_only_bundle();
     let cases: &[(&str, usize)] = &[
-        ("Helmet", 6),
-        ("Boots", 6),
-        ("Gloves", 6),
-        ("Ring", 6),
-        ("Amulet", 6),
-        ("Belt", 6),
+        ("Amulet", 31),
+        ("Belt", 21),
+        ("BodyArmour", 13),
+        ("Boots", 16),
+        ("Bow", 17),
+        ("Buckler", 14),
+        ("Crossbow", 15),
+        ("Focus", 18),
+        ("Gloves", 18),
+        ("Helmet", 17),
+        ("Jewel", 44),
+        ("OneHandMace", 16),
+        ("Quiver", 8),
+        ("Ring", 22),
+        ("Shield", 20),
+        ("Spear", 17),
+        ("Staff", 12),
+        ("Talisman", 18),
+        ("TwoHandMace", 16),
+        ("Wand", 15),
+        ("Warstaff", 12),
     ];
     for (class_name, expected) in cases {
         let class = ItemClassId::from(*class_name);
@@ -85,27 +110,6 @@ fn gear_class_desecrated_coverage_meets_minimums() {
         assert!(
             count >= *expected,
             "{class_name} desecrated coverage too low: got {count}, want ≥ {expected}"
-        );
-    }
-}
-
-#[test]
-fn gear_class_vaal_implicit_coverage_meets_minimums() {
-    let bundle = fixture_only_bundle();
-    let cases: &[(&str, usize)] = &[
-        ("Helmet", 3),
-        ("Boots", 2),
-        ("Gloves", 2),
-        ("Ring", 2),
-        ("Amulet", 2),
-        ("Belt", 2),
-    ];
-    for (class_name, expected) in cases {
-        let class = ItemClassId::from(*class_name);
-        let count = bundle.count_mods_by_kind_for_class(&class, ModKind::Corrupted);
-        assert!(
-            count >= *expected,
-            "{class_name} Vaal implicit coverage too low: got {count}, want ≥ {expected}"
         );
     }
 }

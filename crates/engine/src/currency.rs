@@ -8,7 +8,10 @@
 //! ## Module layout
 //!
 //! - this file — trait, [`ApplyContext`], dispatch helpers
-//! - [`basic`] — classic orbs (Transmute / Aug / Alch / Regal / Exalt / Chaos / Annul / Divine / Vaal) plus Greater / Perfect variants
+//! - `common` — shared sampling/removal kernel (crate-internal)
+//! - [`basic`] — classic orbs (Transmute / Aug / Alch / Regal / Exalt / Chaos / Annul / Divine)
+//! - [`variants`] — Greater / Perfect tier variants of the basic orbs
+//! - [`vaal`] — Vaal Orb corruption outcomes
 //! - `essence` — essence application (lands in M2.5)
 //! - `bone` — desecration bones + Well-of-Souls reveal (M2.5)
 //! - `catalyst` — jewelry catalyst quality (M2.5)
@@ -16,26 +19,32 @@
 //! - `hinekora` — Hinekora's Lock preview / commit (M2.5)
 //! - `recombinator` — Recombinator (M2.5)
 
+pub mod alloy;
 pub mod basic;
 pub mod bone;
 pub mod catalyst;
+pub(crate) mod common;
 pub mod essence;
 pub mod fracturing;
 pub mod hinekora;
 pub mod recombinator;
 pub mod resolver;
+pub mod vaal;
+pub mod variants;
 
+pub use alloy::Alloy;
 pub use bone::{reveal_at_well_of_souls, sample_reveal_options, Bone, RevealOptions};
-pub use catalyst::{
-    Catalyst, CATALYST_INCREMENT_ADAPTIVE, CATALYST_INCREMENT_DEFAULT, CATALYST_QUALITY_CAP,
-};
-pub use essence::{Essence, EssenceQuality};
+pub use catalyst::{Catalyst, CatalystTarget, CATALYST_INCREMENT_DEFAULT, CATALYST_QUALITY_CAP};
+pub use common::{collect_removable_filtered, enumerate_eligible_mods, BASIC_ORB_EXCLUDES};
+pub use essence::{Essence, EssenceQuality, EssenceTarget};
 pub use fracturing::FracturingOrb;
 pub use hinekora::HinekorasLock;
 pub use recombinator::{
-    compute_recombine_success_chance, recombine, recombine_with_chance, RecombinatorOutcome,
+    compute_recombine_success_chance, recombinator_available, recombine, recombine_gated,
+    recombine_with_chance, RecombinatorOutcome,
 };
 pub use resolver::{CurrencyResolver, DefaultCurrencyResolver};
+pub use variants::min_mod_level_floor;
 
 use rand::RngCore;
 
@@ -167,11 +176,19 @@ pub struct ApplyContext<'a> {
     pub base_registry: &'a crate::base_registry::BaseRegistry,
     pub rng: &'a mut dyn RngCore,
     pub patch: PatchVersion,
+    /// Which league ruleset is in effect. Gates Standard-only items
+    /// (Recombinator, Omen of Corruption / Homogenising in 0.5). Defaults to
+    /// the current challenge league via [`ApplyContext::new`] /
+    /// [`ApplyContext::new_without_bases`]; use
+    /// [`ApplyContext::with_league`] to override.
+    pub league: crate::patch::League,
     pub omens: &'a mut crate::omen::OmenSet,
 }
 
 impl<'a> ApplyContext<'a> {
-    /// Construct an `ApplyContext` with an explicit base registry.
+    /// Construct an `ApplyContext` with an explicit base registry. League
+    /// defaults to the current challenge league; chain
+    /// [`Self::with_league`] to override.
     pub fn new(
         registry: &'a ModRegistry,
         base_registry: &'a crate::base_registry::BaseRegistry,
@@ -184,6 +201,7 @@ impl<'a> ApplyContext<'a> {
             base_registry,
             rng,
             patch,
+            league: crate::patch::League::current(),
             omens,
         }
     }
@@ -198,6 +216,15 @@ impl<'a> ApplyContext<'a> {
         omens: &'a mut crate::omen::OmenSet,
     ) -> Self {
         Self::new(registry, &crate::base_registry::EMPTY, rng, patch, omens)
+    }
+
+    /// Override the league ruleset (builder-style). Standard allows legacy
+    /// items (Recombinator, Corruption omen) that are disabled in the
+    /// challenge league.
+    #[must_use]
+    pub fn with_league(mut self, league: crate::patch::League) -> Self {
+        self.league = league;
+        self
     }
 }
 

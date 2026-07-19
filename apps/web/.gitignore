@@ -1,0 +1,32 @@
+# dependencies
+/node_modules/
+
+# next.js build output / static export
+.next/
+out/
+
+# generated WebAssembly engine (rebuild with `bash scripts/build-wasm.sh`)
+/lib/wasm/
+/public/wasm/
+
+# the data bundle is a static-asset copy of an artifact (also ignored at repo root)
+/public/poc2.bundle.json.gz
+
+# scraped per-base icons (regenerate with `cargo run -p poc2-pipeline --bin fetch-base-icons`)
+/public/base-icons/
+# scraped unique icons (regenerate with `cargo run -p poc2-pipeline --bin fetch-unique-icons`)
+/public/unique-icons/
+# Genesis Tree art (regenerate with `cargo run -p poc2-pipeline --bin fetch-genesis-assets`)
+/public/genesis-icons/
+# mod → trade-API stat-id table (regenerate with `cargo run -p poc2-pipeline --bin fetch-trade-stats`)
+/public/trade-stats.json
+# vendored Tesseract.js OCR runtime — worker + core wasm + eng model
+# (regenerate with `bun run ocr:assets`; large blob, fetched not committed)
+/public/ocr/
+# trained advisor Q-tables (optional; produce with `train-advisor` and copy
+# here — the worker loads it at boot when present; never committed)
+/public/trained-models.json
+
+# misc
+*.tsbuildinfo
+next-env.d.ts

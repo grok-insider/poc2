@@ -124,6 +124,7 @@ fn fixture_bundle() -> Bundle {
         ],
         stats: smallvec![],
         required_level: 8,
+        tier: Some(2),
         allowed_item_classes: smallvec![ItemClassId::from("Boots")],
         patch_range: PatchRange::ALL,
         flags: ModFlags::HYBRID,
@@ -232,4 +233,114 @@ fn invalid_patch_range_is_caught() {
     };
     let err = b.validate().unwrap_err();
     assert!(format!("{err}").contains("patch range"));
+}
+
+// -------------------------------------------------------------------------
+// §5.3 Verisium Alloy wiring — `alloys` BundleSection + alloy_catalogue() +
+// resolver seeding. The alloys section is `#[serde(default)]`, so pre-0.5
+// bundles (no `alloys` key) must still load.
+// -------------------------------------------------------------------------
+
+use poc2_data::BUNDLE_SCHEMA_VERSION;
+use poc2_engine::ids::CurrencyId;
+use poc2_engine::{CurrencyResolver, DefaultCurrencyResolver};
+
+/// A single well-formed alloy entry: `{ id, name, engine_mod_id }`.
+fn runic_ward_alloy_entry() -> serde_json::Value {
+    serde_json::json!({
+        "id": "AlloyRunicWard",
+        "name": "Verisium Alloy of Runic Ward",
+        "engine_mod_id": "RunicWardCrafted",
+    })
+}
+
+#[test]
+fn bundle_alloys_section_round_trips() {
+    let mut b = Bundle::empty(PatchVersion::PATCH_0_5_0, "test");
+    b.alloys.entries.push(runic_ward_alloy_entry());
+
+    let s = serde_json::to_string(&b).unwrap();
+    let back: Bundle = serde_json::from_str(&s).unwrap();
+
+    assert_eq!(
+        back.alloys.entries.len(),
+        1,
+        "alloys section should survive the round-trip"
+    );
+    assert_eq!(back.header.schema_version, BUNDLE_SCHEMA_VERSION);
+}
+
+#[test]
+fn alloy_catalogue_extracts_typed_alloys() {
+    let mut b = Bundle::empty(PatchVersion::PATCH_0_5_0, "test");
+    b.alloys.entries.push(runic_ward_alloy_entry());
+    // A malformed entry missing both `id` and `engine_mod_id` must be skipped.
+    b.alloys
+        .entries
+        .push(serde_json::json!({ "name": "Headless Alloy" }));
+
+    let catalogue = b.alloy_catalogue();
+    assert_eq!(
+        catalogue.len(),
+        1,
+        "only the well-formed entry should be extracted; malformed entries are skipped"
+    );
+    let alloy = &catalogue[0];
+    assert_eq!(alloy.id.as_str(), "AlloyRunicWard");
+    assert_eq!(alloy.target_mod, ModId::from("RunicWardCrafted"));
+}
+
+#[test]
+fn alloy_catalogue_seeds_resolver_and_resolves() {
+    let mut b = Bundle::empty(PatchVersion::PATCH_0_5_0, "test");
+    b.alloys.entries.push(runic_ward_alloy_entry());
+
+    let catalogue = b.alloy_catalogue();
+    let resolver = DefaultCurrencyResolver::new().with_alloys(catalogue);
+
+    assert!(
+        resolver
+            .resolve(&CurrencyId::from("AlloyRunicWard"))
+            .is_some(),
+        "seeded alloy id should resolve to a currency trait object"
+    );
+    assert!(
+        resolver
+            .resolve(&CurrencyId::from("AlloyNonexistent"))
+            .is_none(),
+        "unknown alloy id must resolve to None"
+    );
+}
+
+#[test]
+fn empty_bundle_has_empty_alloys() {
+    let b = Bundle::empty(PatchVersion::PATCH_0_5_0, "test");
+    assert!(
+        b.alloy_catalogue().is_empty(),
+        "a fresh bundle carries no alloys"
+    );
+
+    // The empty bundle round-trips fine.
+    let s = serde_json::to_string(&b).unwrap();
+    let back: Bundle = serde_json::from_str(&s).unwrap();
+    assert!(back.alloy_catalogue().is_empty());
+
+    // Back-compat: a bundle JSON with NO `alloys` key still loads via
+    // `#[serde(default)]`. Strip the key from a serialized bundle and confirm
+    // it deserializes to an empty alloys section.
+    let mut value: serde_json::Value = serde_json::from_str(&s).unwrap();
+    value
+        .as_object_mut()
+        .expect("bundle serializes as a JSON object")
+        .remove("alloys");
+    assert!(
+        value.get("alloys").is_none(),
+        "alloys key should have been removed for the back-compat check"
+    );
+    let legacy: Bundle = serde_json::from_value(value).unwrap();
+    assert!(
+        legacy.alloy_catalogue().is_empty(),
+        "pre-0.5 bundle with no alloys key must default to an empty section"
+    );
+    assert_eq!(legacy.alloys.entries.len(), 0);
 }

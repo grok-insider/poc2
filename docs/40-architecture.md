@@ -1,63 +1,85 @@
 # Architecture
 
-> System architecture for Path of Crafting 2.
+> System architecture for Path of Crafting 2 (current: web/WASM app +
+> optional Electron desktop shell, bundle schema v3, patch 0.5).
 
 ## Layers
 
 ```
                             ┌──────────────────────┐
-                            │   ADVISOR (M4)       │
-                            │  beam-search planner │◄───── user risk slider
-                            │  full re-plan        │       market context
+                            │   ADVISOR            │
+                            │  beam-search planner │◄───── risk slider · market context
+                            │  full re-plan        │◄───── trained Q-tables (PlanInput.trained_models)
                             └─────────┬────────────┘
               ┌───────────────────────┼─────────────────────────┐
               ▼                       ▼                         ▼
       ┌──────────────┐        ┌──────────────┐         ┌─────────────────┐
       │  STRATEGY    │        │  RULE        │         │  PROBABILITY    │
       │  LIBRARY     │        │  ENGINE      │         │  & EV LAYER     │
-      │  (M3)        │        │  (M3)        │         │  (M5)           │
+      │  43 TOMLs    │        │  142 rules   │         │  MC ± stderr    │
       └──────┬───────┘        └──────┬───────┘         └────────┬────────┘
              └───────────────────────┼──────────────────────────┘
                                      ▼
                          ┌──────────────────────┐
-                         │  ENGINE CORE (M2)    │
-                         │  apply(currency)     │
-                         │  sub-ms hot path     │
+                         │  ENGINE CORE         │
+                         │  apply(currency,     │  patch + league gated;
+                         │  item, omens)        │  sub-µs hot path
                          └──────────┬───────────┘
                                     ▼
                   ┌─────────────────────────────────┐
-                  │  DATA BUNDLE (M2)               │
+                  │  DATA BUNDLE (schema v3)        │
                   │  patch-versioned, hot-swappable │
                   └────────────┬────────────────────┘
                                │
-          ┌────────────────────┼────────────────────┐
-          ▼                    ▼                    ▼
-   ┌─────────────┐      ┌────────────┐      ┌──────────────┐
-   │  RePoE-fork │      │  poe2db.tw │      │  Craft of    │
-   │  mods/bases │      │  omens     │      │  Exile       │
-   │             │      │  essences  │      │  weights     │
-   └─────────────┘      └────────────┘      └──────────────┘
+          ┌────────────────────┼──────────────────────┐
+          ▼                    ▼                      ▼
+   ┌─────────────┐      ┌────────────┐      ┌──────────────────────┐
+   │  RePoE-fork │      │  poe2db.tw │      │  Craft of Exile      │
+   │  mods/bases │      │  omens     │      │  essences/catalysts  │
+   │  tags       │      │  bones     │      │  weights             │
+   └─────────────┘      └────────────┘      └──────────────────────┘
+          + curated fixtures: desecrated pools, Vaal implicits,
+            alloys.json, emotions.json, brequel_tree.json (Genesis)
 
-  Live channels (M7+):
-   • poe.ninja PoE2 → meta-build awareness, prices
-   • poe2scout       → currency exchange snapshots
-   • GGG /trade2     → live trade integration (OAuth)
-   • Clipboard       → in-game item capture (wl-clipboard)
-   • Client.txt      → zone awareness (inotify)
-   • Layer-shell     → Hyprland overlay window
+  Live channels (runtime, all soft-fail):
+   • poe2scout        → currency prices (browser fetch / desktop proxy / desktop cache)
+   • poe.ninja        → exchange prices (parallel source, fuzzy name-matched)
+   • GGG /trade2      → price-check search+fetch (desktop main-process proxy)
+   • Clipboard        → item import (paste, or desktop hotkey → game Ctrl+C)
+   • Capture daemon   → ws://127.0.0.1:17771/ws (ADR-0011, optional)
+   • Screen region    → OCR price overlay (ADR-0013, desktop only)
 ```
 
 ## Process model
 
-The desktop app is a single Tauri 2 process with three logical compartments:
+The app is a static Next.js export (no server) running entirely in the
+browser, with an optional Electron shell around it:
 
-1. **Frontend** (WebKit + Svelte 5) — renders UI, dispatches commands via IPC.
-2. **Tauri IPC bridge** (`apps/desktop/src-tauri`) — exposes Rust functions to JS, owns plugins.
-3. **Workspace crates** (`crates/*`) — the engine, advisor, data, market, etc. Imported by the IPC bridge.
+1. **UI thread** (React 19 — the "Forge" console in `apps/web`) — renders
+   the UI and dispatches typed RPC calls over `postMessage`
+   (`apps/web/lib/engine/client.ts`).
+2. **Web Worker hosting the WASM engine**
+   (`apps/web/lib/engine/engine.worker.ts` + `crates/poc2-wasm`) — loads
+   `/wasm/poc2_wasm_bg.wasm` and `/poc2.bundle.json.gz` once, builds an
+   in-memory `EngineState`, then answers `recommend` / `parse` /
+   `eligibleMods` / `recordOutcome` / `runNTrials` / `applyPrices` /
+   `genesisTree` / … off the UI thread, so planning never blocks. A
+   re-plan is a **single** `recommend` call; the store token-discards
+   superseded results (no progressive streaming).
+3. **Electron main process** (`apps/desktop`, optional — ADR-0010/0013):
+   serves the export over a privileged `app://` scheme, registers capture
+   hotkeys, proxies the trade2 API with header-driven rate limiting,
+   keeps the hourly poe2scout price cache (node:sqlite), and owns the
+   overlay/calibration windows. The **preload** exposes exactly one
+   bridge, `window.poc2Desktop` (contract mirrored in
+   `apps/web/lib/desktop.ts`); the web app feature-detects it and
+   degrades gracefully in a plain browser.
 
-The advisor's beam search runs in a Tokio worker on the Rust side. The frontend subscribes to a stream of `Recommendation` events; new events arrive as the search deepens.
+The advisor's beam search runs inside the Web Worker (WASM); Rust panics
+forward to `console.error`. (The original Tauri 2 + Svelte frontend was
+retired — see ADR-0001's amendment and ADR-0010.)
 
-## Patch versioning
+## Patch + league versioning
 
 Every entity carries `patch_min` / `patch_max`:
 
@@ -65,83 +87,126 @@ Every entity carries `patch_min` / `patch_max`:
 struct PatchRange { min: Option<PatchVersion>, max: Option<PatchVersion> }
 ```
 
-- Mods, currencies, omens, essences, bones, catalysts — versioned at the data-bundle level.
+- Mods, currencies, omens, essences, bones, catalysts, alloys, emotions —
+  versioned at the data-bundle level.
 - Strategies and rules — versioned in TOML (`patch_min = "0.4.0"`).
-- The bundle declares its `game_patch`. Loaders filter entities to those whose `PatchRange` contains it.
+- The bundle declares its `game_patch`; loaders filter entities to those
+  whose `PatchRange` contains it.
+- **League** (`Standard` | `Challenge`) rides on `ApplyContext` and
+  `PlanInput.league` for gates that differ inside one patch — e.g. the
+  Recombinator and the Corruption/Homogenising omens are Standard-only
+  in 0.5. User-switchable from Settings via the WASM `setLeague`.
 
-This is the mechanism by which 0.5 (May 29 2026) lands as a config swap rather than a rebuild.
+Full delta matrix: [`14-crafting-mechanics-cross-version.md`](14-crafting-mechanics-cross-version.md).
 
-## Sub-millisecond `apply()`
+## Sub-microsecond `apply()`
 
-The advisor's beam search runs tens of thousands of `apply(currency, item, omens)` calls during a re-plan. Constraints:
+The advisor's beam search runs tens of thousands of
+`apply(currency, item, omens)` calls during a re-plan. Constraints:
 
-- No allocations in the hot path. `Item` is small (`SmallVec` for mod slots, fixed-size arrays for fractures).
-- Mod pools precomputed at bundle load: `(BaseType, ilvl, AffixType) → &[ModDefinition]`.
-- State memoization: canonicalize an `Item` to a `u64` hash, cache score.
-- Beam width / depth are user-configurable (default w=5, d=8).
-- Search runs in a `tokio::task::spawn_blocking` so the runtime stays responsive.
-- Cancellation: a new state arriving aborts the in-flight search.
+- No allocations in the hot path. `Item` is small (`SmallVec` for mod
+  slots, fixed-size arrays for fractures).
+- Mod pools precomputed at bundle load; weight resolution is
+  tag-intersection (leftmost-tag-wins) with inclusive higher-tier
+  summation (`ModRegistry::inclusive_weight_for`).
+- `Currency::apply` is **atomic on failure** — the orchestrator
+  (`apply_currency_with_bases`) snapshots and restores the item on `Err`.
+- Beam width / depth are user-configurable (web defaults: width 5,
+  depth 4).
+- Cancellation: a new state arriving bumps the store's re-plan token; the
+  stale result is discarded on arrival.
 
 ## Data bundle
 
-A bundle is a single JSON or compressed JSON document containing the entire dataset the engine needs. Schema sketch (full schema in `21-bundle-schema.json` once M2 lands):
+A bundle is a single JSON (or gzipped JSON) document containing the
+entire dataset the engine needs. **Schema v3** (see
+`crates/data/src/lib.rs` for the version history — v1/v2 bundles are
+hard-rejected with a rebuild instruction):
 
 ```jsonc
 {
-  "schema_version": 1,
-  "game_patch": "0.4.0",
-  "built_at": "2026-04-26T12:00:00Z",
-  "built_by": "pipeline@<git-sha>",
-  "mods":              [...],
-  "base_items":        [...],
-  "item_classes":      [...],
-  "tags":              [...],
-  "currencies":        [...],
-  "omens":             [...],
-  "essences":          [...],
-  "bones":             [...],
-  "catalysts":         [...],
+  "header": {
+    "schema_version": 3,
+    "engine_schema": 1,
+    "game_patch": "0.5.0",
+    "built_at": "…", "built_by": "poc2-pipeline@…",
+    "sources": [ /* upstream revisions for provenance (ADR-0012) */ ]
+  },
+  "mods": [...],              // incl. explicit tier ordinals (v3)
+  "base_items": [...],
+  "item_classes": [...],
+  "tags": [...],
+  "currencies": {...},
+  "omens": {...},
+  "essences": {...},          // per-class target variants
+  "bones": {...},
+  "catalysts": {...},
+  "alloys": {...},            // 13 Verisium Alloys × class targets (0.5)
+  "emotions": {...},          // 26 Distilled Emotions × jewel-base targets (0.5)
+  "genesis": {...},           // Genesis Tree nodes + curated presets (0.5)
   "stat_translations": {...},
-  "weights":           [...],   // CoE primary, poe2db cross-check
-  "synergy_overrides": [...],   // hand-curated edge cases
-  "concept_map":       {...}    // stat-id → concept (for hybrid analysis)
+  "weights": [...],           // CoE-derived numerical weights, confidence-flagged
+  "synergy_edges": [...], "synergy_overrides": [...],
+  "concepts": [...], "concept_map": {...}
 }
 ```
 
-Bundles are produced by `pipeline/` and published as GitHub Releases. The desktop app:
-
-- Ships with one baseline bundle embedded
-- Checks for newer bundles on launch (configurable interval)
-- Caches the latest bundle in `$XDG_DATA_HOME/poc2/bundles/`
-- Is fully usable offline
-
-## Synergy graph
-
-Hybrid auto-derive + hand-override:
-
-- Currencies declare `affected_by: Set<OmenId>`
-- Omens declare `targets: CurrencyId` and `effect: EffectFn`
-- The graph is computed at bundle load: edges are `(currency, omen) → effect`
-- `synergy_overrides.toml` covers state-dependent or wildcard cases:
-  - `HinekorasLock` applies wildcard
-  - `OmenOfCorruption` modifies the *outcome distribution* of `VaalOrb`, not the orb itself
-  - `OmenOfLight` applies to `OrbOfAnnulment` only when desecrated mods exist
+Bundles are produced by `pipeline/` (`cargo run -p poc2-pipeline -- build
+--patch 0.5.0`). The web app ships one as a static asset
+(`apps/web/public/poc2.bundle.json.gz`); operator copies live under
+`~/.config/poc2/bundles/`. The `data-watch.yml` workflow (ADR-0012)
+detects upstream changes, rebuilds, diffs, and opens a draft PR.
 
 ## Hybrid mods (concept-based matching)
 
-A "hybrid" mod is a single-affix mod producing multiple distinct concepts (e.g., `+X% ES AND +Y Life`). The engine handles them via a **concept map**:
+A "hybrid" mod is a single-affix mod producing multiple distinct concepts
+(e.g., `+X% ES AND +Y Life`). The engine handles them via a **concept
+map**:
 
-1. RePoE-fork's `mods.json` lists each mod's `stats: [{id, min, max}, ...]`
+1. RePoE-fork's `mods.json` lists each mod's `stats: [{id, min, max}, …]`
 2. The pipeline computes a `Concept` per `stat-id` (atomic semantic group)
 3. Each mod is annotated with `concept_set: Set<Concept>`
-4. Targets are concept-based: `{ concept: "EnergyShield", min_tier: 1 }` matches any mod whose `concept_set` contains `EnergyShield`
-5. A hybrid `ES + Life` mod simultaneously satisfies `EnergyShield` and `Life` targets
+4. Targets are concept-based: `{ concept: "EnergyShield", min_tier: 1 }`
+   matches any mod whose `concept_set` contains `EnergyShield`
+5. A hybrid `ES + Life` mod simultaneously satisfies `EnergyShield` and
+   `Life` targets
 
-This is required for the canonical "Triple T1 ES Body Armour" test fixture, where the user accepts hybrid ES mods alongside flat ES mods.
+This is required for the canonical "Triple T1 ES Body Armour" test
+fixture, where the user accepts hybrid ES mods alongside flat ES mods.
 
-## NixOS / Hyprland specifics
+## Desktop shell specifics (ADR-0010 / 0011 / 0013)
 
-- **Wayland-only** — no X11 fallback. `wl-clipboard` for clipboard, `wlr-layer-shell` for overlay.
-- **flake.nix** — declarative dev shell. Includes Rust toolchain, Node, pnpm, Tauri system deps (webkit2gtk-4.1, libsoup-3, gtk3, gdk, etc.), Wayland deps.
-- **Hyprland overlay** — implemented as a layer-shell surface, not a regular window. Hyprland window rules (`windowrulev2 = float, ...`) configure positioning.
-- **PoE2 runs under Proton/Wine** — clipboard works (`wl-clipboard`), `Client.txt` lives in the Wine prefix, monitored via `inotify`.
+- **Serving**: `app://poc2/` privileged scheme over `apps/web/out` — the
+  export's root-absolute asset URLs work without a localhost server.
+  Hence the hard rule: **web runtime asset URLs stay origin-relative**.
+- **Capture**: snapshot clipboard → inject the game's own Ctrl+C
+  (per-platform backends) → poll for `Item Class:` text → push to the
+  renderer (`ingestExternalItemText`) → restore clipboard. Wayland
+  compositors without portal hotkeys bind the second-instance flags
+  (`poc2-desktop --capture / --scan / --recalibrate`).
+- **Trade proxy**: `POST /api/trade2/search/{league}` +
+  `GET /api/trade2/fetch/…` run in main via `electron.net`, throttled by
+  the API's `X-Rate-Limit-*` headers.
+- **Price cache**: hourly poe2scout catalogue (11 categories) into
+  node:sqlite (JSON/memory fallback), poe.ninja fallback rows appended
+  after (first-write-wins keeps poe2scout authoritative). Snapshot flows
+  to the renderer once per scan — no per-lookup IPC.
+- **OCR overlay**: capability gate decides full click-through window
+  (win32/X11/probe-pass Wayland) vs. degraded in-app panel
+  (Hyprland/wlroots). Region calibrated once (`/calibrate`), scans are
+  single hotkey-triggered passes OCR'd renderer-side (tesseract.js from
+  vendored `/ocr/` assets).
+
+## Platform notes
+
+- The web app runs in any modern browser; no platform code outside
+  `apps/desktop` and marked operator tooling.
+- **flake.nix** provides the Rust toolchain (+ wasm32), wasm-bindgen /
+  binaryen, Bun + Node, and electron for NixOS dev-runs. Windows dev uses
+  rustup + Bun without Nix (CI proves this lane).
+- Paths resolve via the `XDG_CONFIG_HOME → HOME → USERPROFILE/APPDATA`
+  chain; `.gitattributes` enforces LF so `include_str!` matches across
+  OSes.
+- PoE2 under Proton/Wine: clipboard capture works via the game's own
+  Ctrl+C; Hyprland users source `examples/hyprland/poc2-windowrules.conf`
+  for always-on-top float rules (ADR-0009's layer-shell deferral stands).

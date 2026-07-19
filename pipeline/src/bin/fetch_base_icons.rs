@@ -1,14 +1,21 @@
-//! Per-base art ingestion script (Phase 8).
+//! Per-base art ingestion script.
 //!
-//! Reads the latest bundle from `~/.config/poc2/bundles/poc2.bundle.json.gz`
-//! (or `$POC2_BUNDLE`), iterates released base items, scrapes the
-//! corresponding poe2db detail page for the `Art/2DItems/.../Basetypes/<File>.webp`
-//! URL, downloads each image into
-//! `apps/desktop/public/base-icons/<class-pascal>/<file>.webp`, and writes
-//! a `manifest.json` mapping every base id to its local path.
+//! v2 (all-bases edition): instead of scraping one poe2db detail page per
+//! base (~3,800 requests, drop_level>50 only), this scrapes the ~30
+//! poe2db **class listing pages** (e.g. `/us/Shields`, `/us/Boots`). Every
+//! listing row carries the base's GGPK metadata id in its `data-hover`
+//! attribute (`Data\BaseItemTypes\Metadata/Items/...`) plus the item-art
+//! `<img>` URL — an **exact, deduplicated join key** onto the bundle's
+//! `BaseTypeId`s. No name fuzzing, full coverage (leveling bases included).
 //!
-//! The script must not fail (`exit 0` always). Bases that can't be
-//! resolved end up in the `missing` list of the manifest with a reason.
+//! Duplicate revalidation: rows are deduped by metadata id; conflicting
+//! image URLs for the same id are counted and reported (first wins), and
+//! bases sharing one art file download it once per class directory.
+//!
+//! Output: `apps/web/public/base-icons/<ClassPascal>/<file>.webp` plus a
+//! `manifest.json` mapping every base id to its local path. The script
+//! must not fail (`exit 0` always); unmatched released bases land in the
+//! manifest's `missing` list.
 
 #![allow(clippy::needless_pass_by_value)]
 #![allow(clippy::too_many_lines)]
@@ -20,34 +27,34 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use poc2_data::Bundle;
+use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
 #[command(
-    about = "Download poe2db base-item icons into apps/desktop/public/base-icons/.",
-    long_about = "Reads the loaded bundle, iterates released base items, scrapes \
-                  poe2db.tw detail pages for the canonical Art/2DItems/.../Basetypes URL, \
-                  downloads each image, and writes a manifest under apps/desktop/public/base-icons/."
+    about = "Download poe2db base-item icons into apps/web/public/base-icons/.",
+    long_about = "Reads the loaded bundle, scrapes the poe2db class listing pages \
+                  (metadata-id join, all released bases), downloads each base's \
+                  item art, and writes a manifest under apps/web/public/base-icons/."
 )]
 struct Cli {
     /// Path to the bundle (.bundle.json or .bundle.json.gz). When omitted,
     /// the script uses `$POC2_BUNDLE`, then `~/.config/poc2/bundles/poc2.bundle.json.gz`.
     #[arg(long)]
     bundle: Option<PathBuf>,
-    /// Output directory. Defaults to `apps/desktop/public/base-icons` relative to CWD.
-    #[arg(long, default_value = "apps/desktop/public/base-icons")]
+    /// Output directory. Defaults to `apps/web/public/base-icons` relative to CWD.
+    #[arg(long, default_value = "apps/web/public/base-icons")]
     out: PathBuf,
-    /// Re-download every base, even ones already present locally.
+    /// Re-download every image, even ones already present locally.
     #[arg(long, default_value_t = false)]
     refresh: bool,
-    /// Maximum number of bases to process. 0 means all.
+    /// Maximum number of images to download. 0 means all.
     #[arg(long, default_value_t = 0)]
     limit: usize,
     /// Delay between requests, in milliseconds.
-    #[arg(long, default_value_t = 500)]
+    #[arg(long, default_value_t = 300)]
     delay_ms: u64,
 }
 
@@ -77,6 +84,39 @@ struct Manifest {
     missing: Vec<MissingEntry>,
 }
 
+/// Engine item-class id → poe2db listing page slug.
+const CLASS_PAGES: &[(&str, &str)] = &[
+    ("BodyArmour", "Body_Armours"),
+    ("Boots", "Boots"),
+    ("Gloves", "Gloves"),
+    ("Helmet", "Helmets"),
+    ("Shield", "Shields"),
+    ("Buckler", "Bucklers"),
+    ("Focus", "Foci"),
+    ("Quiver", "Quivers"),
+    ("Ring", "Rings"),
+    ("Amulet", "Amulets"),
+    ("Belt", "Belts"),
+    ("Talisman", "Talismans"),
+    ("Wand", "Wands"),
+    ("Staff", "Staves"),
+    ("Sceptre", "Sceptres"),
+    ("Bow", "Bows"),
+    ("Crossbow", "Crossbows"),
+    ("Spear", "Spears"),
+    ("Flail", "Flails"),
+    ("Dagger", "Daggers"),
+    ("Claw", "Claws"),
+    ("OneHandSword", "One_Hand_Swords"),
+    ("TwoHandSword", "Two_Hand_Swords"),
+    ("OneHandAxe", "One_Hand_Axes"),
+    ("TwoHandAxe", "Two_Hand_Axes"),
+    ("OneHandMace", "One_Hand_Maces"),
+    ("TwoHandMace", "Two_Hand_Maces"),
+    ("Warstaff", "Quarterstaves"),
+    ("Jewel", "Jewels"),
+];
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     tracing_subscriber::fmt()
@@ -100,8 +140,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     fs::create_dir_all(&cli.out)?;
     let manifest_path = cli.out.join("manifest.json");
     let mut manifest = load_manifest(&manifest_path);
-    manifest.version = 1;
+    manifest.version = 2;
     manifest.fetched_at = iso8601_now();
+    manifest.missing.clear();
 
     let client = Client::builder()
         .user_agent(
@@ -111,350 +152,238 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         .timeout(Duration::from_secs(30))
         .build()?;
 
-    let bases: Vec<_> = bundle
+    // Every released gear base, by class. (No drop-level filter — leveling
+    // bases get icons too.)
+    let gear_classes: BTreeSet<&str> = CLASS_PAGES.iter().map(|(c, _)| *c).collect();
+    let mut bases_by_class: BTreeMap<&str, Vec<&poc2_engine::base::BaseType>> = BTreeMap::new();
+    for b in bundle
         .base_items
         .iter()
         .filter(|b| matches!(b.release_state, poc2_engine::base::ReleaseState::Released))
-        .filter(|b| is_inspectable_base(b.item_class.as_str(), &b.name, b.id.as_str()))
-        .collect();
+        // Only craftable gear classes — gems/soul cores/omens etc. have no
+        // base-icon use in the crafting advisor.
+        .filter(|b| gear_classes.contains(b.item_class.as_str()))
+    {
+        bases_by_class
+            .entry(b.item_class.as_str())
+            .or_default()
+            .push(b);
+    }
 
-    info!(total = bases.len(), "released gear bases");
+    // Listing-row pattern: the `data-hover` carries the URL-encoded GGPK id,
+    // the adjacent `<img>` carries the art URL.
+    let row_re = Regex::new(
+        r#"data-hover="\?s=Data%5CBaseItemTypes%2F([^"]+?)"[^>]*href="([^"]*)"\s*>\s*<img[^>]*src="(https://cdn\.poe2db\.tw/image/[^"]+?\.webp)""#,
+    )?;
 
-    let current_base_ids: BTreeSet<&str> = bases.iter().map(|base| base.id.as_str()).collect();
-    let current_base_names: BTreeSet<&str> = bases.iter().map(|base| base.name.as_str()).collect();
-    manifest
-        .entries
-        .retain(|id, _| current_base_ids.contains(id.as_str()));
-    manifest
-        .missing
-        .retain(|missing| current_base_names.contains(missing.name.as_str()));
+    let mut id_to_art: BTreeMap<String, (String, String)> = BTreeMap::new(); // id → (img, detail href)
+    let mut conflicts = 0usize;
+
+    for (class_id, page) in CLASS_PAGES {
+        if !bases_by_class.contains_key(class_id) {
+            continue;
+        }
+        let url = format!("https://poe2db.tw/us/{page}");
+        info!(%url, "fetching class listing");
+        let html = match fetch_text(&client, &url).await {
+            Ok(h) => h,
+            Err(e) => {
+                warn!(%url, error = %e, "listing fetch failed; bases of this class go to missing");
+                continue;
+            }
+        };
+        for cap in row_re.captures_iter(&html) {
+            let raw_id = url_decode(&cap[1]);
+            // `Data\BaseItemTypes\Metadata/Items/...` → take from `Metadata`.
+            let id = raw_id
+                .find("Metadata")
+                .map_or(raw_id.clone(), |i| raw_id[i..].replace('\\', "/"));
+            let img = cap[3].to_string();
+            let href = cap[2].to_string();
+            match id_to_art.get(&id) {
+                Some((existing, _)) if existing != &img => conflicts += 1, // first wins
+                Some(_) => {}
+                None => {
+                    id_to_art.insert(id, (img, href));
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(cli.delay_ms)).await;
+    }
+    info!(
+        joined = id_to_art.len(),
+        conflicts, "listing rows joined by metadata id (duplicates revalidated)"
+    );
 
     let mut ok = 0usize;
     let mut skipped = 0usize;
     let mut missing = 0usize;
+    let mut downloaded = 0usize;
 
-    for (processed, base) in bases.into_iter().enumerate() {
-        if cli.limit > 0 && processed >= cli.limit {
-            break;
-        }
-
-        let class_pascal = pascal_class(base.item_class.as_str());
-        let id = base.id.as_str().to_string();
-
-        if !cli.refresh {
-            if let Some(existing) = manifest.entries.get(&id) {
-                let dest = cli.out.join(&existing.rel);
-                if dest.is_file() {
+    for (class_id, bases) in &bases_by_class {
+        let class_dir = cli.out.join(class_id);
+        for base in bases {
+            let Some((img_url, href)) = id_to_art.get(base.id.as_str()) else {
+                // Classes without listing pages (or rows poe2db doesn't
+                // render) are reported, not fatal.
+                manifest.missing.push(MissingEntry {
+                    name: base.name.clone(),
+                    class_pascal: (*class_id).to_string(),
+                    reason: "no listing row matched this metadata id".into(),
+                    detail_url: format!("https://poe2db.tw/us/{}", base.name.replace(' ', "_")),
+                });
+                missing += 1;
+                continue;
+            };
+            let file = img_url.rsplit('/').next().unwrap_or("icon.webp");
+            let rel = format!("{class_id}/{file}");
+            let dest = class_dir.join(file);
+            if !dest.exists() || cli.refresh {
+                if cli.limit > 0 && downloaded >= cli.limit {
                     skipped += 1;
                     continue;
                 }
-            }
-        }
-
-        let detail_url = poe2db_url(&base.name);
-
-        // Drain any previous "missing" record for this id; we'll re-add if it fails.
-        manifest.missing.retain(|m| m.name != base.name);
-
-        match fetch_one(&client, &detail_url).await {
-            Ok((source_url, file_name)) => {
-                let rel = format!("{class_pascal}/{file_name}");
-                let dest = cli.out.join(&rel);
-                if let Some(parent) = dest.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                match download_to(&client, &source_url, &dest, &detail_url).await {
-                    Ok(()) => {
-                        manifest.entries.insert(
-                            id.clone(),
-                            ManifestEntry {
-                                name: base.name.clone(),
-                                class_pascal: class_pascal.clone(),
-                                rel,
-                                source_url,
-                                drop_level: base.drop_level,
-                                attribute_pool: format!("{:?}", base.attribute_pool)
-                                    .to_ascii_lowercase(),
-                            },
-                        );
-                        ok += 1;
-                        info!(
-                            base = %base.name,
-                            class = %class_pascal,
-                            file = %dest.display(),
-                            "ok"
-                        );
+                fs::create_dir_all(&class_dir)?;
+                match fetch_bytes(&client, img_url).await {
+                    Ok(bytes) if bytes.len() > 200 => {
+                        fs::write(&dest, &bytes)?;
+                        downloaded += 1;
+                        tokio::time::sleep(Duration::from_millis(cli.delay_ms)).await;
                     }
-                    Err(e) => {
+                    Ok(_) | Err(_) => {
                         manifest.missing.push(MissingEntry {
                             name: base.name.clone(),
-                            class_pascal: class_pascal.clone(),
-                            reason: format!("download: {e}"),
-                            detail_url: detail_url.clone(),
+                            class_pascal: (*class_id).to_string(),
+                            reason: "image download failed".into(),
+                            detail_url: img_url.clone(),
                         });
                         missing += 1;
-                        warn!(base = %base.name, error = %e, "download failed");
+                        continue;
                     }
                 }
+            } else {
+                skipped += 1;
             }
-            Err(e) => {
-                manifest.missing.push(MissingEntry {
+            manifest.entries.insert(
+                base.id.as_str().to_string(),
+                ManifestEntry {
                     name: base.name.clone(),
-                    class_pascal: class_pascal.clone(),
-                    reason: format!("scrape: {e}"),
-                    detail_url: detail_url.clone(),
-                });
-                missing += 1;
-                warn!(base = %base.name, error = %e, "scrape failed");
-            }
+                    class_pascal: (*class_id).to_string(),
+                    rel,
+                    source_url: format!("https://poe2db.tw/us/{href}"),
+                    drop_level: base.drop_level,
+                    attribute_pool: format!("{:?}", base.attribute_pool),
+                },
+            );
+            ok += 1;
         }
-
-        write_manifest(&manifest_path, &manifest)?;
-        tokio::time::sleep(Duration::from_millis(cli.delay_ms)).await;
     }
 
-    write_manifest(&manifest_path, &manifest)?;
-    info!(ok, skipped, missing, total = ok + skipped + missing, "done");
+    fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
+    info!(
+        ok,
+        downloaded,
+        skipped,
+        missing,
+        conflicts,
+        manifest = %manifest_path.display(),
+        "base-icon fetch complete"
+    );
     Ok(())
 }
 
-fn resolve_bundle_path(arg: Option<&Path>) -> anyhow::Result<PathBuf> {
-    if let Some(p) = arg {
+fn resolve_bundle_path(cli: Option<&Path>) -> anyhow::Result<PathBuf> {
+    if let Some(p) = cli {
         return Ok(p.to_path_buf());
     }
     if let Ok(env) = std::env::var("POC2_BUNDLE") {
         return Ok(PathBuf::from(env));
     }
-    let xdg = std::env::var_os("XDG_CONFIG_HOME")
+    // Same config-root fallback chain as poc2-market's cache dir:
+    // XDG, then $HOME/.config, then the Windows roots (%APPDATA% is
+    // already per-user config; %USERPROFILE%\.config mirrors unix).
+    let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".config")))
-        .ok_or_else(|| anyhow::anyhow!("no $XDG_CONFIG_HOME or $HOME"))?;
-    let candidate = xdg.join("poc2/bundles/poc2.bundle.json.gz");
-    if candidate.is_file() {
-        return Ok(candidate);
-    }
-    Err(anyhow::anyhow!(
-        "no bundle found; pass --bundle or set $POC2_BUNDLE"
-    ))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .or_else(|| std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".config")))
+        .ok_or_else(|| {
+            anyhow::anyhow!("none of XDG_CONFIG_HOME, HOME, APPDATA, USERPROFILE are set")
+        })?;
+    Ok(base
+        .join("poc2")
+        .join("bundles")
+        .join("poc2.bundle.json.gz"))
 }
 
 fn load_manifest(path: &Path) -> Manifest {
-    fs::read_to_string(path)
+    fs::read(path)
         .ok()
-        .and_then(|s| serde_json::from_str::<Manifest>(&s).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
-}
-
-fn write_manifest(path: &Path, manifest: &Manifest) -> anyhow::Result<()> {
-    let serialized = serde_json::to_string_pretty(manifest)?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serialized)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
-
-/// Translate the bundle's `item_class` (often display-cased like `"Body Armour"`)
-/// into PascalCase used by the engine and frontend (`"BodyArmour"`).
-fn pascal_class(raw: &str) -> String {
-    let mut s = String::with_capacity(raw.len());
-    let mut up = true;
-    for c in raw.chars() {
-        if c.is_whitespace() || c == '-' || c == '_' {
-            up = true;
-        } else if up {
-            for u in c.to_uppercase() {
-                s.push(u);
-            }
-            up = false;
-        } else {
-            s.push(c);
-        }
-    }
-    s
-}
-
-fn is_inspectable_base(class: &str, name: &str, id: &str) -> bool {
-    is_database_base_class(class) && !is_known_noncraft_base(name, id)
-}
-
-fn is_database_base_class(raw: &str) -> bool {
-    matches!(
-        raw,
-        "BodyArmour"
-            | "Body Armour"
-            | "Helmet"
-            | "Gloves"
-            | "Boots"
-            | "Shield"
-            | "Focus"
-            | "Belt"
-            | "Amulet"
-            | "Ring"
-            | "Jewel"
-            | "Bow"
-            | "Crossbow"
-            | "Wand"
-            | "Sceptre"
-            | "Staff"
-            | "Warstaff"
-            | "Quarterstaff"
-            | "Spear"
-            | "Flail"
-            | "Claw"
-            | "Dagger"
-            | "OneHandSword"
-            | "One Hand Sword"
-            | "OneHandAxe"
-            | "One Hand Axe"
-            | "OneHandMace"
-            | "One Hand Mace"
-            | "TwoHandSword"
-            | "Two Hand Sword"
-            | "TwoHandAxe"
-            | "Two Hand Axe"
-            | "TwoHandMace"
-            | "Two Hand Mace"
-    )
-}
-
-fn is_known_noncraft_base(name: &str, id: &str) -> bool {
-    if name.contains("[DNT") || id.contains("/DNT") {
-        return true;
-    }
-    matches!(
-        name,
-        "Golden Hoop" | "Ring" | "Abyssal Signet" | "Timeless Jewel" | "Diamond" | "Energy Blade"
-    ) || matches!(
-        id,
-        "Metadata/Items/Rings/Ring" | "Metadata/Items/Jewels/TimelessJewel"
-    )
-}
-
-fn poe2db_url(name: &str) -> String {
-    let slug: String = name
-        .chars()
-        .map(|c| if c == ' ' { '_' } else { c })
-        .collect();
-    format!("https://poe2db.tw/us/{slug}")
-}
-
-async fn fetch_one(client: &Client, detail_url: &str) -> anyhow::Result<(String, String)> {
-    let html = with_retry(|| async {
-        let resp = client.get(detail_url).send().await?.error_for_status()?;
-        let text = resp.text().await?;
-        Ok::<_, anyhow::Error>(text)
-    })
-    .await?;
-    let url =
-        pick_base_image_url(&html).ok_or_else(|| anyhow::anyhow!("no Art/2DItems URL on page"))?;
-    let file_name = url
-        .rsplit('/')
-        .next()
-        .map(str::to_string)
-        .unwrap_or_else(|| "icon.webp".into());
-    Ok((url, file_name))
-}
-
-/// Search the rendered HTML for a poe2db CDN URL under `Art/2DItems`.
-/// Prefer `.../Basetypes/...` when present, but many weapons and shields use
-/// class-specific paths instead. Falls back to the page's `og:image`.
-fn pick_base_image_url(html: &str) -> Option<String> {
-    let lower = html.to_ascii_lowercase();
-    let needle = "art/2ditems/";
-    let mut from = 0;
-    let mut first_2d_item = None;
-    while let Some(rel) = lower[from..].find(needle) {
-        let i = from + rel;
-        let start = html[..i].rfind("https://").unwrap_or(0);
-        let end = html[i..].find(".webp")?;
-        let candidate = &html[start..(i + end + ".webp".len())];
-        if candidate.to_ascii_lowercase().contains("/basetypes/") {
-            return Some(candidate.to_string());
-        }
-        if first_2d_item.is_none() {
-            first_2d_item = Some(candidate.to_string());
-        }
-        from = i + needle.len();
-    }
-    first_2d_item.or_else(|| extract_og_image(html))
-}
-
-fn extract_og_image(html: &str) -> Option<String> {
-    for marker in [
-        "property=\"og:image\"",
-        "property='og:image'",
-        "name=\"og:image\"",
-        "name='og:image'",
-    ] {
-        let Some(pos) = html.find(marker) else {
-            continue;
-        };
-        let tail = &html[pos..html.len().min(pos + 600)];
-        if let Some(content_pos) = tail.find("content=") {
-            let after = &tail[content_pos + "content=".len()..];
-            let quote = after.chars().next()?;
-            if quote != '"' && quote != '\'' {
-                continue;
-            }
-            let rest = &after[quote.len_utf8()..];
-            let end = rest.find(quote)?;
-            return Some(rest[..end].to_string());
-        }
-    }
-    None
-}
-
-async fn download_to(client: &Client, url: &str, dest: &Path, referer: &str) -> anyhow::Result<()> {
-    let bytes = with_retry(|| async {
-        let resp = client
-            .get(url)
-            .header(reqwest::header::REFERER, referer)
-            .header(reqwest::header::ACCEPT, "image/webp,image/*,*/*;q=0.8")
-            .send()
-            .await?
-            .error_for_status()?;
-        let b = resp.bytes().await?;
-        Ok::<_, anyhow::Error>(b)
-    })
-    .await?;
-    let tmp = dest.with_extension("webp.tmp");
-    fs::write(&tmp, &bytes)?;
-    fs::rename(&tmp, dest)?;
-    Ok(())
-}
-
-async fn with_retry<T, F, Fut>(f: F) -> anyhow::Result<T>
-where
-    F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Result<T, anyhow::Error>>,
-{
-    let mut delay = Duration::from_millis(500);
-    let mut last_err = None;
-    for attempt in 0..3 {
-        match f().await {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                last_err = Some(e);
-                if attempt < 2 {
-                    tokio::time::sleep(delay).await;
-                    delay *= 2;
-                }
-            }
-        }
-    }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("retry exhausted")))
 }
 
 fn iso8601_now() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    secs.to_string()
+        .unwrap_or_default()
+        .as_secs();
+    format!("unix:{secs}")
 }
 
-// Avoid pulling in the full Value parser on the hot path; we only need it
-// for ad-hoc debug logs if we ever inspect a partial JSON response.
-#[allow(dead_code)]
-fn debug_value(s: &str) -> Option<Value> {
-    serde_json::from_str(s).ok()
+async fn fetch_text(client: &Client, url: &str) -> anyhow::Result<String> {
+    for attempt in 0..3u32 {
+        match client
+            .get(url)
+            .header("Referer", "https://poe2db.tw/")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => return Ok(resp.text().await?),
+            Ok(resp) => {
+                warn!(%url, status = %resp.status(), attempt, "listing fetch non-200");
+            }
+            Err(e) => warn!(%url, error = %e, attempt, "listing fetch error"),
+        }
+        tokio::time::sleep(Duration::from_millis(800 * u64::from(attempt + 1))).await;
+    }
+    anyhow::bail!("failed after retries: {url}")
+}
+
+async fn fetch_bytes(client: &Client, url: &str) -> anyhow::Result<Vec<u8>> {
+    for attempt in 0..3u32 {
+        match client
+            .get(url)
+            .header("Referer", "https://poe2db.tw/")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                return Ok(resp.bytes().await?.to_vec());
+            }
+            Ok(resp) => warn!(%url, status = %resp.status(), attempt, "image fetch non-200"),
+            Err(e) => warn!(%url, error = %e, attempt, "image fetch error"),
+        }
+        tokio::time::sleep(Duration::from_millis(600 * u64::from(attempt + 1))).await;
+    }
+    anyhow::bail!("failed after retries: {url}")
+}
+
+/// Minimal percent-decoder for the `data-hover` payloads (%5C, %2F, %20…).
+fn url_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }

@@ -1,0 +1,204 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* ---- result bar ---- */
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resultString {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-all;
+  min-height: 22px;
+  padding: 8px 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  user-select: all;
+}
+
+.resultString[data-copied="true"] {
+  border-color: var(--success);
+}
+
+.resultMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+
+.lengthOver {
+  color: var(--danger);
+}
+
+.resultActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.customText {
+  max-width: 240px;
+}
+
+/* ---- term cards (goal tab) ---- */
+.termRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.termHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.termPattern {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.termWarn {
+  font-size: 11px;
+  color: var(--warn);
+}
+
+/* ---- mod list (mods tab) ---- */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-base);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0 9px;
+}
+.search input {
+  border: none;
+  background: none;
+  padding: 7px 0;
+  flex: 1;
+}
+.search input:focus {
+  border: none;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--surface-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.row:hover {
+  border-color: var(--line-strong);
+}
+.row[data-state="wanted"] {
+  border-color: var(--gold);
+}
+.row[data-state="unwanted"] {
+  border-color: var(--danger);
+}
+
+.rowName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowText {
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+.minInput {
+  width: 64px;
+  text-align: right;
+}
+
+.banBtn {
+  padding: 1px 7px;
+  font-size: 11px;
+}
+
+/* ---- vendor tab ---- */
+.groupGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px 10px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 2px;
+  color: var(--fg-muted);
+}
+.check:hover {
+  color: var(--fg);
+}
+.check input {
+  accent-color: var(--gold-action);
+}
+.check[data-on="true"] {
+  color: var(--fg);
+}
+
+.rangeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rangeRow input {
+  width: 70px;
+  text-align: right;
+}

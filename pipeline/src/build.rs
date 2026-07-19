@@ -7,9 +7,10 @@ use tracing::{info, warn};
 use crate::error::PipelineResult;
 use crate::http::make_client;
 use crate::normalize::{
-    flag_essence_target_mods, normalize_coe, normalize_fixtures, normalize_poe2db, normalize_repoe,
+    assign_tier_ordinals, flag_essence_target_mods, normalize_coe, normalize_fixtures,
+    normalize_genesis, normalize_poe2db, normalize_repoe,
 };
-use crate::sources::{coe, fixtures, poe2db, repoe};
+use crate::sources::{coe, fixtures, genesis, poe2db, repoe};
 
 /// Pipeline build options.
 #[derive(Debug, Clone)]
@@ -28,7 +29,7 @@ pub struct BuildOptions {
 impl Default for BuildOptions {
     fn default() -> Self {
         Self {
-            game_patch: PatchVersion::PATCH_0_4_0,
+            game_patch: PatchVersion::PATCH_0_5_0,
             built_by: format!("poc2-pipeline@{}", env!("CARGO_PKG_VERSION")),
             skip_validation: false,
             skip_coe: false,
@@ -48,12 +49,30 @@ pub async fn build_bundle(opts: BuildOptions) -> PipelineResult<Bundle> {
 
     let mut bundle = Bundle::empty(opts.game_patch, opts.built_by);
 
+    // ---- Live PoE2 patch pointer (provenance only, best-effort) ---------
+    // Stamp the community patch-version pointer into the bundle header so any
+    // built bundle is traceable to the live game version it corresponds to
+    // (ADR-0012). Soft-fail: a missing pointer never blocks a build.
+    if let Some(patch) = crate::watch::fetch_live_patch(&client).await {
+        info!(live_poe2_patch = %patch, "stamped live PoE2 patch pointer");
+        bundle.header.sources.0.push(poc2_data::SourceRevision {
+            name: "poe2.patch_pointer".into(),
+            revision: patch,
+            url: Some(crate::watch::POE2_PATCH_POINTER_URLS[0].into()),
+            fetched_at: iso_now(),
+        });
+    } else {
+        warn!("PoE2 patch pointer unreachable; bundle will not carry a live-version stamp");
+    }
+
     // ---- RePoE-fork (mandatory) -----------------------------------------
     info!("fetching RePoE-fork…");
     let snapshot = repoe::fetch(&client).await?;
     info!("{}", snapshot.count_summary());
     info!("normalizing RePoE-fork into bundle…");
     normalize_repoe(&snapshot, &mut bundle)?;
+    // Alloy affix/required-level back-fill from the curated poe2db table (see normalize::alloy_fixups).
+    crate::normalize::apply_alloy_fixups(&mut bundle);
 
     // ---- Craft of Exile (optional — provides essences/catalysts/weights)
     if opts.skip_coe {
@@ -109,11 +128,35 @@ pub async fn build_bundle(opts: BuildOptions) -> PipelineResult<Bundle> {
         }
     }
 
+    // ---- Genesis Tree (0.5 — embedded snapshot + curated meta) ----------
+    // Only meaningful for 0.5+ bundles; the section stays empty otherwise.
+    if opts.game_patch >= PatchVersion::PATCH_0_5_0 {
+        info!("loading Genesis Tree (embedded BrequelTree snapshot + curated meta)…");
+        match genesis::load() {
+            Ok(snap) => {
+                info!("{}", snap.count_summary());
+                if let Err(e) = normalize_genesis(&snap, &mut bundle) {
+                    warn!(error = %e, "genesis normalization failed");
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "genesis fixture parse failed; bundle lacks Genesis Tree");
+            }
+        }
+    }
+
     // Promote any essence-target mod that didn't already carry the
     // ESSENCE_ONLY flag (Phase E.2 — guarantees the registry's
     // essence pool is complete even when RePoE-fork's is_essence_only
     // boolean missed a join).
     flag_essence_target_mods(&mut bundle);
+
+    // P6 / schema v3: assign explicit tier ordinals over the full mod set
+    // (needs every group's members loaded first). Tier 1 = strongest tier of
+    // each (mod_group, affix). The engine's inclusive higher-tier weighting
+    // consumes these via `ModDefinition::tier_strength_key`.
+    let tiered = assign_tier_ordinals(&mut bundle);
+    info!(tiered, "assigned explicit tier ordinals");
 
     if !opts.skip_validation {
         info!("validating bundle…");
@@ -133,4 +176,14 @@ pub async fn build_bundle(opts: BuildOptions) -> PipelineResult<Bundle> {
         "bundle build complete"
     );
     Ok(bundle)
+}
+
+/// Cheap epoch-seconds provenance timestamp, matching the format the source
+/// modules already use (avoids pulling a date crate into the build path).
+fn iso_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    format!("epoch:{secs}")
 }

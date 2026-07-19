@@ -1,0 +1,22 @@
+{
+  "language": "Spanish",
+  "code": "sp",
+  "source": "curated-starter",
+  "note": "Starter set of common PoE2 currency/rune display names (Spanish client). Code 'sp' mirrors the PoeAncients locale naming. English keys must match the canonical names the matcher indexes. Extend via scripts/regen-locales.mjs (poe2db) with human review.",
+  "entries": {
+    "Orb of Transmutation": "Orbe de transmutación",
+    "Orb of Augmentation": "Orbe de aumento",
+    "Orb of Alchemy": "Orbe de alquimia",
+    "Orb of Annulment": "Orbe de anulación",
+    "Regal Orb": "Orbe regio",
+    "Exalted Orb": "Orbe exaltado",
+    "Divine Orb": "Orbe divino",
+    "Chaos Orb": "Orbe del caos",
+    "Vaal Orb": "Orbe Vaal",
+    "Mirror of Kalandra": "Espejo de Kalandra",
+    "Greater Vision Rune": "Runa de visión mayor",
+    "Vision Rune": "Runa de visión",
+    "Fracturing Orb": "Orbe de fracturación",
+    "Hinekora's Lock": "Cerrojo de Hinékora"
+  }
+}

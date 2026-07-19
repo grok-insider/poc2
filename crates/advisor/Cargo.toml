@@ -14,11 +14,12 @@ poc2-data.workspace = true
 poc2-strategies.workspace = true
 poc2-rules.workspace = true
 poc2-probability.workspace = true
+# Only the `Valuator`/`DivEquiv` types are needed — `market`'s `net` feature is
+# off by default (workspace dep), keeping the advisor wasm-buildable.
 poc2-market.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync", "macros", "rt"] }
 tracing.workspace = true
 ahash.workspace = true
 indexmap.workspace = true

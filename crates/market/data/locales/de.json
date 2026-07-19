@@ -1,0 +1,22 @@
+{
+  "language": "German",
+  "code": "de",
+  "source": "curated-starter",
+  "note": "Starter set of common PoE2 currency/rune display names (German client). English keys must match the canonical names the matcher indexes. Extend via scripts/regen-locales.mjs (poe2db) with human review.",
+  "entries": {
+    "Orb of Transmutation": "Kugel der Transmutation",
+    "Orb of Augmentation": "Kugel der Erweiterung",
+    "Orb of Alchemy": "Kugel der Alchemie",
+    "Orb of Annulment": "Kugel der Annullierung",
+    "Regal Orb": "Königliche Kugel",
+    "Exalted Orb": "Erhabene Kugel",
+    "Divine Orb": "Göttliche Kugel",
+    "Chaos Orb": "Chaoskugel",
+    "Vaal Orb": "Vaal-Kugel",
+    "Mirror of Kalandra": "Spiegel von Kalandra",
+    "Greater Vision Rune": "Größere Visionsrune",
+    "Vision Rune": "Visionsrune",
+    "Fracturing Orb": "Zersplitterungskugel",
+    "Hinekora's Lock": "Hinekoras Schloss"
+  }
+}

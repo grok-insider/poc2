@@ -1,8 +1,19 @@
-# Market Meta Aggregator (M5+ / Phase E)
+# Market & Meta Integrations
 
-> Companion to [`poc2-market`](../crates/market) and the upcoming
-> Phase E work. Designs the poe.ninja PoE2 builds aggregator and the
-> off-meta-finder that consume it.
+> Companion to [`poc2-market`](../crates/market) and
+> [`apps/desktop/src/prices/`](../apps/desktop/src/prices/).
+>
+> **Implementation status:**
+> - ✅ **poe2scout currency prices** — native poller (`net` feature),
+>   browser fetch (Settings "Refresh prices" → WASM `applyPrices`), and
+>   the **desktop price cache** (hourly, node:sqlite, poe.ninja fallback
+>   rows) that also prices the ADR-0013 OCR overlay.
+> - ✅ **poe.ninja exchange source** — parallel price feed resolved via
+>   the fuzzy name matcher (`applyNinjaPrices`).
+> - 📐 **poe.ninja builds aggregator + off-meta finder** — the design in
+>   the second half of this doc; `crates/market/src/meta.rs` carries the
+>   types, but no live builds endpoint is consumed and no UI surfaces
+>   niches yet. Treat those sections as design, not description.
 
 ## Goals
 
@@ -67,9 +78,49 @@ poe2scout /currencies ┘            │
                       │  off_meta(builds, prices) │
                       └────────────────────────┘
                                     │
-                                    ▼
+                                     ▼
                           Vec<NicheTarget>
 ```
+
+### poe.ninja exchange source (parallel price feed)
+
+A second, independent live price source sits alongside poe2scout:
+`poc2_market::prices::fetch_ninja_exchange` polls poe.ninja's PoE2
+bulk-currency **exchange** economy at
+`https://poe.ninja/poe2/api/economy/exchange/current/overview`, one request
+per `type` — `Currency`, `Runes`, `Expedition`, `Verisium`, `UncutGems` —
+fetched concurrently (`futures::try_join_all`). Each request sends a
+`User-Agent` and a `Referer` of the form
+`https://poe.ninja/poe2/economy/<league-slug>/<type-slug>` (poe.ninja gates
+the API on a plausible referer).
+
+The response splits the catalogue from the prices: `items[]` is `id → name`,
+`lines[]` is `id → primaryValue`, and the `core` block names the denominating
+`primary` currency plus the conversion `rates`. Entries are keyed by
+`name_match::normalize(name)` and, unlike the poe2scout slug → `CurrencyId`
+table, are resolved onto engine ids through the **fuzzy matcher**
+(`Valuator::resolve_name`) — so no hand-maintained id map is needed.
+
+**SC-divine-primary vs HC-exalt-primary rate handling.** poe.ninja denominates
+prices in whichever currency a league trades against:
+
+- **Softcore** leagues report `core.primary == "divine"`. Prices are already
+  in divines, so the divine rate is `1.0` and `core.rates.exalted` carries the
+  exalts-per-divine cross-rate used to derive `exalt_value`.
+- **Hardcore** leagues report `core.primary == "exalted"`. Prices are in
+  exalts, so the exalt rate is `1.0` and `core.rates.divine` carries the
+  divines-per-exalt cross-rate used to derive `divine_value`.
+
+`fetch_ninja_exchange` derives **both** `divine_value` and `exalt_value` for
+every line via those rates; lines with a `null` `primaryValue` are stored with
+`has_market_data: false`. Missing rates fall back to `1.0` (the price passes
+through unchanged) so schema drift degrades gracefully instead of zeroing
+prices. The pure `apply_ninja_to_valuator` then sets each resolved currency's
+`DivEquiv` from `divine_value` (`expected`, with `min = x0.7`, `max = x1.5` —
+the same band margins as the poe2scout apply path). The WASM boundary exposes
+this as `applyNinjaPrices` (browser fetches the snapshot; the engine has no
+network stack), mirroring `applyPrices` and returning the same
+`{ applied, unmatched }` view.
 
 ## Crate Layout
 

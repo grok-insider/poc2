@@ -1,22 +1,18 @@
 {
-  "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "allowSyntheticDefaultImports": true,
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "isolatedModules": true,
-    "useDefineForClassFields": true,
-    "verbatimModuleSyntax": true,
-    "types": ["svelte", "vite/client", "node"]
+    "sourceMap": true,
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"],
-  "exclude": ["node_modules", "dist", "src-tauri"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["test", "dist", "node_modules"]
 }

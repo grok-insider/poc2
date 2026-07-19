@@ -1,0 +1,114 @@
+# release-plz — automated versioning + GitHub Releases for the `poc2` workspace.
+# Docs: https://release-plz.dev/docs/config
+#
+# Every crate shares ONE version via `version.workspace = true` (root Cargo.toml
+# `[workspace.package] version`). To keep that single field consistent, all crates
+# are pinned to one `version_group` so they bump in lockstep — a change in ANY
+# crate moves the whole workspace to the next version.
+#
+# poc2's actual deliverable is the web app + WASM engine + the Electron desktop
+# packages, none of which is a Cargo "binary product". So we anchor the single
+# tag/changelog on `poc2-engine` — the clean dependency root every other crate
+# builds on. It emits the one `vX.Y.Z` tag + GitHub Release + the root
+# CHANGELOG.md; the other 12 crates ride the shared version silently and fold
+# their commits into that changelog via `changelog_include`.
+#
+# On each push to `master`, release-plz opens/updates a "release PR" (bump +
+# Cargo.lock + CHANGELOG). The release.yml workflow then rewrites that PR's
+# changelog with AI-written, user-facing notes. Merging it tags `vX.Y.Z`, creates
+# the GitHub Release, and (release.yml) builds + attaches the Electron packages.
+# Nothing is published to crates.io (`git_only`).
+
+[workspace]
+# Not on crates.io: read the current version from the `v*` git tag, not the cargo
+# registry. Implies no `cargo publish`.
+git_only = true
+# Never run `cargo publish` (git_only alone doesn't always disable it).
+publish = false
+# Release the current workspace version whenever it isn't tagged yet (robust; lets
+# a direct version bump cut a release and re-baseline at packageable code).
+release_always = true
+# Only open/update the release PR when a `feat`/`fix` has landed. Keeps the release
+# PR meaningful AND skips the expensive per-crate `cargo package` analysis on
+# chore/docs/ci/refactor-only pushes (those still ride into the next release's
+# changelog — release_commits filters the trigger, not the notes).
+release_commits = "^(feat|fix)"
+# Internal libs + WASM/desktop app, not a published API: skip cargo-semver-checks.
+semver_check = false
+# This is an end-user app (not a published library): treat `feat:` as a minor bump
+# even on 0.x and a breaking change as a major — more communicative than the
+# Cargo-SemVer 0.x default.
+features_always_increment_minor = true
+# CRITICAL: every crate must resolve its release baseline to the SINGLE shared tag
+# `vX.Y.Z`. Set workspace-wide (not just on the anchor): otherwise the libraries
+# fall back to the default `poc2-<lib>-vX.Y.Z` pattern, find no such tag, and get
+# treated as "initial release" — replaying the entire history into a spurious bump.
+git_tag_name = "v{{ version }}"
+pr_labels = ["release"]
+
+# --- The libraries: share the version group, stay silent individually. ----------
+[[package]]
+name = "poc2-data"
+version_group = "poc2"
+[[package]]
+name = "poc2-strategies"
+version_group = "poc2"
+[[package]]
+name = "poc2-rules"
+version_group = "poc2"
+[[package]]
+name = "poc2-probability"
+version_group = "poc2"
+[[package]]
+name = "poc2-market"
+version_group = "poc2"
+[[package]]
+name = "poc2-advisor"
+version_group = "poc2"
+[[package]]
+name = "poc2-parser"
+version_group = "poc2"
+[[package]]
+name = "poc2-plugin-host"
+version_group = "poc2"
+[[package]]
+name = "poc2-plugin-sdk"
+version_group = "poc2"
+[[package]]
+name = "poc2-wasm"
+version_group = "poc2"
+[[package]]
+name = "poc2-capture"
+version_group = "poc2"
+[[package]]
+name = "poc2-pipeline"
+version_group = "poc2"
+
+# --- The anchor: the single release unit (one `vX.Y.Z` tag + Release + changelog).
+[[package]]
+name = "poc2-engine"
+version_group = "poc2"
+git_tag_enable = true
+git_release_enable = true
+# Tag/release named `vX.Y.Z` (the `git_tag_name` template is set workspace-wide
+# above so all crates share this baseline; poc2-engine is the only one that emits it).
+git_release_name = "v{{ version }}"
+# Keep the single curated changelog at the repo root.
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+# poc2-engine is the dependency root every other crate builds on, so a change
+# anywhere ships in the product. Fold all members' commits into the root changelog.
+changelog_include = [
+    "poc2-data",
+    "poc2-strategies",
+    "poc2-rules",
+    "poc2-probability",
+    "poc2-market",
+    "poc2-advisor",
+    "poc2-parser",
+    "poc2-plugin-host",
+    "poc2-plugin-sdk",
+    "poc2-wasm",
+    "poc2-capture",
+    "poc2-pipeline",
+]

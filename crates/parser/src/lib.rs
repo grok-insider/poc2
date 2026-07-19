@@ -55,5 +55,8 @@
 pub mod lower;
 pub mod text;
 
-pub use lower::lower_to_item;
-pub use text::{parse_clipboard_text, ParseError, ParsedItem, Requirements};
+pub use lower::{item_class_id_from_text, lower_to_item, lower_to_item_offline};
+pub use text::{
+    parse_clipboard_text, AnnotationAffix, ModAnnotation, ModLine, ParseError, ParsedItem,
+    Requirements, StatRoll,
+};

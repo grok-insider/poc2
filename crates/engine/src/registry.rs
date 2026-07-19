@@ -75,7 +75,11 @@ impl ModRegistry {
     /// Per-(mod, scope) duplicate weight observations resolve via
     /// last-writer-wins. The pipeline emits at most one per pair today; if
     /// future sources cross-emit duplicates, the warning here surfaces it.
-    pub fn from_mods(mods: Vec<ModDefinition>, weights: Vec<WeightObservation>) -> Self {
+    pub fn from_mods(mut mods: Vec<ModDefinition>, weights: Vec<WeightObservation>) -> Self {
+        // Derive the Spirit / SkillLevel concepts the pipeline doesn't emit yet
+        // (additive — see `crate::concepts`).
+        crate::concepts::augment_concepts(&mut mods);
+
         let mut by_id = AHashMap::with_capacity(mods.len());
         let mut by_group: AHashMap<ModGroupId, SmallVec<[ModIndex; 8]>> = AHashMap::new();
         let mut by_class_affix: AHashMap<(ItemClassId, AffixType), Vec<ModIndex>> = AHashMap::new();
@@ -202,41 +206,87 @@ impl ModRegistry {
     /// Ineligibility (`Self::for_class_affix` already filtered the candidate
     /// out) is the caller's responsibility; this method assumes the mod is
     /// at least nominally eligible on the item class.
-    pub fn weight_for(
+    /// Like [`Self::weight_for`] but with the base's tag list available, so
+    /// the tag-intersection (leftmost-tag-wins) resolution can run as a real
+    /// scope instead of the binary eligibility stub.
+    ///
+    /// Resolution order (first match wins):
+    /// 1–3. Same numeric CoE/poe2db weight scopes as [`Self::weight_for`]
+    ///    (per-base ilvl-stratified, per-base exact, per-class aggregate).
+    /// 4. **Tag-intersection**: [`ModDefinition::spawn_weight_for_tags`]
+    ///    against `base_tags`. A matching positive weight is used directly;
+    ///    a matching zero weight excludes the mod (returns `0.0`); no match
+    ///    means the mod cannot roll on this base (`0.0`).
+    /// 5. Eligibility stub (any positive `spawn_weights` entry ⇒ 1.0) only
+    ///    when `base_tags` is empty (no `BaseRegistry` available — the
+    ///    v2-transitional path).
+    pub fn weight_for_on_base(
         &self,
         mod_id: &ModId,
         base: &BaseTypeId,
         ilvl: u32,
         item_class: &ItemClassId,
+        base_tags: &[crate::ids::TagId],
     ) -> f64 {
-        // 1. Per-base ilvl-stratified weight. The vec is pre-sorted ascending
-        //    by `min_ilvl`; iterate in reverse to find the largest threshold
-        //    satisfied by `ilvl`.
+        // Numeric scopes first (1-3) — identical to `weight_for`.
+        if let Some(w) = self.numeric_weight(mod_id, base, ilvl, item_class) {
+            return w;
+        }
+        // 4. Tag-intersection (real spawn-weight resolution) when we have the
+        //    base's tags.
+        if !base_tags.is_empty() {
+            if let Some(idx) = self.by_id.get(mod_id) {
+                if let Some(m) = self.mods.get(idx.0 as usize) {
+                    return match m.spawn_weight_for_tags(base_tags) {
+                        Some(w) => f64::from(w),
+                        None => 0.0,
+                    };
+                }
+            }
+            return 0.0;
+        }
+        // 5. No base tags: fall back to the binary eligibility stub.
+        self.eligibility_stub(mod_id)
+    }
+
+    /// Numeric weight scopes (per-base-ilvl / per-base / per-class). Returns
+    /// `None` when no numeric observation covers this mod, so callers can
+    /// fall through to tag/eligibility resolution.
+    fn numeric_weight(
+        &self,
+        mod_id: &ModId,
+        base: &BaseTypeId,
+        ilvl: u32,
+        item_class: &ItemClassId,
+    ) -> Option<f64> {
         if let Some(tiers) = self
             .weights_by_mod_base_ilvl
             .get(&(mod_id.clone(), base.clone()))
         {
             for (min_ilvl, w) in tiers.iter().rev() {
                 if ilvl >= *min_ilvl {
-                    return *w;
+                    return Some(*w);
                 }
             }
         }
-        // 2. Per-base exact weight.
         if let Some(w) = self
             .weights_by_mod_base
             .get(&(mod_id.clone(), base.clone()))
         {
-            return *w;
+            return Some(*w);
         }
-        // 3. Per-class aggregate.
         if let Some(w) = self
             .weights_by_mod_class
             .get(&(mod_id.clone(), item_class.clone()))
         {
-            return *w;
+            return Some(*w);
         }
-        // 4. RePoE-fork tag-eligibility fallback.
+        None
+    }
+
+    /// RePoE-fork binary eligibility stub: 1.0 when the mod has any positive
+    /// `spawn_weights` entry, else 0.0.
+    fn eligibility_stub(&self, mod_id: &ModId) -> f64 {
         if let Some(idx) = self.by_id.get(mod_id) {
             if let Some(m) = self.mods.get(idx.0 as usize) {
                 if m.spawn_weights.iter().any(|sw| sw.weight > 0) {
@@ -244,8 +294,81 @@ impl ModRegistry {
                 }
             }
         }
-        // 5. Not eligible.
         0.0
+    }
+
+    pub fn weight_for(
+        &self,
+        mod_id: &ModId,
+        base: &BaseTypeId,
+        ilvl: u32,
+        item_class: &ItemClassId,
+    ) -> f64 {
+        // Numeric scopes (1-3), then the binary eligibility stub (4). This is
+        // the tag-less path used when no `BaseRegistry` is threaded; callers
+        // that have the base's tags should use `weight_for_on_base` to get
+        // real tag-intersection resolution.
+        self.numeric_weight(mod_id, base, ilvl, item_class)
+            .unwrap_or_else(|| self.eligibility_stub(mod_id))
+    }
+
+    /// Inclusive higher-tier spawn weight of `m` on a specific (base, ilvl,
+    /// class), per the PoE2 mechanic where a lower tier "inherits" the spawn
+    /// weight of the higher tiers of the same mod-group that can roll at the
+    /// current item level.
+    ///
+    /// Concretely: `Σ weight_for(peer)` over all peers in `m`'s mod-group
+    /// that (a) share `m`'s affix type, (b) are rollable at `ilvl`
+    /// (`required_level <= ilvl`), and (c) are the **same or a stronger
+    /// tier** than `m` (`peer.tier_strength_key() >= m.tier_strength_key()`).
+    ///
+    /// This mirrors the recombinator success formula's `Σ_{j=m_i}^{m_t0}`
+    /// term (`recombinator.rs`), but is now available to normal currency
+    /// sampling so Exalt/Aug/Regal/Chaos odds match in-game tools (e.g.
+    /// Craft of Exile, Belton's weight sheets).
+    ///
+    /// `m_t0` (the pool top) is implicitly ilvl-dependent: peers above `ilvl`
+    /// are excluded, so raising ilvl that unlocks a new top tier increases
+    /// the inclusive weight of every lower tier in the group.
+    pub fn inclusive_weight_for(
+        &self,
+        m: &ModDefinition,
+        base: &BaseTypeId,
+        ilvl: u32,
+        item_class: &ItemClassId,
+    ) -> f64 {
+        self.inclusive_weight_for_on_base(m, base, ilvl, item_class, &[])
+    }
+
+    /// [`Self::inclusive_weight_for`] with the base's tag list available, so
+    /// each peer tier's weight resolves via tag-intersection
+    /// ([`Self::weight_for_on_base`]) when no numeric observation exists.
+    pub fn inclusive_weight_for_on_base(
+        &self,
+        m: &ModDefinition,
+        base: &BaseTypeId,
+        ilvl: u32,
+        item_class: &ItemClassId,
+        base_tags: &[crate::ids::TagId],
+    ) -> f64 {
+        let my_key = m.tier_strength_key();
+        let mut sum = 0.0;
+        for &peer_idx in self.group_members(&m.mod_group.0) {
+            let Some(peer) = self.at(peer_idx) else {
+                continue;
+            };
+            if peer.affix_type != m.affix_type {
+                continue;
+            }
+            if peer.required_level > ilvl {
+                continue;
+            }
+            if peer.tier_strength_key() < my_key {
+                continue;
+            }
+            sum += self.weight_for_on_base(&peer.id, base, ilvl, item_class, base_tags);
+        }
+        sum
     }
 
     /// Number of weight observations indexed in this registry. Useful for
@@ -283,6 +406,7 @@ mod tests {
             spawn_weights: smallvec![],
             stats: smallvec![],
             required_level: 1,
+            tier: None,
             allowed_item_classes: classes.iter().map(|c| ItemClassId::from(*c)).collect(),
             patch_range: PatchRange::ALL,
             flags: ModFlags::empty(),
@@ -509,6 +633,68 @@ mod tests {
             ) - 1000.0)
                 .abs()
                 < 1e-9
+        );
+    }
+
+    #[test]
+    fn weight_for_on_base_uses_leftmost_tag_wins() {
+        use crate::ids::TagId;
+        // A mod with spawn_weights [str_armour:1000, default:0]. On a base
+        // tagged str_armour it weighs 1000; on a base tagged only default it
+        // is excluded (weight 0); on a base with neither tag it cannot roll.
+        let mut m = mk_mod("Impregnable", "Armour%", AffixType::Prefix, &["BodyArmour"]);
+        m.spawn_weights = smallvec![
+            SpawnWeight {
+                tag: TagId::from("str_armour"),
+                weight: 1000,
+            },
+            SpawnWeight {
+                tag: TagId::from("default"),
+                weight: 0,
+            },
+        ];
+        let r = ModRegistry::from_mods(vec![m], vec![]);
+        let id = ModId::from("Impregnable");
+        let base = BaseTypeId::from("GloriousPlate");
+        let class = ItemClassId::from("BodyArmour");
+
+        // str_armour present (with default) → leftmost match wins = 1000.
+        let w_str = r.weight_for_on_base(
+            &id,
+            &base,
+            82,
+            &class,
+            &[TagId::from("str_armour"), TagId::from("default")],
+        );
+        assert!((w_str - 1000.0).abs() < 1e-9, "got {w_str}");
+
+        // only default present → matches the zero-weight entry → excluded.
+        let w_def = r.weight_for_on_base(&id, &base, 82, &class, &[TagId::from("default")]);
+        assert!(
+            w_def.abs() < 1e-12,
+            "default-only base must exclude; got {w_def}"
+        );
+
+        // no matching tag → cannot roll.
+        let w_none = r.weight_for_on_base(&id, &base, 82, &class, &[TagId::from("dex_armour")]);
+        assert!(w_none.abs() < 1e-12, "no tag match must be 0; got {w_none}");
+
+        // numeric weight observation still takes precedence over tags.
+        let r2 = ModRegistry::from_mods(
+            vec![{
+                let mut m2 = mk_mod("Impregnable", "Armour%", AffixType::Prefix, &["BodyArmour"]);
+                m2.spawn_weights = smallvec![SpawnWeight {
+                    tag: TagId::from("str_armour"),
+                    weight: 1000,
+                }];
+                m2
+            }],
+            vec![obs_base("Impregnable", "GloriousPlate", 42.0)],
+        );
+        let w_num = r2.weight_for_on_base(&id, &base, 82, &class, &[TagId::from("str_armour")]);
+        assert!(
+            (w_num - 42.0).abs() < 1e-9,
+            "numeric scope wins; got {w_num}"
         );
     }
 

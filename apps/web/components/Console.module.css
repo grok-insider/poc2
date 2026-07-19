@@ -1,0 +1,124 @@
+.app {
+  display: grid;
+  height: 100vh;
+  grid-template-columns: 60px 1fr;
+  grid-template-rows: 52px 1fr 52px;
+  grid-template-areas:
+    "top  top"
+    "rail main"
+    "dock dock";
+}
+
+.topbar {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  z-index: 20;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.mark {
+  color: var(--primary);
+  font-size: 17px;
+}
+.wordmark {
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.16em;
+  color: var(--fg);
+}
+.itemline {
+  font-size: 13px;
+}
+.topright {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg-base);
+}
+.railBtn {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--fg-faint);
+  position: relative;
+  transition: color 150ms var(--easing), background 150ms var(--easing);
+}
+.railBtn:hover {
+  color: var(--fg-muted);
+  background: var(--surface);
+}
+.railActive {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.railActive::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--primary);
+}
+
+.canvas {
+  grid-area: main;
+  display: grid;
+  grid-template-columns: minmax(340px, 38%) 1fr;
+  gap: 14px;
+  padding: 14px;
+  overflow: hidden;
+  min-height: 0;
+}
+/* Full-bleed sections (Genesis Tree): hide the bench, give the pane
+   the whole canvas. */
+.canvasFull {
+  grid-template-columns: 1fr;
+}
+.bench,
+.guide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
+}
+
+/* capture-daemon connection dot (game green, glyph-paired with the label) */
+.captureDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}

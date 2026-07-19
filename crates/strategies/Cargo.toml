@@ -11,6 +11,8 @@ repository.workspace = true
 [dependencies]
 poc2-engine.workspace = true
 poc2-data.workspace = true
+# Only `Valuator` is used (predicate.rs); `market`'s `net` feature is off by
+# default (workspace dep), keeping the strategies → market chain wasm-buildable.
 poc2-market.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -20,6 +22,8 @@ indexmap.workspace = true
 ahash.workspace = true
 smallvec.workspace = true
 tracing.workspace = true
+# Embeds the seed-strategy TOML catalogue into the binary (works on wasm).
+include_dir = "0.7"
 
 [dev-dependencies]
 insta.workspace = true

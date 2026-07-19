@@ -1,0 +1,554 @@
+# Genesis Tree curated metadata (PoE2 0.5 "Return of the Ancients").
+#
+# Companion to `pipeline/data/brequel_tree.json` (a committed snapshot of
+# RePoE-fork's `passive_skill_trees/BrequelTree.json`, client 4.5.1.1.6).
+# The tree JSON carries machine stat keys only; this file supplies:
+#
+#   1. `stat_templates`  — stat-key → human-readable line ("{}" = value).
+#   2. `node_overrides`  — full descriptions for `brequel_display_*` nodes
+#      whose specifics (mod lists, base lists) are not in the stats. Wording
+#      follows poe2db.tw / poe2wiki / Fextralife verbatim where possible.
+#   3. `wombs`           — branch metadata (Wombgift, point caps, icons).
+#   4. `presets`         — community-sourced "best nodes per goal"
+#      allocations with citations. All numbers are community estimates.
+#   5. `farming` / `videos` — Hiveblood/Wombgift farming notes + vetted
+#      video sources surfaced in the UI.
+#
+# Refresh `brequel_tree.json` from
+#   https://repoe-fork.github.io/poe2/passive_skill_trees/BrequelTree.json
+# when a patch changes the tree, then re-run the pipeline build.
+#
+# Point caps are community-confirmed (multi-source): Currency 15, Amulet 15,
+# Ring 10, Belt 10 — the 15s include +5 from Breach Atlas passives
+# ("Exquisite Design" for Amulet, the Currency equivalent), +2-per-womb
+# atlas nodes, quest/Xesht completions. The Breachstone womb has no
+# allocatable passives — it only births Breachstones from Revelatory gifts.
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Womb branches
+# ---------------------------------------------------------------------------
+
+[wombs.currency]
+display_name = "Currency Womb"
+wombgift = "Lavish Wombgift"
+gift_art = "BreachFruit2"
+points = 15
+icon_normal = "KeepersCurrencyNode"
+icon_notable = "KeepersCurrencyNotable"
+blurb = "Births currency: Transmutes through Divines, Catalysts, Breach Splinters, Essences of the Breach, Altered Collarbones and Breachlord Sacs. Blocker notables prune the pool toward what you want."
+
+[wombs.ring]
+display_name = "Ring Womb"
+wombgift = "Signet Wombgift"
+gift_art = "BreachFruit3"
+points = 10
+icon_normal = "KeepersMiscellaneousNode"
+icon_notable = "KeepersMiscellaneousNotable"
+blurb = "Births rings, including the Genesis-exclusive Biostatic / Vitalic / Mnemonic / Kinetic / Oneiric / Grasping bases and Breach Rings. Gateway nodes unlock tree-exclusive Caster and Minion modifiers."
+
+[wombs.amulet]
+display_name = "Amulet Womb"
+wombgift = "Ornate Wombgift"
+gift_art = "BreachFruit5"
+points = 15
+icon_normal = "KeepersEquipmentNode"
+icon_notable = "KeepersEquipmentNotable"
+blurb = "Births amulets, including the Genesis-exclusive Lament / Portent / Absent / Corona bases. The deepest branch: guaranteed attribute/resistance mods, minimum modifier levels, and max-value suffix nodes."
+
+[wombs.belt]
+display_name = "Belt Womb"
+wombgift = "Banded Wombgift"
+gift_art = "BreachFruit1"
+points = 10
+icon_normal = "KeepersUniqueNode"
+icon_notable = "KeepersUniqueNotable"
+blurb = "Births belts, including the Genesis-exclusive Stalking / Invoking / Sinew / Forking bases (+1 Charm Slot). Gateway nodes unlock tree-exclusive Caster and Minion modifiers."
+
+[wombs.breachstone]
+display_name = "Breachstone Womb"
+wombgift = "Revelatory Wombgift"
+gift_art = "BreachFruit4"
+points = 0
+icon_normal = "MasteryBlank"
+icon_notable = "MasteryBlank"
+blurb = "No passives — slot a Revelatory Wombgift (auto-assembled from 300 Breach Splinters) to birth a Breachstone. Splinter-acceleration nodes live in the Currency branch."
+
+# ---------------------------------------------------------------------------
+# Stat-key templates ("{}" is replaced with the stat value)
+# ---------------------------------------------------------------------------
+
+[stat_templates]
+"brequel_reward_additional_item_chance_%" = "{}% Surpassing chance to Birth an additional Item"
+"brequel_reward_5_additional_items_same_type_chance_%" = "{}% chance to Birth 5 additional Items of the same type"
+"brequel_reward_10_additional_exalted_orb_chance_%" = "{}% chance to Birth 10 additional Items of the same type when Birthing Exalted Orbs"
+"brequel_reward_16_to_24_additional_splinters_chance_%" = "{}% chance to Birth 16 to 24 additional Breach Splinters when Birthing Breach Splinters"
+"brequel_reward_2_additional_quality_currency_same_type_chance_%" = "{}% chance to Birth 2 additional Items of the same type when Birthing Quality Currency"
+"brequel_reward_3_to_7_additional_chaos_or_vaal_chance_%" = "{}% chance to Birth 3 to 7 additional Items of the same type when Birthing Chaos Orbs or Vaal Orbs"
+"brequel_reward_additional_alchemy_orb_chance_%" = "{}% chance to Birth an additional Item of the same type when Birthing Orbs of Alchemy"
+"brequel_reward_additional_exalted_orb_chance_%" = "{}% chance to Birth an additional Item of the same type when Birthing Exalted Orbs"
+"brequel_reward_additional_regal_orb_chance_%" = "{}% chance to Birth an additional Item of the same type when Birthing Regal Orbs"
+"brequel_reward_additional_catalyst_same_type_chance_%" = "{}% Surpassing chance to Birth an additional Catalyst of the same type when Birthing Catalysts"
+"brequel_reward_additional_catalyst_different_type_chance_%" = "{}% Surpassing chance to Birth an additional Catalyst of a different type when Birthing Catalysts"
+"brequel_reward_additional_jewel_catalyst_same_type_chance_%" = "{}% Surpassing chance to Birth an additional Jewel Catalyst of the same type when Birthing Jewel Catalysts"
+"brequel_reward_additional_jewel_catalyst_different_type_chance_%" = "{}% Surpassing chance to Birth an additional Jewel Catalyst of a different type when Birthing Jewel Catalysts"
+"brequel_reward_absent_amulet_chance_+%" = "{}% increased chance for Birthed Items to be Absent Amulets"
+"brequel_reward_lament_amulet_chance_+%" = "{}% increased chance for Birthed Items to be Lament Amulets"
+"brequel_reward_portent_amulet_chance_+%" = "{}% increased chance for Birthed Items to be Portent Amulets"
+"brequel_reward_corona_amulet_chance_%" = "{}% chance for Birthed Items to be Corona Amulets"
+"brequel_reward_reservation_amulet_chance_%" = "{}% chance for Birthed Items to be Lament, Portent or Absent Amulets"
+"brequel_reward_stalking_belt_chance_%" = "{}% chance for Birthed Items to be Stalking Belts"
+"brequel_reward_sinew_belt_chance_%" = "{}% chance for Birthed Items to be Sinew Belts"
+"brequel_reward_invoking_belt_chance_%" = "{}% chance for Birthed Items to be Invoking Belts"
+"brequel_reward_forking_belt_chance_%" = "{}% chance for Birthed Items to be Forking Belts"
+"brequel_reward_breach_ring_chance_%" = "{}% chance for Birthed Items to be Breach Rings"
+"brequel_reward_breach_ring_additional_quality" = "Birthed Breach Rings have +{}% to maximum Quality"
+"brequel_reward_breach_splinters_chance_%" = "{}% chance for Birthed Currency to be a stack of Breach Splinters"
+"brequel_reward_breachlord_sac_chance_%" = "{}% chance for Birthed Currency to be a Breachlord Sac"
+"brequel_reward_catalyst_chance_%" = "{}% chance for Birthed Currency to be a Catalyst"
+"brequel_reward_special_catalyst_chance_%" = "{}% chance for Birthed Catalysts to be Jewel Catalysts"
+"brequel_reward_only_catalysts" = "Can only Birth Catalysts"
+"brequel_reward_essence_chance_%" = "{}% chance for Birthed Currency to be an Essence of the Breach"
+"brequel_reward_desecration_chance_%" = "{}% chance for Birthed Currency to be an Altered Collarbone"
+"brequel_reward_chaos_orb_chance_+%" = "{}% increased chance to Birth Chaos Orbs"
+"brequel_reward_vaal_orb_chance_+%" = "{}% increased chance to Birth Vaal Orbs"
+"brequel_reward_divine_orb_chance_+%" = "{}% increased chance to Birth Divine Orbs"
+"brequel_reward_exalted_orb_chance_+%" = "{}% increased chance to Birth Exalted Orbs"
+"brequel_reward_regal_orb_chance_+%" = "{}% increased chance to Birth Regal Orbs"
+"brequel_reward_jewellers_orb_chance_+%" = "{}% increased chance to Birth Jeweller's Orbs"
+"brequel_reward_quality_currency_chance_+%" = "{}% increased chance to Birth Quality Currency"
+"brequel_reward_orb_of_alchemy_chance_+%" = "{}% increased chance to Birth Orbs of Alchemy"
+"brequel_reward_orb_of_anunulment_chance_+%" = "{}% increased chance to Birth Orbs of Annulment"
+"brequel_reward_orb_of_augmentation_chance_+%" = "{}% increased chance to Birth Orbs of Augmentation"
+"brequel_reward_orb_of_transmutation_chance_+%" = "{}% increased chance to Birth Orbs of Transmutation"
+"brequel_reward_no_chance_orbs" = "Cannot Birth Orbs of Chance"
+"brequel_reward_no_divine_orbs" = "Cannot Birth Divine Orbs"
+"brequel_reward_no_gem_cutters_prisms" = "Cannot Birth Gemcutter's Prisms"
+"brequel_reward_no_orbs_of_annulment" = "Cannot Birth Orbs of Annulment"
+"brequel_reward_no_orbs_of_augmentation" = "Cannot Birth Orbs of Augmentation"
+"brequel_reward_no_orbs_of_transmutation" = "Cannot Birth Orbs of Transmutation"
+"brequel_reward_no_perfect_jewellers_orbs" = "Cannot Birth Perfect Jeweller's Orbs"
+"brequel_reward_convert_items_to_gold" = "All Birthed Items are converted to Gold"
+"brequel_reward_consume_no_resource_chance_%" = "{}% chance for Birthing to not consume Hiveblood"
+"brequel_reward_resource_cost_+%" = "Birthing consumes {}% increased Hiveblood"
+"brequel_reward_enable_caster_modifiers" = "Birthed Items can roll additional Caster-related Modifiers"
+"brequel_reward_enable_minion_modifiers" = "Birthed Items can roll additional Minion-related Modifiers"
+"brequel_reward_guarantee_attribute_modifier" = "Birthed Items always have an Attribute Modifier"
+"brequel_reward_guarantee_defence_modifier" = "Birthed Items always have an Armour, Evasion or Energy Shield Modifier"
+"brequel_reward_guarantee_open_prefix" = "Birthed Items always have an empty Prefix Modifier"
+"brequel_reward_guarantee_open_suffix" = "Birthed Items always have an empty Suffix Modifier"
+"brequel_reward_guarantee_resistance_modifier" = "Birthed Items always have a Resistance Modifier"
+"brequel_reward_guarantee_resource_modifier" = "Birthed Items always have a Life or Mana Modifier"
+"brequel_reward_guarantee_two_caster_modifiers" = "Birthed Items always have two Caster Modifiers"
+"brequel_reward_guarantee_two_minion_modifiers" = "Birthed Items always have two Minion Modifiers"
+"brequel_reward_guarantee_x_caster_modifier" = "Birthed Items always have a Caster Modifier"
+"brequel_reward_guarantee_x_minion_modifiers" = "Birthed Items always have a Minion Modifier"
+"brequel_reward_modifier_value_lucky_rolls_+" = "Modifiers on Birthed Items have their values rolled an additional {} times, keeping the highest value"
+"brequel_reward_prefix_modifier_value_lucky_rolls_+" = "Prefix Modifiers on Birthed Items have their values rolled an additional {} times, keeping the highest value"
+"brequel_reward_suffix_modifier_value_lucky_rolls_+" = "Suffix Modifiers on Birthed Items have their values rolled an additional {} times, keeping the highest value"
+"brequel_reward_caster_modifier_value_lucky_rolls_+" = "Caster Modifiers on Birthed Items have their values rolled an additional {} times, keeping the highest value"
+"brequel_reward_minion_modifier_value_lucky_rolls_+" = "Minion Modifiers on Birthed Items have their values rolled an additional {} times, keeping the highest value"
+"brequel_reward_prefix_modifier_values_always_max" = "Prefix Modifiers on Birthed Items have maximum values"
+"brequel_reward_suffix_modifier_values_always_max" = "Suffix Modifiers on Birthed Items have maximum values"
+"brequel_reward_no_attack_modifiers" = "Birthed Items cannot have Attack Modifiers"
+"brequel_reward_no_caster_modifiers" = "Birthed Items cannot have Caster Modifiers"
+"brequel_reward_no_critical_modifiers" = "Birthed Items cannot have Critical Modifiers"
+"brequel_reward_temporary_minion_limit_crafted_chance_%" = "{}% chance for Birthed Items to be Crafted with of Multitudes (+1 to Temporary Minion Limit)"
+"brequel_reward_minimum_modifier_level" = "Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_modifier_levelb" = "Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_prefix_modifier_level" = "Birthed Items have Minimum Prefix Modifier Level {}"
+"brequel_reward_minimum_suffix_modifier_level" = "Birthed Items have Minimum Suffix Modifier Level {}"
+"brequel_reward_minimum_attribute_modifier_level" = "Attribute Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_strength_modifier_level" = "Strength Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_dexterity_modifier_level" = "Dexterity Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_intelligence_modifier_level" = "Intelligence Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_resistance_modifier_level" = "Resistance Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_fire_resistance_modifier_level" = "Fire Resistance Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_cold_resistance_modifier_level" = "Cold Resistance Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_lightning_resistance_modifier_level" = "Lightning Resistance Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_chaos_resistance_modifier_levelb" = "Chaos Resistance Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_resource_modifier_levela" = "Life and Mana Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_life_modifier_level" = "Life Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_mana_modifier_levela" = "Mana Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_defence_modifier_levela" = "Armour, Evasion and Energy Shield Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_armour_modifier_level" = "Armour Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_evasion_modifier_level" = "Evasion Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_energy_shield_modifier_level" = "Energy Shield Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_damage_modifier_level" = "Damage Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_flask_modifier_level" = "Flask Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_charm_modifier_level" = "Charm Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_caster_modifier_levela" = "Caster Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_caster_prefix_modifier_levela" = "Caster Prefix Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_caster_suffix_modifier_levela" = "Caster Suffix Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_caster_speed_modifier_levela" = "Caster Speed Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_caster_crit_modifier_levela" = "Caster Critical Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_minion_modifier_level" = "Minion Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_minion_prefix_modifier_levela" = "Minion Prefix Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_minion_suffix_modifier_levela" = "Minion Suffix Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_minion_damage_modifier_levelb" = "Minion Damage Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_minion_speed_modifier_levelb" = "Minion Speed Modifiers on Birthed Items have Minimum Modifier Level {}"
+"brequel_reward_minimum_minion_resistance_modifier_levelb" = "Minion Resistance Modifiers on Birthed Items have Minimum Modifier Level {}"
+# `brequel_display_*` keys are covered per-node by [[node_overrides]].
+
+# ---------------------------------------------------------------------------
+# Node description overrides (display nodes whose specifics live outside the
+# stats dict). Keyed by the stable node `id` in BrequelTree.json. Wording per
+# poe2db.tw / Fextralife (Genesis Tree Crafting Guide, updated 2026-06-03).
+# ---------------------------------------------------------------------------
+
+# -- Currency branch --
+[[node_overrides]]
+id = "BrequelTreeCurrency23"
+description = "Birthed Orbs of Transmutation and Orbs of Augmentation are always Greater or Perfect"
+
+[[node_overrides]]
+id = "BrequelTreeCurrency35"
+description = "Cannot Birth Skittering, Reaver or Sibilant Catalysts"
+
+[[node_overrides]]
+id = "BrequelTreeCurrency37"
+description = "Cannot Birth Xoph's, Tul's, Esh's, Uul-Netol's or Chayula's Catalysts"
+
+[[node_overrides]]
+id = "BrequelTreeCurrency39"
+description = "Cannot Birth Flesh, Neural, Adaptive or Carapace Catalysts"
+
+[[node_overrides]]
+id = "BrequelTreeCurrency69"
+description = "Cannot Birth Chaos Orbs or Vaal Orbs"
+
+# -- Ring branch --
+[[node_overrides]]
+id = "BrequelTreeRings10"
+description = "Birthed Items always have an empty Prefix Modifier and an empty Suffix Modifier"
+
+[[node_overrides]]
+id = "BrequelTreeRings14"
+description = "5% chance for Birthed Items to be Biostatic Rings\n5% chance for Birthed Items to be Grasping Rings"
+
+[[node_overrides]]
+id = "BrequelTreeRings15"
+description = "10% chance for Birthed Items to be Kinetic Rings\n10% chance for Birthed Items to be Oneiric Rings"
+
+[[node_overrides]]
+id = "BrequelTreeRings16"
+description = "10% chance for Birthed Items to be Vitalic Rings\n10% chance for Birthed Items to be Mnemonic Rings"
+
+[[node_overrides]]
+id = "BrequelTreeRings20"
+description = "Birthed Items cannot have Strength, Dexterity or Intelligence Modifiers"
+
+[[node_overrides]]
+id = "BrequelTreeRings21"
+description = "Birthed Items cannot have Fire, Cold or Lightning Modifiers"
+
+[[node_overrides]]
+id = "BrequelTreeRings22"
+description = "Birthed Items cannot have Life or Mana Modifiers"
+
+[[node_overrides]]
+id = "BrequelTreeRings31"
+description = "5% chance for Birthed Items to be Crafted with Sacrificial or of the Cabal"
+
+[[node_overrides]]
+id = "BrequelTreeRings34"
+description = "5% chance for Birthed Items to be Crafted with of Punctuality or of Invigoration"
+
+[[node_overrides]]
+id = "BrequelTreeRings37"
+description = "5% chance for Birthed Items to be Crafted with Scratching or Contaminating"
+
+[[node_overrides]]
+id = "BrequelTreeRings44"
+description = "5% chance for Birthed Items to be Crafted with Soul Stealer's or of Lancing"
+
+[[node_overrides]]
+id = "BrequelTreeRings47"
+description = "5% chance for Birthed Items to be Crafted with Burdensome or of Vastness"
+
+[[node_overrides]]
+id = "BrequelTreeRings50"
+description = "5% chance for Birthed Items to be Crafted with of Amplification or of Drenching"
+
+[[node_overrides]]
+id = "BrequelTreeRings55"
+description = "5% chance for Birthed Items to be Crafted with Storm Chaser's, Fire Breather's or Tempest Rider's"
+
+# -- Amulet branch --
+[[node_overrides]]
+id = "BrequelTreeAmulets19"
+description = "Birthed Items always have a Fire, Cold or Lightning Resistance Modifier of your choice"
+
+[[node_overrides]]
+id = "BrequelTreeAmulets23"
+description = "Birthed Items always have a Strength, Dexterity or Intelligence Modifier of your choice"
+
+[[node_overrides]]
+id = "BrequelTreeAmulets38"
+description = "Birthed Items cannot be Solar or Gold Amulets"
+
+[[node_overrides]]
+id = "BrequelTreeAmulets39"
+description = "Birthed Items cannot be Amber, Lapis, Jade or Stellar Amulets"
+
+[[node_overrides]]
+id = "BrequelTreeAmulets40"
+description = "Birthed Items cannot be Crimson, Azure, Lunar or Bloodstone Amulets"
+
+[[node_overrides]]
+id = "BrequelTreeAmulets45"
+description = "5% chance for Birthed Items to be Crafted with of Xoph, Tul's, Uul-Netol's or of Esh"
+
+[[node_overrides]]
+id = "BrequelTreeAmulets54"
+description = "Birthed Items always have a Life Modifier or a Mana Modifier of your choice"
+
+[[node_overrides]]
+id = "BrequelTreeAmulets60_"
+description = "Birthed Items always have an Armour, Evasion or Energy Shield Modifier of your choice"
+
+# -- Belt branch --
+[[node_overrides]]
+id = "BrequelTreeBelts20"
+description = "Birthed Items cannot have Fire, Cold or Lightning Modifiers"
+
+[[node_overrides]]
+id = "BrequelTreeBelts21"
+description = "Birthed Items always have an empty Prefix Modifier and an empty Suffix Modifier"
+
+[[node_overrides]]
+id = "BrequelTreeBelts22_"
+description = "Birthed Items cannot have Life or Mana Modifiers"
+
+[[node_overrides]]
+id = "BrequelTreeBelts23"
+description = "Birthed Items cannot have Flask or Charm Modifiers"
+
+[[node_overrides]]
+id = "BrequelTreeBelts30"
+description = "5% chance for Birthed Items to be Crafted with of Unending or Underling's"
+
+[[node_overrides]]
+id = "BrequelTreeBelts34"
+description = "5% chance for Birthed Items to be Crafted with Instructor's, Monstrous or of Scattering"
+
+[[node_overrides]]
+id = "BrequelTreeBelts37_"
+description = "5% chance for Birthed Items to be Crafted with of Coherence, of Ravaging or of Binding"
+
+[[node_overrides]]
+id = "BrequelTreeBelts42"
+description = "5% chance for Birthed Items to be Crafted with Erupting, Energising or Glacial"
+
+[[node_overrides]]
+id = "BrequelTreeBelts44"
+description = "5% chance for Birthed Items to be Crafted with of Expectation or of Imbuing"
+
+[[node_overrides]]
+id = "BrequelTreeBelts51"
+description = "5% chance for Birthed Items to be Crafted with of Exertion or Unshackling"
+
+# ---------------------------------------------------------------------------
+# Goal presets — community-sourced node allocations. Node references are by
+# (womb, exact node name); names that appear on several copies (e.g.
+# "Additional Item Chance") match every copy and the UI highlights them all.
+# Confidence levels: "measured" (recorded sample), "official" (GGG demo),
+# "community" (creator/wiki consensus, no measured EV).
+# ---------------------------------------------------------------------------
+
+[[presets]]
+id = "divine-farm"
+name = "Divine Orb farming"
+womb = "currency"
+confidence = "community"
+summary = "The most popular trade-league money setup: stack Divine chance to ~200% increased, fill with Additional Item Chance, and never block Divines. Reported ~5 Divines per ~16 level-80 Lavish gifts (anecdotal, single-source)."
+sources = [
+  "Kingdom Twelve — How to Unlock the Full Genesis Tree, Farm Hiveblood & Print Divines — https://www.youtube.com/watch?v=t5_E7xDstGs",
+  "EODGamerz — Easy Guide To MAXIMISING the Genesis Tree — https://www.youtube.com/watch?v=BwH6yGstVF0",
+]
+steps = [
+  { node = "Increased Divine Orb Chance", why = "50% increased Divine chance each — take both copies on the way up.", priority = 1 },
+  { node = "Nurture Divinity", why = "+100% increased Divine chance — the branch capstone.", priority = 2 },
+  { node = "Rebirth", why = "10% chance to consume no Hiveblood — effectively 'buy 10 get 1 free'.", priority = 3 },
+  { node = "Additional Item Chance", why = "Fill every remaining point: each copy is +20% Surpassing chance for an extra birthed item (stacks past 100%).", priority = 4, fill = true },
+]
+avoid = [
+  { node = "Known Value", why = "Blocks Divine Orbs entirely — never take it on this setup." },
+]
+gift_advice = "Use item level 80 Lavish Wombgifts for the farming loop (community reports a large rarity jump at 80); burn cheap low-level gifts purely to reveal nodes."
+
+[[presets]]
+id = "exalt-fishing"
+name = "Exalted Orb fishing (SSF)"
+womb = "currency"
+confidence = "official"
+summary = "GGG's official demo path: concentrate the pool on Exalted Orbs and multiply them. Community EV ranks it below the Divine/Catalyst setups for trade-league profit, but it is the best SSF target-farm and fishes Greater/Perfect Exalted Orbs."
+sources = [
+  "GGG — Return of the Ancients: Genesis Tree Deep Dive — https://www.youtube.com/watch?v=LqAO9oQSaCc",
+  "BawLoch — Unstable Breach Catalyst Farming (EV discussion) — https://www.youtube.com/watch?v=EqF8dSumiMQ",
+]
+steps = [
+  { node = "Increased Exalted Orb Chance", why = "100% increased Exalt chance per copy.", priority = 1 },
+  { node = "For the Price of One", why = "An additional item of the same type whenever you birth Exalted Orbs.", priority = 2 },
+  { node = "Riches Beget Riches", why = "15% chance to birth 10 additional Exalted Orbs — the jackpot node.", priority = 3 },
+  { node = "Refuse Emptiness", why = "Blocks Orbs of Annulment and Transmutation, squeezing the pool toward Exalts.", priority = 4 },
+]
+avoid = []
+gift_advice = "Community report: ~50 Lavish gifts returned ~200 Exalted Orbs with a few Greater/Perfect among them."
+
+[[presets]]
+id = "catalyst-farm"
+name = "Catalyst farming"
+womb = "currency"
+confidence = "measured"
+summary = "The only strategy with a recorded profit sample: ~30 Divines net over 20 maps (>1.5 div/map) at early-league prices. Catalysts hold a price floor because the Catalysing Exaltation omen constantly consumes them."
+sources = [
+  "BawLoch — PoE2 0.5: Unstable Breach Catalyst Farming (20-map recorded sample) — https://www.youtube.com/watch?v=EqF8dSumiMQ",
+]
+steps = [
+  { node = "Complete Refinement", why = "Can ONLY birth Catalysts — the core of the strategy (the route there picks up Catalyst Chance nodes).", priority = 1 },
+  { node = "Ignorant to Power", why = "Blocks cheap Skittering/Reaver/Sibilant Catalysts. Pick blockers by current market prices.", priority = 2 },
+  { node = "Forgo the Flesh", why = "Blocks Flesh/Neural/Adaptive/Carapace if they are cheap on your league economy.", priority = 3 },
+  { node = "Catalyst Chance", why = "15% of birthed currency becomes a Catalyst per copy — take the ones along your path.", priority = 4, fill = true },
+  { node = "Additional Duplicate Catalyst Chance", why = "30% Surpassing chance each — at 100%+ every birth duplicates.", priority = 5, fill = true },
+  { node = "Additional Different Catalyst Chance", why = "Alternative fill when duplicate copies run out.", priority = 6, fill = true },
+]
+avoid = [
+  { node = "Jewel Catalyst Chance", why = "14% combined over 2 points is not worth it while Jewel Catalysts price like normal ones (BawLoch)." },
+  { node = "Enhanced Creation", why = "Same reasoning — skip while prices are flat." },
+]
+gift_advice = "Measured: 20 desert-biome maps consuming all Lavish gifts dropped ~33 div liquid for ~3-4 div input, with 17,000 Hiveblood left over."
+
+[[presets]]
+id = "minion-belt"
+name = "Minion belts"
+womb = "belt"
+confidence = "community"
+summary = "Force two guaranteed minion mods, raise their minimum tiers, then luck-roll the values. Only 10 points — every node counts. Genesis is the ONLY source of minion mods on belts."
+sources = [
+  "Fextralife — Genesis Tree Crafting Guide — https://pathofexile2.wiki.fextralife.com/Genesis+Tree+Crafting+Guide",
+  "EODGamerz — Easy Guide To MAXIMISING the Genesis Tree — https://www.youtube.com/watch?v=BwH6yGstVF0",
+]
+steps = [
+  { node = "Stench of Carrion", why = "Gateway: birthed belts can roll the tree-exclusive Minion modifiers.", priority = 1 },
+  { node = "Necrosis", why = "Always at least one Minion modifier.", priority = 2 },
+  { node = "Wrapped in Dread", why = "Always TWO Minion modifiers.", priority = 3 },
+  { node = "Minion Modifier Level", why = "Minion mods at Minimum Modifier Level 35.", priority = 4 },
+  { node = "Minion Modifier Values", why = "Minion mods roll values twice more, keeping the highest (it sits on the path).", priority = 5 },
+  { node = "Minion Prefix Modifier Level", why = "Minion prefixes at Minimum Modifier Level 50 — this caps the 10-point budget.", priority = 6 },
+  { node = "Minion Suffix Modifier Level", why = "Swap-in for Prefix Level when your chase mod is a suffix (10 points cannot fit both).", priority = 7, optional = true },
+  { node = "Unfeeling", why = "Respec option: blocker that removes Fire/Cold/Lightning mods (costs points you must free elsewhere).", priority = 8, optional = true },
+  { node = "Severed Veins", why = "Respec option: blocker that removes Flask/Charm mods.", priority = 9, optional = true },
+]
+avoid = [
+  { node = "Husk", why = "Blocks Life and Mana modifiers — usually wanted on a minion belt." },
+]
+gift_advice = "Banded Wombgift level sets the output item level — use the highest-level gifts you can afford for top-tier minion mods."
+
+[[presets]]
+id = "caster-ring"
+name = "Caster rings"
+womb = "ring"
+confidence = "community"
+summary = "Force two guaranteed caster mods with raised minimum tiers and lucky values. The 0.5-new caster mods on rings (extra spell damage as element, spell crit, cast speed) are Genesis-exclusive."
+sources = [
+  "Fextralife — Genesis Tree Crafting Guide — https://pathofexile2.wiki.fextralife.com/Genesis+Tree+Crafting+Guide",
+  "KpShamino — The Genesis Tree Tutorial — https://www.youtube.com/watch?v=F32hX3F4REg",
+]
+steps = [
+  { node = "First Working", why = "Gateway: birthed rings can roll the tree-exclusive Caster modifiers.", priority = 1 },
+  { node = "Natural Weaving", why = "Always at least one Caster modifier.", priority = 2 },
+  { node = "Overtaken by Power", why = "Always TWO Caster modifiers.", priority = 3 },
+  { node = "Caster Modifier Level", why = "Caster mods at Minimum Modifier Level 35 (it sits on the path).", priority = 4 },
+  { node = "Caster Modifier Values", why = "Caster mods roll values twice more, keeping the highest.", priority = 5 },
+  { node = "Caster Prefix Modifier Level", why = "Caster prefixes at Minimum Modifier Level 50 — this caps the 10-point budget.", priority = 6 },
+  { node = "Master of One", why = "Respec option: 5% chance for the crafted extra-spell-damage mod of your element (Storm Chaser's / Fire Breather's / Tempest Rider's).", priority = 7, optional = true },
+  { node = "Sever Inexperience", why = "Respec option: blocker that removes attribute mods from the pool.", priority = 8, optional = true },
+]
+avoid = [
+  { node = "Selective Sustenance", why = "Blocks Life/Mana — only take it for pure-damage rings." },
+]
+gift_advice = "Base bias options: Engorged (10% Vitalic/Mnemonic — life or mana implicit), Otherworldly Clutch + Refined Grip for the Breach Ring / Refined Breach Ring money path."
+
+[[presets]]
+id = "attr-res-amulet"
+name = "Attribute / resistance amulets"
+womb = "amulet"
+confidence = "official"
+summary = "GGG's amulet demo: guarantee the modifier types you want, push their minimum tiers to 60, and take Premonition Fulfilled so suffixes (attributes + resistances) roll at MAXIMUM values."
+sources = [
+  "GGG — Return of the Ancients: Genesis Tree Deep Dive — https://www.youtube.com/watch?v=LqAO9oQSaCc",
+  "Fextralife — Genesis Tree Crafting Guide — https://pathofexile2.wiki.fextralife.com/Genesis+Tree+Crafting+Guide",
+]
+steps = [
+  { node = "Traits Foretold", why = "Always an Attribute modifier.", priority = 1 },
+  { node = "Inherited Talents", why = "Choose the guaranteed attribute: Strength, Dexterity or Intelligence.", priority = 2 },
+  { node = "Scarred Flesh", why = "Always a Resistance modifier.", priority = 3 },
+  { node = "Imbue the Body", why = "Choose the guaranteed resistance element.", priority = 4 },
+  { node = "Attribute Modifier Level", why = "Attribute mods at Minimum Modifier Level 40.", priority = 5 },
+  { node = "Resistance Modifier Level", why = "Resistance mods at Minimum Modifier Level 40.", priority = 6 },
+  { node = "Suffix Modifier Values", why = "Suffix mods roll values twice more, keeping the highest.", priority = 7 },
+  { node = "Premonition Fulfilled", why = "Suffix modifiers at MAXIMUM values — attributes and resistances are suffixes. The standout node.", priority = 8 },
+  { node = "The Greatest Cost", why = "Respec option: base blocker (no Solar/Gold) — combine blockers to force your base.", priority = 9, optional = true },
+]
+avoid = [
+  { node = "Empty Feeling", why = "Guaranteed empty suffix wastes a guaranteed-suffix slot on this build (use it only when you plan to exalt-finish yourself)." },
+]
+gift_advice = "Warning (KpShamino): base blockers are easy to misread — they permanently EXCLUDE those bases from your births."
+
+[[presets]]
+id = "breachstones"
+name = "Breachstones"
+womb = "breachstone"
+confidence = "community"
+summary = "No tree nodes: 300 Breach Splinters auto-assemble into a Revelatory Wombgift; slot it to birth a Breachstone (the gateway to Breach Domains, Tul/Esh and Xesht). Splinter acceleration lives in the CURRENCY branch."
+sources = [
+  "KpShamino — The Genesis Tree Tutorial — https://www.youtube.com/watch?v=F32hX3F4REg",
+  "GGG — Return of the Ancients: Genesis Tree Deep Dive — https://www.youtube.com/watch?v=LqAO9oQSaCc",
+]
+steps = [
+  { node = "Scavenge the Remains", why = "(Currency womb) 10% of birthed currency becomes a Breach Splinter stack — niche, only if you cannot farm Breaches directly.", priority = 1 },
+  { node = "Additional Breach Splinters", why = "(Currency womb) 50% chance for +16-24 splinters when birthing splinters.", priority = 2 },
+  { node = "Reappropriated Offspring", why = "(Currency womb) 0.3% chance for a Breachlord Sac — 'probably one of the fastest ways to get to Xesht' (KpShamino).", priority = 3 },
+]
+avoid = []
+gift_advice = "Quest bug warning: during the Keepers questline, slot the Breachstone Ailith GIVES you — a self-crafted one cannot be slotted at that quest step. Higher-level Revelatory gifts cost more Hiveblood for the same stone."
+
+# ---------------------------------------------------------------------------
+# Hiveblood / Wombgift farming notes (community estimates)
+# ---------------------------------------------------------------------------
+
+[farming]
+notes = [
+  "Hiveblood is auto-collected from Hiveborn kills (cap 100,000 — spend it regularly). Best sustained rate: Unstable Breaches with 3-4 Breach Precursor Tablets (+ the unique tablet) in open desert/mountain layouts.",
+  "Take every Breach Atlas node that boosts Hiveblood/Wombgift gain; the +5-point womb nodes (e.g. Exquisite Design for Amulets) unlock the 15-point caps.",
+  "Wombgift level sets the birthed item's level and scales the Hiveblood cost roughly linearly (observed on-screen: Lavish ilvl 78 = 734, Ornate ilvl 78/79/80 = 1,174 / 1,269 / 1,364). Numbers are community-observed, not official.",
+  "Burn cheap low-level gifts (300-400 Hiveblood) to reveal branch nodes (~3 nodes per birth); save level-80 gifts for the actual farming loop.",
+  "Point caps: Currency 15, Amulet 15, Ring 10, Belt 10. Respec is free at any time.",
+]
+
+[[videos]]
+title = "Return of the Ancients: Genesis Tree Deep Dive (official)"
+channel = "Path of Exile"
+url = "https://www.youtube.com/watch?v=LqAO9oQSaCc"
+
+[[videos]]
+title = "Unstable Breach Catalyst Farming (measured 20-map sample)"
+channel = "BawLoch"
+url = "https://www.youtube.com/watch?v=EqF8dSumiMQ"
+
+[[videos]]
+title = "How to Unlock the Full Genesis Tree, Farm Hiveblood & Print Divines"
+channel = "Kingdom Twelve"
+url = "https://www.youtube.com/watch?v=t5_E7xDstGs"
+
+[[videos]]
+title = "The Genesis Tree Tutorial"
+channel = "KpShamino"
+url = "https://www.youtube.com/watch?v=F32hX3F4REg"
+
+[[videos]]
+title = "Easy Guide To MAXIMISING the Genesis Tree"
+channel = "EODGamerz"
+url = "https://www.youtube.com/watch?v=BwH6yGstVF0"

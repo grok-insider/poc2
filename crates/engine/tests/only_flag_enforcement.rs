@@ -48,6 +48,7 @@ fn mk_mod(id: &str, group: &str, affix: AffixType, flags: ModFlags) -> ModDefini
         }],
         stats: smallvec![],
         required_level: 1,
+        tier: None,
         allowed_item_classes: smallvec![ItemClassId::from("BodyArmour")],
         patch_range: PatchRange::ALL,
         flags,

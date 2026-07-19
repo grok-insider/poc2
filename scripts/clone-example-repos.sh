@@ -17,6 +17,7 @@ declare -A REPOS=(
   ["POE2_HTC"]="https://github.com/Dboire9/POE2_HTC.git"
   ["XileHUD-poe_overlay"]="https://github.com/XileHUD/poe_overlay.git"
   ["Exiled-Exchange-2"]="https://github.com/Kvan7/Exiled-Exchange-2.git"
+  ["awakened-poe-trade"]="https://github.com/SnosMe/awakened-poe-trade.git"
   ["ggpk-explorer"]="https://github.com/juddisjudd/ggpk-explorer.git"
   ["poe-dat-viewer"]="https://github.com/SnosMe/poe-dat-viewer.git"
   ["LocalIdentity-poe2-data"]="https://github.com/LocalIdentity/poe2-data.git"

@@ -1,0 +1,9 @@
+{
+  "poe2_patch": "4.5.4.3",
+  "repoe_shas": {
+    "base_items": "046299aeb60b69b004c69bb452b3f69b4abc6089960162eec9736effaa4a0584",
+    "mods": "7b4ba177808a43afcb711fab9dded41ba1b6f0f0b65f14d637964a1170e0b864",
+    "tags": "3718514164e26d06ac32d339c60ab8848308baba6509d48ecca068b373aaab7a"
+  },
+  "last_checked": "epoch:1783172611"
+}

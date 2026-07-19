@@ -1,6 +1,11 @@
 # ADR-0009 — Defer Wayland layer-shell to v1.1
 
-**Status:** Accepted (Phase D.2 / 2026-04).
+**Status:** Accepted (Phase D.2 / 2026-04). Still in force after
+[ADR-0010](0010-desktop-shell-electron-cross-platform.md) (2026-06): the
+Electron desktop app is a normal window, not an overlay, so layer-shell
+remains deferred. The `windowrulev2` recipes in `examples/hyprland/` stay
+valid for users who want overlay-like placement (window class changes to the
+Electron app id).
 **Supersedes:** Part of [ADR-0002 platform-nixos-only](0002-platform-nixos-only.md)
 (specifically the layer-shell line item).
 

@@ -1,0 +1,24 @@
+[package]
+name = "poc2-capture"
+description = "Path of Crafting 2 — Hyprland item-capture daemon (hotkey → Ctrl+C → clipboard → web app)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "poc2-capture"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["process", "signal", "net"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum = { version = "0.7", features = ["ws"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+base64 = "0.22"
