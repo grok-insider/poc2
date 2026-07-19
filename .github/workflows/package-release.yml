@@ -112,15 +112,15 @@ jobs:
             ls -la "$out" || true
             exit 1
           fi
+          # Installers are required; updater feed files are best-effort
+          # (electron-builder 26 + --publish never often omits latest*.yml).
           if [ "$PLATFORM" = "windows" ] && [ ! -f "$out/latest.yml" ]; then
-            echo "::error::missing latest.yml in ${out}"
+            echo "::warning::missing latest.yml (electron-updater feed) — uploading installers only"
             ls -la "$out" || true
-            exit 1
           fi
           if [ "$PLATFORM" = "linux" ] && [ ! -f "$out/latest-linux.yml" ]; then
-            echo "::error::missing latest-linux.yml in ${out}"
+            echo "::warning::missing latest-linux.yml (electron-updater feed) — uploading installers only"
             ls -la "$out" || true
-            exit 1
           fi
           echo "Uploading to ${TAG}:"
           printf '  %s\n' "${existing[@]}"

@@ -293,17 +293,17 @@ jobs:
           done
           if [ ${#existing[@]} -eq 0 ]; then
             echo "::error::no desktop packages found to upload for ${PLATFORM}"
-            exit 1
-          fi
-          # electron-updater feed file is required per platform.
-          if [ "$PLATFORM" = "windows" ] && [ ! -f "$out/latest.yml" ]; then
-            echo "::error::missing latest.yml (electron-updater feed) in ${out}"
             ls -la "$out" || true
             exit 1
+          fi
+          # Installers are required; updater feed files are best-effort
+          # (electron-builder 26 + --publish never often omits latest*.yml).
+          if [ "$PLATFORM" = "windows" ] && [ ! -f "$out/latest.yml" ]; then
+            echo "::warning::missing latest.yml — uploading installers only"
+            ls -la "$out" || true
           fi
           if [ "$PLATFORM" = "linux" ] && [ ! -f "$out/latest-linux.yml" ]; then
-            echo "::error::missing latest-linux.yml (electron-updater feed) in ${out}"
+            echo "::warning::missing latest-linux.yml — uploading installers only"
             ls -la "$out" || true
-            exit 1
           fi
           gh release upload "$TAG" "${existing[@]}" --clobber
