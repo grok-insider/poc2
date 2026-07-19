@@ -11,17 +11,24 @@ name: Release
 #                           GitHub Release from the changelog.
 #   * resolve / artifacts — builds the Electron desktop packages (Windows NSIS,
 #                           Linux AppImage + deb) for the released tag and
-#                           attaches them to the Release.
+#                           attaches them to the Release along with
+#                           electron-updater feeds (latest.yml / latest-linux.yml)
+#                           and optional *.blockmap. Builds are unsigned (OSS).
 #
-# poc2's deliverable is the web app + WASM engine + Electron desktop shell, not a
-# single CLI binary — so the artifacts are the packaged desktop apps. The web app
-# itself ships as the static export (apps/web/out) the desktop bundles.
+# Manual re-package (e.g. release already cut but packages missing):
+#   workflow_dispatch with `tag=vX.Y.Z` → skips release-plz, packages that tag.
 #
 # Nothing is published to crates.io — see `git_only` in release-plz.toml.
 
 "on":
   push:
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to package and attach (e.g. v2.0.0). Skips release-plz."
+        required: true
+        type: string
 
 # Least privilege by default; each job elevates only what it needs.
 permissions:
@@ -35,7 +42,9 @@ jobs:
     # Canonical-org guard (fork protection). Cargo metadata names
     # `anomalyco`; the automation account is `grok-insider` — accept both
     # until the canonical remote is settled (AGENTS.md "Release Notes").
-    if: contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
+    if: >
+      github.event_name == 'push' &&
+      contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
     runs-on: ubuntu-latest
     # release-plz runs `cargo package` per crate to detect changes, which fetches
     # the crates.io index + git deps. That network step is flaky on hosted runners;
@@ -108,7 +117,9 @@ jobs:
   # whether a release was cut (and its tag/version) to the artifact jobs below.
   release-plz-release:
     name: release-plz release
-    if: contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
+    if: >
+      github.event_name == 'push' &&
+      contains(fromJSON('["grok-insider","anomalyco"]'), github.repository_owner)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -131,12 +142,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
 
-  # Resolve the just-created release's tag/version once so the desktop matrix
-  # doesn't each need jq.
+  # Resolve the tag/version for packaging: either from a just-created release-plz
+  # cut, or from workflow_dispatch input (manual re-package).
   resolve:
     name: resolve release tag
-    needs: release-plz-release
-    if: needs.release-plz-release.outputs.releases_created == 'true'
+    needs: [release-plz-release]
+    # Always run resolve when dispatching; on push only when a release was cut.
+    # `always() && !cancelled()` so a skipped release-plz-release (dispatch) still
+    # allows this job; `!failure()` keeps a hard release-plz crash from packaging.
+    if: |
+      always() && !cancelled() && !failure() &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        needs.release-plz-release.outputs.releases_created == 'true'
+      )
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.r.outputs.tag }}
@@ -144,11 +163,24 @@ jobs:
     steps:
       - id: r
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
           RELEASES: ${{ needs.release-plz-release.outputs.releases }}
         run: |
           set -euo pipefail
-          echo "tag=$(echo "$RELEASES" | jq -r '.[0].tag')" >> "$GITHUB_OUTPUT"
-          echo "version=$(echo "$RELEASES" | jq -r '.[0].version')" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="${DISPATCH_TAG:?tag input required}"
+            # Strip leading v for the app version (v2.0.0 → 2.0.0).
+            version="${tag#v}"
+          else
+            tag="$(echo "$RELEASES" | jq -r '.[0].tag')"
+            version="$(echo "$RELEASES" | jq -r '.[0].version')"
+          fi
+          [ -n "$tag" ] && [ "$tag" != "null" ] || { echo "::error::empty tag"; exit 1; }
+          [ -n "$version" ] && [ "$version" != "null" ] || { echo "::error::empty version"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Packaging tag=$tag version=$version"
 
   # Build the Electron desktop packages for the released tag and attach them to the
   # Release. Mirrors the windows / desktop-linux lanes in ci.yml (rustup + Bun, no
@@ -156,8 +188,8 @@ jobs:
   # others (and the tag/Release/changelog) intact, re-runnable.
   artifacts:
     name: package ${{ matrix.name }}
-    needs: [release-plz-release, resolve]
-    if: needs.release-plz-release.outputs.releases_created == 'true'
+    needs: [resolve]
+    if: needs.resolve.result == 'success'
     permissions:
       contents: write
     strategy:
@@ -232,16 +264,44 @@ jobs:
 
       # `shell: bash` runs in Git Bash on the Windows runner too, keeping one
       # portable upload step across both targets.
+      # electron-updater needs latest.yml (Windows) / latest-linux.yml (Linux)
+      # plus optional *.blockmap for delta updates — not just the installers.
+      # Builds are intentionally unsigned (OSS; no CSC_* secrets).
       - name: Attach packages to the Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLATFORM: ${{ matrix.name }}
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(apps/desktop/dist-packages/*.exe apps/desktop/dist-packages/*.AppImage apps/desktop/dist-packages/*.deb)
-          if [ ${#assets[@]} -eq 0 ]; then
-            echo "::warning::no desktop packages found to upload for ${{ matrix.name }}"
-            exit 0
+          out=apps/desktop/dist-packages
+          assets=(
+            "$out"/*.exe
+            "$out"/*.AppImage
+            "$out"/*.deb
+            "$out"/*.blockmap
+            "$out"/latest.yml
+            "$out"/latest-linux.yml
+          )
+          # Filter to paths that actually exist (nullglob leaves globs empty).
+          existing=()
+          for f in "${assets[@]}"; do
+            [ -f "$f" ] && existing+=("$f")
+          done
+          if [ ${#existing[@]} -eq 0 ]; then
+            echo "::error::no desktop packages found to upload for ${PLATFORM}"
+            exit 1
           fi
-          gh release upload "$TAG" "${assets[@]}" --clobber
+          # electron-updater feed file is required per platform.
+          if [ "$PLATFORM" = "windows" ] && [ ! -f "$out/latest.yml" ]; then
+            echo "::error::missing latest.yml (electron-updater feed) in ${out}"
+            ls -la "$out" || true
+            exit 1
+          fi
+          if [ "$PLATFORM" = "linux" ] && [ ! -f "$out/latest-linux.yml" ]; then
+            echo "::error::missing latest-linux.yml (electron-updater feed) in ${out}"
+            ls -la "$out" || true
+            exit 1
+          fi
+          gh release upload "$TAG" "${existing[@]}" --clobber
