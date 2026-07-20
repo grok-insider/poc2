@@ -9,6 +9,7 @@
 import { create } from "zustand";
 import { FRESH_BODY_ARMOUR, WORKED_EXAMPLE_GOAL } from "./fixtures";
 import { loadCraft, saveCraft, type PersistedCraft } from "./persist";
+import type { ClientLocale } from "./types";
 import { seedSpecsFromItem } from "./concepts";
 import { validateArchetype, type Archetype } from "./archetypes";
 import { loadBaseIconManifest } from "./baseIcons";
@@ -106,6 +107,12 @@ interface CraftState {
   /** Engine League ruleset — "challenge" (Runes of Aldur) or "standard".
    * Gates Recombinator + Corruption/Homogenising omens in 0.5. */
   engineLeague: "standard" | "challenge";
+  /**
+   * PoE2 client language for reward-scan OCR name resolve. `"en"` skips
+   * translation; `"sp"` etc. use bundled English↔localized maps so Spanish
+   * (etc.) item text prices against English poe2scout keys.
+   */
+  clientLocale: ClientLocale;
   notes: string;
   hydrated: boolean;
 
@@ -125,6 +132,7 @@ interface CraftState {
   setNotes: (n: string) => void;
   setLeague: (l: string) => void;
   setEngineLeague: (l: "standard" | "challenge") => Promise<void>;
+  setClientLocale: (l: ClientLocale) => void;
   openOutcome: () => void;
   closeOutcome: () => void;
 
@@ -163,7 +171,18 @@ function nowIso(): string {
 
 /** The persistable slice of the store (the shape `loadCraft` restores). */
 function persistedSlice(s: CraftState): PersistedCraft {
-  const { item, goal, risk, depth, history, league, engineLeague, notes, lastItemText } = s;
+  const {
+    item,
+    goal,
+    risk,
+    depth,
+    history,
+    league,
+    engineLeague,
+    clientLocale,
+    notes,
+    lastItemText,
+  } = s;
   return {
     item,
     goal,
@@ -173,9 +192,25 @@ function persistedSlice(s: CraftState): PersistedCraft {
     league,
     marketLeagueVersion: MARKET_LEAGUE_VERSION,
     engineLeague,
+    clientLocale,
     notes,
     lastItemText,
   };
+}
+
+const CLIENT_LOCALES: ReadonlySet<string> = new Set([
+  "en",
+  "de",
+  "fr",
+  "pt",
+  "ru",
+  "sp",
+]);
+
+function coerceClientLocale(raw: unknown): ClientLocale {
+  return typeof raw === "string" && CLIENT_LOCALES.has(raw)
+    ? (raw as ClientLocale)
+    : "en";
 }
 
 export const useCraft = create<CraftState>((set, get) => ({
@@ -212,6 +247,7 @@ export const useCraft = create<CraftState>((set, get) => ({
 
   league: DEFAULT_MARKET_LEAGUE,
   engineLeague: "challenge",
+  clientLocale: "en",
   notes: "",
   hydrated: false,
 
@@ -257,6 +293,7 @@ export const useCraft = create<CraftState>((set, get) => ({
       set({ error: String(e) });
     }
   },
+  setClientLocale: (clientLocale) => set({ clientLocale: coerceClientLocale(clientLocale) }),
   openOutcome: () => set({ outcomeOpen: true }),
   closeOutcome: () => set({ outcomeOpen: false }),
 
@@ -391,6 +428,7 @@ export const useCraft = create<CraftState>((set, get) => ({
           history: saved.history ?? [],
           league: migrateMarketLeague(saved.league, saved.marketLeagueVersion),
           engineLeague: saved.engineLeague === "standard" ? "standard" : "challenge",
+          clientLocale: coerceClientLocale(saved.clientLocale),
           notes: saved.notes ?? "",
           lastItemText: saved.lastItemText ?? null,
         });

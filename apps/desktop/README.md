@@ -132,10 +132,12 @@ Capability gate at startup decides `overlayMode`:
 | Other Wayland probe-fail | `degraded` (portal capture, in-app result panel) |
 
 Reward scan = one `Alt+V` pass, or an opt-in `Alt+Shift+V` watcher with open/close
-hysteresis and independent 500 ms presence checks. OCR starts no more than once
-every two seconds and keeps only the newest pending frame. Windows uses a
-packaged, persistent `Windows.Media.Ocr` helper first; any unavailable, failed,
-or incomplete native read falls back to the portable worker. The hidden
+hysteresis and independent 500 ms presence checks. Match the PoE2 client language
+in **Settings → Client language** so OCR maps localized names to English price
+keys (`sp` = Spanish). OCR starts no more than once every two seconds and keeps
+only the newest pending frame. Windows uses a packaged, persistent
+`Windows.Media.Ocr` helper first; any unavailable, failed, or incomplete native
+read falls back to the portable worker. The hidden
 `/overlay` worker otherwise captures first → native-canvas 1.25x text-column
 crop with the fast Tesseract model and PSM 11 (2x/alternate-crop fallback when
 fewer than four catalogue rows resolve) → one batched fuzzy resolution against

@@ -79,6 +79,8 @@ async function fetchScoutSnapshot(league: string): Promise<PoeScoutSnapshot> {
 
 export function SettingsPanel() {
   const league = useCraft((s) => s.league);
+  const clientLocale = useCraft((s) => s.clientLocale);
+  const setClientLocale = useCraft((s) => s.setClientLocale);
   const setLeague = useCraft((s) => s.setLeague);
   const engineLeague = useCraft((s) => s.engineLeague);
   const setEngineLeague = useCraft((s) => s.setEngineLeague);
@@ -268,6 +270,39 @@ export function SettingsPanel() {
                 />
               </div>
             </div>
+
+            <div className="field-row">
+              <label className="field-label" htmlFor="client-locale">
+                Client language
+              </label>
+              <div className="seg" id="client-locale">
+                {(
+                  [
+                    { value: "en", label: "English" },
+                    { value: "sp", label: "Spanish" },
+                    { value: "de", label: "German" },
+                    { value: "fr", label: "French" },
+                    { value: "pt", label: "Portuguese" },
+                    { value: "ru", label: "Russian" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={clientLocale === opt.value ? "on" : ""}
+                    onClick={() => setClientLocale(opt.value)}
+                    title="Matches your PoE2 client language so reward-scan OCR maps item names to English prices"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className={`${styles.note} faint`}>
+              Reward scan translates OCR&apos;d item names from this language into English
+              catalogue keys (poe2scout stays English). Spanish uses code{" "}
+              <span className="num">sp</span>.
+            </p>
 
             {priceStatus?.kind === "ok" && (
               <p className={`${styles.note} success num`}>{priceStatus.note}</p>

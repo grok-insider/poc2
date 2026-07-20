@@ -56,6 +56,7 @@ import {
   type PricedRow,
 } from "@/lib/ocr/priceSource";
 import { loadPriceSource, priceCandidates } from "@/lib/prices/source";
+import { resolveLocaleArg } from "@/lib/ocr/localePrep";
 import { useCraft } from "@/lib/store";
 import {
   cardPayload,
@@ -284,8 +285,11 @@ export default function OverlayPage() {
       await bridge.pricesSetLeague(useCraft.getState().league);
       await loadPriceSource();
       const candidates = priceCandidates();
+      const locale = resolveLocaleArg(useCraft.getState().clientLocale);
       const { reads, priced } = await resolveAndPriceBatch(ocrRows, (raws) =>
-        engine.resolveNames(candidates.length > 0 ? { raws, candidates } : { raws }),
+        engine.resolveNames(
+          candidates.length > 0 ? { raws, candidates, locale } : { raws, locale },
+        ),
       );
       const resolved = priced.filter((_row, index) => reads[index]?.key !== null);
       setRows(resolved);
@@ -459,10 +463,13 @@ export default function OverlayPage() {
       }
       await ensurePriceIcons();
       const candidates = priceCandidates();
+      const locale = resolveLocaleArg(useCraft.getState().clientLocale);
       const resolveVariant = async (variant: Awaited<ReturnType<typeof recognizeFrameVariant>>) => ({
         variant,
         result: await resolveAndPriceBatch(variant.rows, (raws) =>
-          engine.resolveNames(candidates.length > 0 ? { raws, candidates } : { raws }),
+          engine.resolveNames(
+            candidates.length > 0 ? { raws, candidates, locale } : { raws, locale },
+          ),
         ),
       });
       const preferredCrop = preferredCropRef.current;
