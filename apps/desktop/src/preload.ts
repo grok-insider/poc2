@@ -18,12 +18,14 @@ const CHANNELS = {
   overlayShow: "poc2:overlay-show",
   overlayHide: "poc2:overlay-hide",
   overlaySetRegion: "poc2:overlay-set-region",
+  overlaySetContentBounds: "poc2:overlay-set-content-bounds",
   calibrateRegion: "poc2:calibrate-region",
   getCaptureRegion: "poc2:get-capture-region",
   regionCalibrated: "poc2:region-calibrated",
   overlayState: "poc2:overlay-state",
   hyprOverlayRender: "poc2:hypr-overlay-render",
   hyprOverlayPreparePriceIcons: "poc2:hypr-overlay-prepare-price-icons",
+  preparePriceIconDataUrls: "poc2:prepare-price-icon-data-urls",
   hyprOverlayEvent: "poc2:hypr-overlay-event",
   rewardWatcher: "poc2:reward-watcher",
   rewardWatcherStatus: "poc2:reward-watcher-status",
@@ -100,6 +102,10 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   overlaySetRegion(rect: CaptureRect): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.overlaySetRegion, rect);
   },
+  /** Position the full-mode paint window (marker strip), not the OCR capture rect. */
+  overlaySetContentBounds(rect: CaptureRect): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.overlaySetContentBounds, rect);
+  },
   /** Open the calibrator (no arg) or report a calibrated rect back to main. */
   calibrateRegion(rect?: CaptureRect): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.calibrateRegion, rect ?? null);
@@ -126,6 +132,9 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   },
   hyprOverlayPreparePriceIcons(): Promise<Record<string, string>> {
     return ipcRenderer.invoke(CHANNELS.hyprOverlayPreparePriceIcons);
+  },
+  preparePriceIconDataUrls(): Promise<Record<string, string>> {
+    return ipcRenderer.invoke(CHANNELS.preparePriceIconDataUrls);
   },
   onHyprOverlayEvent(cb: (event: unknown) => void): () => void {
     const listener = (_e: unknown, event: unknown) => cb(event);

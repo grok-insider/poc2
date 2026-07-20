@@ -19,6 +19,7 @@ import {
   globalShortcut,
   Menu,
   nativeImage,
+  screen,
   Tray,
   type MenuItemConstructorOptions,
 } from "electron";
@@ -599,6 +600,8 @@ const overlayController: OverlayController = {
     else overlayWindow.hide();
   },
   setOverlayRegion(rect: CaptureRect): void {
+    // Capture region only — never place the paint window on the OCR target.
+    // Full-mode content bounds come from overlaySetContentBounds after layout.
     if (
       this.capabilities().overlayMode !== "full" &&
       this.capabilities().overlayMode !== "hyprland-plugin"
@@ -606,17 +609,17 @@ const overlayController: OverlayController = {
       return;
     }
     ensureOverlayWindow();
-    if (this.capabilities().overlayMode === "full") {
-      overlayWindow?.setBounds({
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        width: Math.max(1, Math.round(rect.width)),
-        height: Math.max(1, Math.round(rect.height)),
-      });
-    }
-    // Keep the overlay renderer's cached region in sync with its bounds so a
-    // scan triggered right after positioning has a rect to capture.
     overlayWindow?.webContents.send(CHANNELS.regionCalibrated, rect);
+  },
+  setOverlayContentBounds(rect: CaptureRect): void {
+    if (this.capabilities().overlayMode !== "full") return;
+    ensureOverlayWindow();
+    overlayWindow?.setBounds({
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(rect.height)),
+    });
   },
   openCalibration(): void {
     if (this.capabilities().overlayMode === "hyprland-plugin") {
@@ -635,6 +638,8 @@ const overlayController: OverlayController = {
       return;
     }
     ensureCalibrationWindow();
+    // Re-apply virtual desktop bounds in case displays changed since create.
+    calibrationWindow?.setBounds(electronVirtualDesktopBounds());
     calibrationWindow?.show();
     calibrationWindow?.focus();
   },
@@ -714,6 +719,9 @@ function focusMainWindow(): BrowserWindow {
  * Loads /overlay. Created lazily on first show so degraded sessions never
  * allocate it. NOT a layer-shell surface (ADR-0009 deferred) — a normal
  * Electron window with override-redirect-style hints.
+ *
+ * Alpha lives in CSS marker chips only — no window-level opacity (that washed
+ * out the hypr-parity HUD on Windows).
  */
 function ensureOverlayWindow(): void {
   if (overlayWindow && !overlayWindow.isDestroyed()) return;
@@ -730,7 +738,6 @@ function ensureOverlayWindow(): void {
     resizable: false,
     hasShadow: false,
     backgroundColor: "#00000000",
-    opacity: 0.62,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -755,20 +762,65 @@ function ensureOverlayWindow(): void {
 }
 
 /**
- * Full-screen transparent calibration window. The user drag-selects the price
- * region; the /calibrate route posts the rect back through the bridge
+ * Electron virtual-desktop union of all displays (global screen coordinates).
+ * Used instead of `fullscreen: true` so transparent windows actually composite
+ * on Windows (fullscreen + transparent is a known win32 Electron failure).
+ * Distinct from hyprOverlay.virtualDesktopBounds (hyprctl monitors).
+ */
+function electronVirtualDesktopBounds(): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  const displays = screen.getAllDisplays();
+  if (displays.length === 0) {
+    const primary = screen.getPrimaryDisplay().bounds;
+    return { x: primary.x, y: primary.y, width: primary.width, height: primary.height };
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const d of displays) {
+    const b = d.bounds;
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.width);
+    maxY = Math.max(maxY, b.y + b.height);
+  }
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
+/**
+ * Transparent calibration window. The user drag-selects the price region;
+ * the /calibrate route posts the rect back through the bridge
  * (calibrateRegion) → overlayController.applyCalibration.
+ *
+ * Never uses `fullscreen: true` — that breaks transparency on Windows.
  */
 function ensureCalibrationWindow(): void {
   if (calibrationWindow && !calibrationWindow.isDestroyed()) return;
+  const bounds = electronVirtualDesktopBounds();
   const win = new BrowserWindow({
     show: false,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
-    fullscreen: true,
     skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    hasShadow: false,
     backgroundColor: "#00000000",
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -777,6 +829,7 @@ function ensureCalibrationWindow(): void {
     },
   });
   win.setAlwaysOnTop(true, "screen-saver");
+  win.setBounds(bounds);
   void win.loadURL(`${DEV_BASE()}/calibrate/index.html`);
   // Esc closes the calibrator without applying.
   win.webContents.on("before-input-event", (_e, input) => {

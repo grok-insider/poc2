@@ -22,7 +22,10 @@ import {
   type HyprOverlayEventSession,
   REGEX_OVERLAY_ID,
 } from "./capture/hyprOverlay";
-import { prepareHyprOverlayPriceIcons } from "./capture/hyprOverlayIcons";
+import {
+  prepareHyprOverlayPriceIcons,
+  preparePriceIconDataUrls,
+} from "./capture/hyprOverlayIcons";
 import { addMarketHistory, listMarketHistory } from "./marketHistory";
 import { getScanDiagnostics, setScanDiagnostics } from "./scanDiagnostics";
 import type { NativeOcrController } from "./ocr/windowsNative";
@@ -50,13 +53,15 @@ export const CHANNELS = {
   scanRewards: "poc2:scan-rewards", // renderer → main (invoke)
   overlayShow: "poc2:overlay-show", // renderer → main (invoke)
   overlayHide: "poc2:overlay-hide", // renderer → main (invoke)
-  overlaySetRegion: "poc2:overlay-set-region", // renderer → main (invoke)
+  overlaySetRegion: "poc2:overlay-set-region", // renderer → main (invoke: capture region notify)
+  overlaySetContentBounds: "poc2:overlay-set-content-bounds", // renderer → main (paint window bounds)
   calibrateRegion: "poc2:calibrate-region", // renderer → main (invoke / push-back)
   getCaptureRegion: "poc2:get-capture-region", // renderer → main (invoke: persisted rect)
   regionCalibrated: "poc2:region-calibrated", // main → renderer (push)
   overlayState: "poc2:overlay-state", // main → renderer (push: show/hide/degraded)
   hyprOverlayRender: "poc2:hypr-overlay-render", // renderer → main (invoke)
   hyprOverlayPreparePriceIcons: "poc2:hypr-overlay-prepare-price-icons",
+  preparePriceIconDataUrls: "poc2:prepare-price-icon-data-urls",
   hyprOverlayEvent: "poc2:hypr-overlay-event", // main → renderer (push)
   rewardWatcher: "poc2:reward-watcher",
   rewardWatcherStatus: "poc2:reward-watcher-status",
@@ -96,8 +101,13 @@ export interface OverlayController {
   rewardWatcherEnabled(): boolean;
   /** Hide the overlay window. */
   hideOverlay(): void;
-  /** Reposition the overlay over the given region. */
+  /**
+   * Notify the overlay renderer of the OCR capture region.
+   * Does not place the paint window on the capture rect (that caused self-occlusion).
+   */
   setOverlayRegion(rect: CaptureRect): void;
+  /** Position the Electron full-mode paint window (marker strip / stack panel). */
+  setOverlayContentBounds(rect: CaptureRect): void;
   /** Open the full-screen calibration window. */
   openCalibration(): void;
   /** Persist a calibrated region and notify listeners (called from calibrate). */
@@ -106,8 +116,8 @@ export interface OverlayController {
   isOverlayVisible(): boolean;
   /**
    * Briefly toggle the overlay window's visibility. Used to take it out of the
-   * way during a region capture so the click-through overlay can't occlude /
-   * self-capture its own target (full mode positions it AT the region).
+   * way during a region capture so the click-through paint window can't occlude
+   * the calibrated OCR target (content bounds sit beside the region).
    */
   setOverlayVisible(visible: boolean): void;
 }
@@ -216,9 +226,8 @@ export function registerIpc(
     }
     const caps = overlay?.capabilities();
     const silent = caps?.silentRegionCapture ?? false;
-    // In full mode the overlay window sits AT the capture region, so it would
-    // occlude / self-capture its own target. Hide it for the duration of the
-    // grab, then restore it so it can render the resulting price plates.
+    // Full mode paints beside the capture region; still hide the window so a
+    // large strip or mis-docked panel cannot contaminate the OCR grab.
     const wasVisible = overlay?.isOverlayVisible() ?? false;
     if (wasVisible) overlay?.setOverlayVisible(false);
     if (caps?.overlayMode === "hyprland-plugin" && preserveOverlay !== true) {
@@ -275,6 +284,10 @@ export function registerIpc(
     if (!caps?.capabilities.includes("images.rgba")) return {};
     return prepareHyprOverlayPriceIcons(getPriceSnapshot().unitIcons);
   });
+  ipcMain.handle(CHANNELS.preparePriceIconDataUrls, async () => {
+    // Electron full-mode marker paint; decorative only.
+    return preparePriceIconDataUrls(getPriceSnapshot().unitIcons);
+  });
   ipcMain.handle(CHANNELS.rewardWatcher, (_e, enabled: unknown) => {
     overlay?.setRewardWatcher(enabled === true);
     return overlay?.rewardWatcherEnabled() ?? false;
@@ -321,6 +334,13 @@ export function registerIpc(
     const parsed = coerceRect(rect);
     if (!parsed) throw new Error("overlaySetRegion: invalid rect");
     overlay?.setOverlayRegion(parsed);
+    return true;
+  });
+
+  ipcMain.handle(CHANNELS.overlaySetContentBounds, (_e, rect: unknown) => {
+    const parsed = coerceRect(rect);
+    if (!parsed) throw new Error("overlaySetContentBounds: invalid rect");
+    overlay?.setOverlayContentBounds(parsed);
     return true;
   });
 

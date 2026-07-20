@@ -3,7 +3,9 @@ import {
   bgraToRgba,
   isAllowedPriceIconUrl,
   prepareHyprOverlayPriceIcons,
+  preparePriceIconDataUrls,
   resetHyprOverlayPriceIconCacheForTests,
+  type PriceIconDataUrlDependencies,
   type PriceIconDependencies,
 } from "../src/capture/hyprOverlayIcons";
 
@@ -48,5 +50,24 @@ describe("hypr-overlay price icons", () => {
     await prepareHyprOverlayPriceIcons(urls, deps);
     expect(registered).toHaveLength(2);
     expect(Buffer.from(registered[0].rgbaBase64, "base64")).toEqual(Buffer.from([1, 2, 3, 255]));
+  });
+
+  test("Electron path returns data URLs from the same allowlisted sources", async () => {
+    const deps: PriceIconDataUrlDependencies = {
+      fetchBytes: async () => Buffer.from("png"),
+      decodeBgra: async () => ({ width: 1, height: 1, data: Buffer.from([3, 2, 1, 255]) }),
+      toDataUrl: async () => "data:image/png;base64,abc",
+    };
+    const urls = {
+      div: "https://web.poecdn.com/div.png",
+      ex: "https://evil.example/ex.png",
+    };
+    expect(await preparePriceIconDataUrls(urls, deps)).toEqual({
+      div: "data:image/png;base64,abc",
+    });
+    // Cache hit: no second toDataUrl needed for same URL.
+    expect(await preparePriceIconDataUrls(urls, deps)).toEqual({
+      div: "data:image/png;base64,abc",
+    });
   });
 });

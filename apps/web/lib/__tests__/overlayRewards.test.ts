@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { rewardOverlayPayload } from "../overlay/rewards";
+import {
+  REWARD_TOKENS,
+  buildRewardSurface,
+  formatRewardMarker,
+  rewardOverlayPayload,
+  toHyprPayload,
+} from "../overlay/rewards";
 import type { PricedRow } from "../ocr/priceSource";
 
 function row(over: Partial<PricedRow>): PricedRow {
@@ -17,7 +23,7 @@ function row(over: Partial<PricedRow>): PricedRow {
   };
 }
 
-describe("reward compositor payload", () => {
+describe("reward surface model", () => {
   const rows = [
     row({}),
     row({
@@ -29,27 +35,31 @@ describe("reward compositor payload", () => {
     }),
   ];
 
-  test("docks beside a left-side capture instead of covering it", () => {
-    const payload = rewardOverlayPayload(
+  test("stack docks beside a left-side capture instead of covering it", () => {
+    const model = buildRewardSurface(
       { x: 40, y: 120, width: 600, height: 180 },
       rows,
       2560,
       1440,
     );
-    expect(payload.rect.x).toBe(652);
-    expect(payload.rect.w).toBe(380);
-    expect(payload.style?.background).toEndWith("c8");
+    expect(model.kind).toBe("stack");
+    if (model.kind !== "stack") return;
+    expect(model.strip.x).toBe(40 + 600 + REWARD_TOKENS.edge);
+    expect(model.strip.width).toBe(REWARD_TOKENS.panelWidth);
+    expect(toHyprPayload(model).style?.background).toEndWith("c8");
   });
 
-  test("flips to the left when a right-side capture has no room", () => {
-    const payload = rewardOverlayPayload(
+  test("stack flips to the left when a right-side capture has no room", () => {
+    const model = buildRewardSurface(
       { x: 1900, y: 80, width: 600, height: 200 },
       rows,
       2560,
       1440,
     );
-    expect(payload.rect.x).toBe(1508);
-    expect(payload.rows?.[1]).toMatchObject({
+    expect(model.kind).toBe("stack");
+    if (model.kind !== "stack") return;
+    expect(model.strip.x).toBe(1900 - REWARD_TOKENS.panelWidth - REWARD_TOKENS.edge);
+    expect(model.rows[1]).toMatchObject({
       label: "3x Greater Chaos Orb",
       value: "1.1 div",
       detail: "0.4 div ea",
@@ -57,7 +67,7 @@ describe("reward compositor payload", () => {
   });
 
   test("positions icon-and-value markers at OCR row centers", () => {
-    const payload = rewardOverlayPayload(
+    const model = buildRewardSurface(
       { x: 40, y: 120, width: 600, height: 400 },
       [
         row({
@@ -89,9 +99,36 @@ describe("reward compositor payload", () => {
         ttlMs: 0,
       },
     );
-    expect(payload.ttlMs).toBe(0);
+    expect(model.kind).toBe("positioned");
+    if (model.kind !== "positioned") return;
+    expect(model.ttlMs).toBe(0);
+    expect(model.strip).toEqual({
+      x: 40 + 600 + REWARD_TOKENS.edge,
+      y: 120,
+      width: REWARD_TOKENS.markerWidth,
+      height: 400,
+    });
+    expect(model.markers[0]).toMatchObject({
+      label: "1.2",
+      top: 60,
+      height: REWARD_TOKENS.markerHeight,
+      iconRef: "poc2.currency.div",
+      color: REWARD_TOKENS.colorHighest,
+    });
+    expect(model.markers[1]).toMatchObject({
+      label: "60 (20 each)",
+      top: 260,
+      iconRef: "poc2.currency.ex",
+    });
+
+    const payload = toHyprPayload(model);
     expect(payload.style?.background).toBe("#00000000");
-    expect(payload.rect).toEqual({ x: 652, y: 120, w: 190, h: 400 });
+    expect(payload.rect).toEqual({
+      x: model.strip.x,
+      y: model.strip.y,
+      w: model.strip.width,
+      h: model.strip.height,
+    });
     expect(payload.rows?.[0]).toMatchObject({
       label: "1.2",
       top: 60,
@@ -99,10 +136,21 @@ describe("reward compositor payload", () => {
       iconId: "poc2.currency.div",
       color: "#50ff78ff",
     });
-    expect(payload.rows?.[1]).toMatchObject({
-      label: "60 (20 each)",
-      top: 260,
-      iconId: "poc2.currency.ex",
-    });
+  });
+
+  test("rewardOverlayPayload remains a thin hypr wrapper", () => {
+    const payload = rewardOverlayPayload(
+      { x: 40, y: 120, width: 600, height: 180 },
+      rows,
+      2560,
+      1440,
+    );
+    expect(payload.rect.x).toBe(652);
+    expect(payload.rect.w).toBe(380);
+  });
+
+  test("marker label omits unit when an icon is present", () => {
+    expect(formatRewardMarker(row({ total: 2.5, unit: "div" }), true)).toBe("2.5");
+    expect(formatRewardMarker(row({ total: 2.5, unit: "div" }), false)).toBe("2.5 div");
   });
 });

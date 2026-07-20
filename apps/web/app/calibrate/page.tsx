@@ -1,15 +1,23 @@
 "use client";
 
-// Calibration window route (ADR-0013). Loaded full-screen + transparent by the
-// Electron shell at /calibrate. The user drag-selects the in-game price region;
-// mouse-up retains a draft; Enter/Space confirms it through calibrateRegion.
-//
-// Minimal but real: this is the drag-select surface, not a downstream worker.
-// Export-safe (origin-relative assets only); in a plain browser it's an inert
-// labelled stub.
+// Calibration window route (ADR-0013). Loaded as a transparent virtual-desktop
+// cover by the Electron shell at /calibrate (never true fullscreen — that
+// breaks transparency on Windows). The user drag-selects the in-game price
+// region; mouse-up retains a draft; Enter/Space confirms it through
+// calibrateRegion. Tokens align with hyproverlay selection chrome.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getDesktopBridge, type CaptureRect } from "@/lib/desktop";
+
+/** Match openHyprlandCalibration / hyproverlay selection style. */
+const CALIBRATE_TOKENS = {
+  dim: "rgba(0, 0, 0, 0.4)", // #00000066
+  border: "#50d06d",
+  borderWidth: 3,
+  hintColor: "#f4f0e6",
+  hint: "Press ENTER to confirm, drag to redo · ESC cancels",
+  label: "calibrate · drag to select the complete reward rows",
+} as const;
 
 interface Drag {
   startX: number;
@@ -29,33 +37,51 @@ function rectOf(d: Drag): CaptureRect {
 
 export default function CalibratePage() {
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [draft, setDraft] = useState<CaptureRect | null>(null);
   const [hasBridge, setHasBridge] = useState(false);
   const dragging = useRef(false);
 
   useEffect(() => {
     queueMicrotask(() => setHasBridge(getDesktopBridge() !== null));
+    // Hydrate prior region as a starting draft (hypr parity).
+    void getDesktopBridge()
+      ?.getCaptureRegion?.()
+      .then((rect) => {
+        if (rect && rect.width >= 1 && rect.height >= 1) {
+          // Convert global screen coords → window-local for painting.
+          setDraft({
+            x: rect.x - window.screenX,
+            y: rect.y - window.screenY,
+            width: rect.width,
+            height: rect.height,
+          });
+        }
+      })
+      .catch(() => undefined);
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         dragging.current = false;
         setDrag(null);
+        // Main's before-input-event hides the calibrator window.
         return;
       }
-      if ((e.key === "Enter" || e.key === " ") && drag) {
-        const local = rectOf(drag);
-        if (local.width >= 1 && local.height >= 1) {
+      const active = drag ? rectOf(drag) : draft;
+      if ((e.key === "Enter" || e.key === " ") && active) {
+        if (active.width >= 1 && active.height >= 1) {
           e.preventDefault();
           void getDesktopBridge()?.calibrateRegion({
-            x: window.screenX + local.x,
-            y: window.screenY + local.y,
-            width: local.width,
-            height: local.height,
+            x: window.screenX + active.x,
+            y: window.screenY + active.y,
+            width: active.width,
+            height: active.height,
           });
         }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [drag]);
+  }, [drag, draft]);
 
   const onDown = useCallback((e: React.MouseEvent) => {
     dragging.current = true;
@@ -68,23 +94,31 @@ export default function CalibratePage() {
   }, []);
 
   const onUp = useCallback(() => {
+    if (!dragging.current) return;
     dragging.current = false;
+    setDrag((d) => {
+      if (!d) return d;
+      const r = rectOf(d);
+      if (r.width >= 1 && r.height >= 1) setDraft(r);
+      return null;
+    });
   }, []);
 
-  const sel = drag ? rectOf(drag) : null;
+  const sel = drag ? rectOf(drag) : draft;
 
   return (
     <main
       onMouseDown={onDown}
       onMouseMove={onMove}
       onMouseUp={onUp}
+      onMouseLeave={onUp}
       style={{
         margin: 0,
         height: "100vh",
         width: "100vw",
         cursor: "crosshair",
-        background: "rgba(0, 0, 0, 0.4)",
-        color: "#e8d9b5",
+        background: CALIBRATE_TOKENS.dim,
+        color: CALIBRATE_TOKENS.hintColor,
         fontFamily: "system-ui, sans-serif",
         userSelect: "none",
         position: "relative",
@@ -93,7 +127,9 @@ export default function CalibratePage() {
     >
       <div style={{ position: "absolute", top: 16, left: 16, fontSize: 14 }}>
         <strong>calibrate</strong>
-        {hasBridge ? " · drag to select the complete reward rows" : " · (no desktop bridge)"}
+        {hasBridge
+          ? " · drag to select the complete reward rows"
+          : " · (no desktop bridge)"}
       </div>
       {sel && (
         <div
@@ -103,9 +139,10 @@ export default function CalibratePage() {
             top: sel.y,
             width: sel.width,
             height: sel.height,
-            border: "3px solid #50d06d",
+            border: `${CALIBRATE_TOKENS.borderWidth}px solid ${CALIBRATE_TOKENS.border}`,
             background: "rgba(80, 208, 109, 0.06)",
             pointerEvents: "none",
+            boxSizing: "border-box",
           }}
         >
           <span
@@ -114,12 +151,12 @@ export default function CalibratePage() {
               left: 0,
               top: "calc(100% + 10px)",
               whiteSpace: "nowrap",
-              color: "#f4f0e6",
+              color: CALIBRATE_TOKENS.hintColor,
               fontSize: 14,
               textShadow: "0 1px 3px #000",
             }}
           >
-            Press ENTER to confirm, drag to redo · ESC cancels
+            {CALIBRATE_TOKENS.hint}
           </span>
         </div>
       )}

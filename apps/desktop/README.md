@@ -146,7 +146,7 @@ Capability gate at startup decides `overlayMode`:
 
 | Session | Mode |
 |---|---|
-| win32, non-Hyprland Linux X11/XWayland | `full` (silent Electron capture, click-through window) |
+| win32, non-Hyprland Linux X11/XWayland | `full` (silent Electron capture, click-through window; **positioned icon+value markers** from the shared reward surface model — same layout as hyproverlay) |
 | Wayland GNOME/KDE (probe passes) | `full` (portal capture) |
 | Hyprland/wlroots with `hyproverlay` v4 loaded | `hyprland-plugin` (compositor drag-confirm calibration, `grim` capture, positioned icon/value rows and generic menus) |
 | Wayland wlroots without plugin | `degraded` (`slurp` + `grim`, in-app result panel) |
@@ -162,14 +162,19 @@ read falls back to the portable worker. The hidden
 `/overlay` worker otherwise captures first → native-canvas 1.25x text-column
 crop with the fast Tesseract model and PSM 11 (2x/alternate-crop fallback when
 fewer than four catalogue rows resolve) → one batched fuzzy resolution against
-the price-cache catalogue → spatial row locking. On `hyproverlay` v4, each line center becomes a
-transparent, row-aligned currency icon + stack value immediately outside the
-capture region; old plugins retain compact cards. Runtime-fetched Divine/Exalted
-icons are converted to bounded RGBA and registered in compositor memory, never
-committed. Calibration is compositor-native on Hyprland: drag, release, then
-Enter/Space to confirm or drag again. Settings → OCR diagnostics exposes
-**Calibrate**, **Scan now**, **Start watcher**, the selected OCR backend, row Y
-positions, and protocol data.
+the price-cache catalogue → spatial row locking. Reward results use a **shared
+surface model** (`apps/web/lib/overlay/rewards.ts`): when OCR geometry exists,
+each line center becomes a transparent, row-aligned currency icon + stack value
+immediately outside the capture region — painted by `hyproverlay` on Hyprland
+or by the Electron full-mode window (Windows/X11) with the same placement and
+tokens. Without geometry, compact stack cards remain. Runtime-fetched
+Divine/Exalted icons are allowlisted once; hypr registers RGBA in compositor
+memory, Electron full mode uses data URLs. Calibration is compositor-native on
+Hyprland; on Electron full mode the calibrator is a transparent
+virtual-desktop cover (never true `fullscreen` — that breaks see-through on
+Windows). Drag, release, Enter/Space to confirm. Settings → OCR diagnostics
+exposes **Calibrate**, **Scan now**, **Start watcher**, the selected OCR
+backend, row Y positions, and protocol data.
 
 Item price check = hovered item capture → `/overlay` builds smart trade2 stat
 filters (default 90% lower-bound / 110% upper-bound) → desktop proxy search/fetch

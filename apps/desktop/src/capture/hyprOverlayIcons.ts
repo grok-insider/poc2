@@ -5,23 +5,40 @@ export const PRICE_ICON_IDS = {
   ex: "poc2.currency.ex",
 } as const;
 
-const ICON_SIZE = 34;
+/** Matches REWARD_TOKENS.iconSize in apps/web/lib/overlay/rewards.ts. */
+export const PRICE_ICON_SIZE = 34;
+
 const registeredUrls = new Map<string, string>();
+const dataUrlCache = new Map<string, string>();
 
 export interface PriceIconUrls {
   div?: string;
   ex?: string;
 }
 
-export interface PriceIconDependencies {
+export interface DecodedIconBitmap {
+  width: number;
+  height: number;
+  data: Buffer;
+}
+
+export interface PriceIconLoadDependencies {
   fetchBytes(url: string): Promise<Buffer>;
-  decodeBgra(bytes: Buffer, size: number): Promise<{ width: number; height: number; data: Buffer }>;
+  decodeBgra(bytes: Buffer, size: number): Promise<DecodedIconBitmap>;
+}
+
+export interface PriceIconDependencies extends PriceIconLoadDependencies {
   register(input: {
     id: string;
     width: number;
     height: number;
     rgbaBase64: string;
   }): Promise<boolean>;
+}
+
+export interface PriceIconDataUrlDependencies extends PriceIconLoadDependencies {
+  /** Optional: produce a data URL from the resized source bytes (default uses Electron). */
+  toDataUrl?(bytes: Buffer, size: number): Promise<string | null>;
 }
 
 export function isAllowedPriceIconUrl(value: string): boolean {
@@ -55,7 +72,17 @@ export function bgraToRgba(data: Uint8Array): Buffer {
   return out;
 }
 
-async function defaultDependencies(): Promise<PriceIconDependencies> {
+function isValidIconBitmap(image: DecodedIconBitmap): boolean {
+  return (
+    image.width >= 1 &&
+    image.height >= 1 &&
+    image.width <= 64 &&
+    image.height <= 64 &&
+    image.data.length === image.width * image.height * 4
+  );
+}
+
+async function defaultLoadDependencies(): Promise<PriceIconLoadDependencies> {
   const { nativeImage, net } = await import("electron");
   return {
     async fetchBytes(url) {
@@ -70,8 +97,37 @@ async function defaultDependencies(): Promise<PriceIconDependencies> {
       const dimensions = resized.getSize();
       return { width: dimensions.width, height: dimensions.height, data: resized.toBitmap() };
     },
+  };
+}
+
+async function defaultDependencies(): Promise<PriceIconDependencies> {
+  const load = await defaultLoadDependencies();
+  return {
+    ...load,
     register: registerHyprOverlayImage,
   };
+}
+
+/** Shared load path: allowlisted fetch + square BGRA bitmap. */
+export async function loadUnitIconBitmaps(
+  urls: PriceIconUrls,
+  dependencies?: PriceIconLoadDependencies,
+): Promise<Partial<Record<keyof PriceIconUrls, DecodedIconBitmap & { sourceUrl: string }>>> {
+  const deps = dependencies ?? (await defaultLoadDependencies());
+  const out: Partial<Record<keyof PriceIconUrls, DecodedIconBitmap & { sourceUrl: string }>> = {};
+  for (const unit of ["div", "ex"] as const) {
+    const url = urls[unit];
+    if (!url || !isAllowedPriceIconUrl(url)) continue;
+    try {
+      const encoded = await deps.fetchBytes(url);
+      const image = await deps.decodeBgra(encoded, PRICE_ICON_SIZE);
+      if (!isValidIconBitmap(image)) continue;
+      out[unit] = { ...image, sourceUrl: url };
+    } catch {
+      // Decorative only.
+    }
+  }
+  return out;
 }
 
 export async function prepareHyprOverlayPriceIcons(
@@ -90,16 +146,8 @@ export async function prepareHyprOverlayPriceIcons(
     }
     try {
       const encoded = await deps.fetchBytes(url);
-      const image = await deps.decodeBgra(encoded, ICON_SIZE);
-      if (
-        image.width < 1 ||
-        image.height < 1 ||
-        image.width > 64 ||
-        image.height > 64 ||
-        image.data.length !== image.width * image.height * 4
-      ) {
-        continue;
-      }
+      const image = await deps.decodeBgra(encoded, PRICE_ICON_SIZE);
+      if (!isValidIconBitmap(image)) continue;
       const ok = await deps.register({
         id,
         width: image.width,
@@ -116,6 +164,53 @@ export async function prepareHyprOverlayPriceIcons(
   return available;
 }
 
+/**
+ * Electron full-mode markers: same allowlisted sources as hypr, returned as data URLs.
+ */
+export async function preparePriceIconDataUrls(
+  urls: PriceIconUrls,
+  dependencies?: PriceIconDataUrlDependencies,
+): Promise<Partial<Record<keyof PriceIconUrls, string>>> {
+  const load = dependencies
+    ? { fetchBytes: dependencies.fetchBytes, decodeBgra: dependencies.decodeBgra }
+    : await defaultLoadDependencies();
+  const available: Partial<Record<keyof PriceIconUrls, string>> = {};
+  for (const unit of ["div", "ex"] as const) {
+    const url = urls[unit];
+    if (!url || !isAllowedPriceIconUrl(url)) continue;
+    const cached = dataUrlCache.get(url);
+    if (cached) {
+      available[unit] = cached;
+      continue;
+    }
+    try {
+      let dataUrl: string | null = null;
+      if (dependencies?.toDataUrl) {
+        const bytes = await load.fetchBytes(url);
+        dataUrl = await dependencies.toDataUrl(bytes, PRICE_ICON_SIZE);
+      } else {
+        const { nativeImage } = await import("electron");
+        const bytes = await load.fetchBytes(url);
+        const image = nativeImage.createFromBuffer(bytes);
+        if (image.isEmpty()) continue;
+        const resized = image.resize({
+          width: PRICE_ICON_SIZE,
+          height: PRICE_ICON_SIZE,
+          quality: "best",
+        });
+        dataUrl = resized.toDataURL();
+      }
+      if (!dataUrl || !dataUrl.startsWith("data:image/")) continue;
+      dataUrlCache.set(url, dataUrl);
+      available[unit] = dataUrl;
+    } catch {
+      // Decorative only.
+    }
+  }
+  return available;
+}
+
 export function resetHyprOverlayPriceIconCacheForTests(): void {
   registeredUrls.clear();
+  dataUrlCache.clear();
 }

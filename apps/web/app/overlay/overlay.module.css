@@ -21,6 +21,13 @@
   box-sizing: border-box;
 }
 
+/* Hypr-parity marker strip: window is already the strip rect; no padding. */
+.root[data-markers="true"] {
+  padding: 0;
+  justify-content: stretch;
+  align-items: stretch;
+}
+
 /* Adaptive placement: flip plates to the left edge for right-side regions. */
 .root[data-place="left"] {
   justify-content: flex-start;
@@ -152,4 +159,46 @@
 /* Follow the plate edge: left-placed regions dock the X to the left too. */
 .root[data-place="left"] .close {
   align-self: flex-start;
+}
+
+/* ---- Positioned reward markers (shared model with hyproverlay) ---- */
+
+.markerStrip {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  min-height: 100%;
+  pointer-events: none;
+}
+
+.marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--marker-icon-gap, 7px);
+  padding: 0 8px;
+  border-radius: var(--marker-radius, 9px);
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", monospace;
+  font-size: var(--marker-font-size, 20px);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.markerIcon {
+  width: var(--marker-icon-size, 34px);
+  height: var(--marker-icon-size, 34px);
+  flex: 0 0 var(--marker-icon-size, 34px);
+  object-fit: contain;
+  image-rendering: auto;
+  pointer-events: none;
+}
+
+.markerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

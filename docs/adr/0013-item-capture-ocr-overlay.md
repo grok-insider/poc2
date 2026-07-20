@@ -124,10 +124,18 @@ separates host-compositor detection from Electron's rendering backend:
   portable Tesseract path used by Linux and the browser;
 - OCR line boxes survive preprocessing transforms and are row-locked by nearest
   screen Y rather than array index;
-- `hyproverlay` v4 draws a currency icon + total at each OCR line center just
-  outside the selected region. Icons are runtime-fetched from the price source,
-  converted to bounded RGBA in Electron, and registered in compositor memory;
-  the plugin performs no file/network/PNG work;
+- Positioned reward markers are a **shared pure layout model**
+  (`buildRewardSurface` / visual tokens). Transports project it:
+  - `hyproverlay` v4 draws a currency icon + total at each OCR line center just
+    outside the selected region (RGBA icons registered in compositor memory);
+  - Electron `full` mode (Windows / X11) paints the same strip via a
+    click-through transparent window with content bounds **beside** the capture
+    region (not on it), using data-URL unit icons from the same allowlist.
+  Capture region and paint bounds stay separate IPC concepts so the overlay
+  cannot self-OCR its chips.
+- Electron calibration never uses `fullscreen: true` (opaque on win32); it
+  covers the virtual desktop with a transparent frameless window and hypr-aligned
+  dim/selection chrome;
 - `Alt+V` remains a one-shot pass. `Alt+Shift+V` adds an opt-in watcher with
   open/close hysteresis, 500 ms presence sampling independent from OCR,
   latest-frame-wins two-second OCR admission, and stale-scan cancellation;

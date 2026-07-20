@@ -64,10 +64,17 @@ import {
   priceCheckItemOverlay,
 } from "@/lib/overlay/market";
 import {
+  REWARD_TOKENS,
+  buildRewardSurface,
+  errorRewardSurface,
   formatRewardEach,
   formatRewardTotal,
-  rewardOverlayPayload,
+  type RewardSurfaceModel,
 } from "@/lib/overlay/rewards";
+import {
+  hideRewardSurface,
+  publishRewardSurface,
+} from "@/lib/overlay/publishRewardSurface";
 import {
   applyRegexOverlayEvent,
   emptyRegexOverlayState,
@@ -224,6 +231,7 @@ export default function OverlayPage() {
   const [state, setState] = useState<OverlayState | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [rows, setRows] = useState<PricedRow[]>([]);
+  const [surface, setSurface] = useState<RewardSurfaceModel | null>(null);
   const [cardRows, setCardRows] = useState<OverlayRows | null>(null);
   const [itemPopup, setItemPopup] = useState<ItemPopupModel | null>(null);
   const [itemArtUrl, setItemArtUrl] = useState<string | null>(null);
@@ -272,13 +280,12 @@ export default function OverlayPage() {
         setRows([]);
         setStatus("empty");
         setNote("Capture blocked; clipboard had no recognizable item lines.");
-        if (overlayModeRef.current === "hyprland-plugin") {
-          await bridge.hyprOverlayRender(
-            errorPayload("Reward Scan", "Capture blocked and clipboard had no item rows"),
-          );
-        } else {
-          await bridge.overlayShow();
-        }
+        const model = errorRewardSurface(
+          "Reward Scan",
+          "Capture blocked and clipboard had no item rows",
+        );
+        setSurface(model);
+        await publishRewardSurface(bridge, overlayModeRef.current, model);
         return;
       }
       const { engine } = await import("@/lib/engine/client");
@@ -295,42 +302,50 @@ export default function OverlayPage() {
       setRows(resolved);
       setStatus(resolved.length > 0 ? "ready" : "empty");
       setNote("Capture blocked — read from clipboard instead.");
-      if (overlayModeRef.current === "hyprland-plugin") {
-        await bridge.hyprOverlayRender(
-          resolved.length > 0
-            ? rewardOverlayPayload(
-                regionRef.current ?? { x: 80, y: 80, width: 420, height: 160 },
-                resolved,
-                window.screen.width,
-                window.screen.height,
-              )
-            : errorPayload("Reward Scan", "Clipboard rows did not resolve"),
-        );
-      } else {
-        await bridge.overlayShow();
-      }
+      const capture = regionRef.current ?? { x: 80, y: 80, width: 420, height: 160 };
+      const model =
+        resolved.length > 0
+          ? buildRewardSurface(
+              capture,
+              resolved,
+              window.screen.width,
+              window.screen.height,
+              {
+                supportsPositionedRows: true,
+                iconIds: iconIdsRef.current,
+              },
+            )
+          : errorRewardSurface("Reward Scan", "Clipboard rows did not resolve");
+      setSurface(model);
+      await publishRewardSurface(bridge, overlayModeRef.current, model);
     } catch {
       setRows([]);
       setStatus("empty");
       setNote("Capture blocked and clipboard is unavailable.");
-      if (overlayModeRef.current === "hyprland-plugin") {
-        await bridge.hyprOverlayRender(
-          errorPayload("Reward Scan", "Capture blocked and clipboard unavailable"),
-        );
-      } else {
-        await bridge.overlayShow();
-      }
+      const model = errorRewardSurface(
+        "Reward Scan",
+        "Capture blocked and clipboard unavailable",
+      );
+      setSurface(model);
+      await publishRewardSurface(bridge, overlayModeRef.current, model);
     }
   }, []);
 
   const ensurePriceIcons = useCallback(async () => {
     const bridge = getDesktopBridge();
     if (!bridge || iconsPreparedRef.current) return;
-    if (!hyprStatusRef.current?.capabilities.includes("images.rgba")) return;
     if (Date.now() - iconAttemptAtRef.current < 30_000) return;
     iconAttemptAtRef.current = Date.now();
     try {
-      iconIdsRef.current = await bridge.hyprOverlayPreparePriceIcons();
+      const mode = overlayModeRef.current;
+      if (mode === "hyprland-plugin") {
+        if (!hyprStatusRef.current?.capabilities.includes("images.rgba")) return;
+        iconIdsRef.current = await bridge.hyprOverlayPreparePriceIcons();
+      } else if (mode === "full" && bridge.preparePriceIconDataUrls) {
+        iconIdsRef.current = await bridge.preparePriceIconDataUrls();
+      } else {
+        return;
+      }
       iconsPreparedRef.current = Boolean(iconIdsRef.current.div && iconIdsRef.current.ex);
     } catch {
       // Decorative only; the positioned marker includes a text unit fallback.
@@ -414,11 +429,9 @@ export default function OverlayPage() {
           if (result.reason === "invalid-rect" && !rect) {
             setStatus("no-region");
             setNote("No price region calibrated yet.");
-            if (overlayModeRef.current === "hyprland-plugin") {
-              await bridge.hyprOverlayRender(errorPayload("Reward Scan", "No OCR region calibrated"));
-            } else {
-              await bridge.overlayShow();
-            }
+            const model = errorRewardSurface("Reward Scan", "No OCR region calibrated");
+            setSurface(model);
+            await publishRewardSurface(bridge, overlayModeRef.current, model);
             await bridge.scanDiagnosticsSet({
               updatedAt: new Date().toISOString(),
               transport: overlayModeRef.current ?? "degraded",
@@ -428,11 +441,12 @@ export default function OverlayPage() {
           }
           setStatus("empty");
           setNote(`Capture failed (${result.reason}).`);
-          if (overlayModeRef.current === "hyprland-plugin") {
-            await bridge.hyprOverlayRender(errorPayload("Reward Scan", `Capture failed: ${result.reason}`));
-          } else {
-            await bridge.overlayShow();
-          }
+          const model = errorRewardSurface(
+            "Reward Scan",
+            `Capture failed: ${result.reason}`,
+          );
+          setSurface(model);
+          await publishRewardSurface(bridge, overlayModeRef.current, model);
           await bridge.scanDiagnosticsSet({
             updatedAt: new Date().toISOString(),
             transport: overlayModeRef.current ?? "degraded",
@@ -584,38 +598,26 @@ export default function OverlayPage() {
         .sort((a, b) => (a.geometry?.center.y ?? 2) - (b.geometry?.center.y ?? 2));
       setRows(out);
       setStatus(out.length > 0 ? "ready" : "empty");
-      let renderOk = true;
-      if (overlayModeRef.current === "hyprland-plugin" && rect) {
-        renderOk = await bridge.hyprOverlayRender(
-          out.length > 0
-            ? rewardOverlayPayload(
-                rect,
-                out,
-                window.screen.width,
-                window.screen.height,
-                {
-                  supportsPositionedRows:
-                    hyprStatusRef.current?.capabilities.includes("cards.positionedRows") === true,
-                  iconIds: iconIdsRef.current,
-                  displayBounds: cap.displayBounds,
-                  ttlMs: watching ? 0 : 20_000,
-                },
-              )
-            : errorPayload("Reward Scan", "No item rows recognized"),
-        );
-      } else {
-        await bridge.overlayShow();
-      }
+      const supportsPositioned =
+        overlayModeRef.current === "full" ||
+        hyprStatusRef.current?.capabilities.includes("cards.positionedRows") === true;
+      const model =
+        out.length > 0 && rect
+          ? buildRewardSurface(rect, out, window.screen.width, window.screen.height, {
+              supportsPositionedRows: supportsPositioned,
+              iconIds: iconIdsRef.current,
+              displayBounds: cap.displayBounds,
+              ttlMs: watching ? 0 : REWARD_TOKENS.defaultTtlMs,
+            })
+          : errorRewardSurface("Reward Scan", "No item rows recognized");
+      setSurface(model);
+      const { renderOk } = await publishRewardSurface(
+        bridge,
+        overlayModeRef.current,
+        model,
+      );
       if (watcherStale()) {
-        if (overlayModeRef.current === "hyprland-plugin") {
-          await bridge.hyprOverlayRender({
-            mode: "cards",
-            visible: false,
-            rect: { x: rect?.x ?? 0, y: rect?.y ?? 0, w: 1, h: 1 },
-          });
-        } else {
-          await bridge.overlayHide();
-        }
+        await hideRewardSurface(bridge, overlayModeRef.current, rect);
         return;
       }
       await bridge.scanDiagnosticsSet({
@@ -667,11 +669,9 @@ export default function OverlayPage() {
       setStatus("empty");
       const message = e instanceof Error ? e.message : String(e);
       setNote(message);
-      if (overlayModeRef.current === "hyprland-plugin") {
-        await bridge.hyprOverlayRender(errorPayload("Reward Scan", message));
-      } else {
-        await bridge.overlayShow();
-      }
+      const model = errorRewardSurface("Reward Scan", message);
+      setSurface(model);
+      await publishRewardSurface(bridge, overlayModeRef.current, model);
       await bridge.scanDiagnosticsSet({
         updatedAt: new Date().toISOString(),
         transport: overlayModeRef.current ?? "degraded",
@@ -731,16 +731,9 @@ export default function OverlayPage() {
         }
         lockRef.current = emptyRowLock();
         setRows([]);
+        setSurface(null);
         setStatus("idle");
-        if (overlayModeRef.current === "hyprland-plugin") {
-          await bridge.hyprOverlayRender({
-            mode: "cards",
-            visible: false,
-            rect: { x: rect?.x ?? 0, y: rect?.y ?? 0, w: 1, h: 1 },
-          });
-        } else {
-          await bridge.overlayHide();
-        }
+        await hideRewardSurface(bridge, overlayModeRef.current, rect);
       } else if (
         (observed.action === "scan" ||
           (observed.action === "skip" &&
@@ -783,7 +776,9 @@ export default function OverlayPage() {
     }
     setCardRows(fallbackRows(payload));
     setRows([]);
+    setSurface(null);
     setStatus("ready");
+    await bridge.overlayShow();
   }, []);
 
   const hydrateRegexData = useCallback(async () => {
@@ -1086,79 +1081,149 @@ export default function OverlayPage() {
 
   const degraded = state?.degraded ?? false;
   const highest = highestValueIndex(rows);
+  const positioned = surface?.kind === "positioned" ? surface : null;
+  const stackSurface = surface?.kind === "stack" ? surface : null;
+  // Positioned markers fill the strip window (hypr parity). Stack/plates use the
+  // classic column layout for degraded, price-check, and no-geometry fallback.
+  const useMarkerStrip =
+    !degraded && positioned !== null && !cardRows && !itemPopup;
 
   return (
     <main
       className={styles.root}
       data-degraded={degraded ? "true" : "false"}
       data-place={placeLeft ? "left" : "right"}
+      data-markers={useMarkerStrip ? "true" : "false"}
+      style={
+        useMarkerStrip
+          ? {
+              ["--marker-icon-size" as string]: `${REWARD_TOKENS.iconSize}px`,
+              ["--marker-icon-gap" as string]: `${REWARD_TOKENS.iconGap}px`,
+              ["--marker-font-size" as string]: `${REWARD_TOKENS.fontSize}px`,
+              ["--marker-radius" as string]: `${REWARD_TOKENS.markerRadius}px`,
+            }
+          : undefined
+      }
     >
-      <div className={styles.stack}>
-        <button
-          type="button"
-          className={styles.close}
-          aria-label="Close overlay"
-          onClick={() => void getDesktopBridge()?.overlayHide()}
-        >
-          ×
-        </button>
-        {(status === "scanning" || status === "idle") && rows.length === 0 && (
-          <div className={styles.plate}>
-            <span className={styles.muted}>
-              {status === "scanning" ? "scanning…" : "ready"}
-            </span>
-          </div>
-        )}
-
-        {rows.map((r, i) => {
-          const total = formatRewardTotal(r);
-          const each = formatRewardEach(r);
-          return (
+      {useMarkerStrip && positioned ? (
+        <div className={styles.markerStrip} aria-label="Reward prices">
+          {positioned.markers.map((m, i) => (
             <div
-              key={`${r.key ?? r.name}-${i}`}
-              className={`${styles.plate} ${i === highest ? styles.best : ""}`}
+              key={`marker-${i}-${m.label}`}
+              className={styles.marker}
+              style={{
+                top: m.top,
+                height: m.height,
+                background: m.bg,
+                color: m.color,
+              }}
             >
-              <span className={`${styles.name} r-currency`}>
-                {r.quantity > 1 && <span className={styles.qty}>{r.quantity}× </span>}
-                {r.name}
-              </span>
+              {m.iconRef ? (
+                // eslint-disable-next-line @next/next/no-img-element -- data URL / external unit icon
+                <img
+                  className={styles.markerIcon}
+                  src={m.iconRef}
+                  alt=""
+                  width={REWARD_TOKENS.iconSize}
+                  height={REWARD_TOKENS.iconSize}
+                  draggable={false}
+                />
+              ) : null}
+              <span className={styles.markerLabel}>{m.label}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className={styles.stack}>
+          <button
+            type="button"
+            className={styles.close}
+            aria-label="Close overlay"
+            onClick={() => void getDesktopBridge()?.overlayHide()}
+          >
+            ×
+          </button>
+          {(status === "scanning" || status === "idle") &&
+            rows.length === 0 &&
+            !cardRows &&
+            !itemPopup && (
+              <div className={styles.plate}>
+                <span className={styles.muted}>
+                  {status === "scanning" ? "scanning…" : "ready"}
+                </span>
+              </div>
+            )}
+
+          {/* Stack surface (shared model) or legacy rows when surface not set */}
+          {stackSurface
+            ? stackSurface.rows.map((r, i) => (
+                <div
+                  key={`stack-${r.label}-${i}`}
+                  className={`${styles.plate} ${r.emphasis ? styles.best : ""}`}
+                >
+                  <span className={`${styles.name} r-currency`}>{r.label}</span>
+                  <span className={styles.prices}>
+                    <span className={styles.total}>{r.value}</span>
+                    {r.detail && <span className={styles.each}>{r.detail}</span>}
+                  </span>
+                </div>
+              ))
+            : rows.map((r, i) => {
+                const total = formatRewardTotal(r);
+                const each = formatRewardEach(r);
+                return (
+                  <div
+                    key={`${r.key ?? r.name}-${i}`}
+                    className={`${styles.plate} ${i === highest ? styles.best : ""}`}
+                  >
+                    <span className={`${styles.name} r-currency`}>
+                      {r.quantity > 1 && (
+                        <span className={styles.qty}>{r.quantity}× </span>
+                      )}
+                      {r.name}
+                    </span>
+                    <span className={styles.prices}>
+                      {total ? (
+                        <span className={styles.total}>{total}</span>
+                      ) : (
+                        <span className={styles.muted}>no price</span>
+                      )}
+                      {each && <span className={styles.each}>{each}</span>}
+                    </span>
+                  </div>
+                );
+              })}
+
+          {itemPopup && (
+            <div className={styles.itemPopupWrap}>
+              <ItemPopup model={itemPopup} artUrl={itemArtUrl} />
+            </div>
+          )}
+
+          {cardRows?.map((r, i) => (
+            <div
+              key={`card-${r.label ?? "row"}-${i}`}
+              className={`${styles.plate} ${r.emphasis ? styles.best : ""}`}
+            >
+              <span className={`${styles.name} r-currency`}>{r.label ?? ""}</span>
               <span className={styles.prices}>
-                {total ? (
-                  <span className={styles.total}>{total}</span>
-                ) : (
-                  <span className={styles.muted}>no price</span>
-                )}
-                {each && <span className={styles.each}>{each}</span>}
+                {r.value ? <span className={styles.total}>{r.value}</span> : null}
+                {r.detail && <span className={styles.each}>{r.detail}</span>}
               </span>
             </div>
-          );
-        })}
+          ))}
 
-        {itemPopup && (
-          <div className={styles.itemPopupWrap}>
-            <ItemPopup model={itemPopup} artUrl={itemArtUrl} />
-          </div>
-        )}
-
-        {cardRows?.map((r, i) => (
-          <div
-            key={`card-${r.label ?? "row"}-${i}`}
-            className={`${styles.plate} ${r.emphasis ? styles.best : ""}`}
-          >
-            <span className={`${styles.name} r-currency`}>{r.label ?? ""}</span>
-            <span className={styles.prices}>
-              {r.value ? <span className={styles.total}>{r.value}</span> : null}
-              {r.detail && <span className={styles.each}>{r.detail}</span>}
-            </span>
-          </div>
-        ))}
-
-        {note && rows.length === 0 && !cardRows && !itemPopup && (
-          <div className={styles.plate}>
-            <span className={styles.muted}>{note}</span>
-          </div>
-        )}
-      </div>
+          {note &&
+            rows.length === 0 &&
+            !stackSurface &&
+            !cardRows &&
+            !itemPopup && (
+              <div className={styles.plate}>
+                <span className={styles.muted}>{note}</span>
+              </div>
+            )}
+        </div>
+      )}
     </main>
   );
 }

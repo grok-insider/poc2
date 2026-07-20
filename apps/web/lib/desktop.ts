@@ -321,8 +321,16 @@ export interface Poc2DesktopBridge {
   overlayShow(): Promise<DesktopCapabilities["overlayMode"]>;
   /** Hide the overlay window. */
   overlayHide(): Promise<boolean>;
-  /** Reposition the overlay over a screen region. */
+  /**
+   * Notify the overlay of the OCR capture region (does not move the paint window
+   * onto the capture rect).
+   */
   overlaySetRegion(rect: CaptureRect): Promise<boolean>;
+  /**
+   * Position the Electron full-mode paint window (marker strip / stack panel).
+   * Separate from the persisted capture region. Optional on older shells.
+   */
+  overlaySetContentBounds?(rect: CaptureRect): Promise<boolean>;
   /** Open the calibrator (no arg) or report a calibrated rect back to main. */
   calibrateRegion(rect?: CaptureRect): Promise<boolean>;
   /** The persisted calibrated region, or null. Optional — absent on
@@ -335,8 +343,13 @@ export interface Poc2DesktopBridge {
   onOverlayState(cb: (state: OverlayState) => void): () => void;
   /** Send already-computed rows to the Hyprland compositor overlay plugin. */
   hyprOverlayRender(payload: HyprOverlayPayload): Promise<boolean>;
-  /** Fetch/register Divine and Exalted images from the active price snapshot. */
+  /** Fetch/register Divine and Exalted images from the active price snapshot (hypr ids). */
   hyprOverlayPreparePriceIcons(): Promise<Record<string, string>>;
+  /**
+   * Same unit icons as data URLs for Electron full-mode marker paint.
+   * Optional on shells that predate this channel.
+   */
+  preparePriceIconDataUrls?(): Promise<Record<string, string>>;
   /**
    * Subscribe to hyproverlay interaction events (regex menu, etc.).
    * Returns an unsubscribe. Absent on shells that predate interactive menus.
