@@ -130,6 +130,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased] — crafting-mechanics fidelity + PoE2 0.5
 
+## [2.0.1](https://github.com/grok-insider/poc2/compare/v2.0.0...v2.0.1) - 2026-07-20
+
+### Fixed
+
+- *(web,market)* expose Client language for reward-scan OCR
+
+### Other
+
+- release v2.0.0
+
 ## [1.0.0] — 2026-04 (release)
 
 First public release. NixOS + Hyprland only per ADR-0002 + ADR-0009.
