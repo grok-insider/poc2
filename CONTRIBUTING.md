@@ -44,9 +44,10 @@ feat/* · fix/* · ci/* · docs/* · release/*     ← work branches (typed pref
 - Flow: open your work branch off `dev` → PR into `dev` → when `dev` is ready, a
   **single `dev → master` PR** ships everything.
 - `.github/workflows/guard-master.yml` enforces this: a PR into `master` fails
-  its required check unless the head branch is `dev` (or release-plz's
-  `release-plz-*`). Add that check to `master`'s branch protection to make it
-  blocking.
+  its required check unless the head branch is `dev` or a release-bot head
+  (`release-plz-*`, `release-plz-manual-*`, `release-please--*`,
+  `release-please-manual-*`). Add that check to `master`'s branch protection
+  to make it blocking.
 - Automated data-refresh PRs (`.github/workflows/data-watch.yml`) target `dev`.
 
 A PR should leave `dev`/`master` green: `fmt + clippy + test`, web typecheck +
@@ -88,6 +89,10 @@ or hand-write changelog entries:
    changelog), creates the GitHub Release, and attaches the Electron desktop
    packages — Windows NSIS `.exe` and Linux AppImage + `.deb`.
 
+Admin-only major/minor bumps use **Manual Version Bump**
+(`workflow_dispatch` on `manual-version-bump.yml`); they open a
+`release-plz-manual-*` PR into `master` the same way as an automated release PR.
+
 Nothing is published to crates.io (`git_only` in `release-plz.toml`). The web app
 ships as the static export the desktop packages bundle.
 
@@ -105,6 +110,12 @@ ships as the static export the desktop packages bundle.
     can open PRs.
 - **Settings → Actions → General → Workflow permissions:** enable *"Allow GitHub
   Actions to create and approve pull requests."*
-- **Branch protection on `master`:** require a PR and the required status checks
-  (`only dev into master`, `fmt + clippy + test`, the web build). This is what
-  makes the `guard master` gate enforceable.
+- **Branch protection on `master`:** require a PR and the full CI matrix
+  status checks (`only dev into master`, `Rust (fmt|clippy|test)`, `Flake check`,
+  `Web (typecheck · lint · build)`, `Windows (cargo · wasm · web · desktop)`,
+  `Desktop package (Linux)`), with `enforce_admins`. Protect `dev` with the same
+  CI gates (without the guard). This is what makes the `guard master` gate
+  enforceable.
+- **Admin major/minor:** `workflow_dispatch` on `.github/workflows/manual-version-bump.yml`
+  (repo admins only). Opens a `release-plz-manual-*` PR into `master` with AI
+  changelog notes; merge tags via the normal Release workflow.
