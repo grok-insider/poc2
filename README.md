@@ -155,7 +155,11 @@ To clone the reference repos (~1.5 GB):
    13 catalysts, 10 bones, 13 Verisium Alloys (132 class-targets),
    26 Distilled Emotions, the Waystone/Tablet/Relic/Flask/Charm/
    Ultimatum pools, and 6,302 weights**. Copy it to
-   `apps/web/public/poc2.bundle.json.gz` to ship it with the web app.
+   `apps/web/public/poc2.bundle.json.gz` to ship it with the web app
+   (or from the repo root: `bun run bundle:web`, which builds straight
+   into that path). **Desktop installers must include this file** — CI
+   packaging runs the same step; without it the app fails at boot with
+   `bundle fetch failed: 404`.
 
 2. **Live prices** (optional): click "Refresh prices" in Settings to
    pull from poe2scout (the desktop shell also keeps its own hourly

@@ -56,6 +56,12 @@ What it adds over the browser app:
   (run `bun run build` at the repo root first)
 - `bun run dist:linux` / `dist:win` — electron-builder packages
   (AppImage/deb, NSIS). CI runs these on ubuntu/windows runners.
+  **Requires** `apps/web/public/poc2.bundle.json.gz` (gitignored data
+  bundle) and a prior root `bun run wasm && bun run build` so
+  `apps/web/out` includes the engine assets. From the repo root:
+  `bun run bundle:web && bun run wasm && bun run build`, then package.
+  Missing the bundle → Windows/Linux installs show
+  `ENGINE FAILED TO LOAD / bundle fetch failed: 404`.
 
 Electron binary resolution (`scripts/run-electron.mjs`): `$POC2_ELECTRON` →
 npm-downloaded binary → `electron` on PATH (the Nix devshell provides it).
