@@ -730,20 +730,47 @@ mod tests {
     }
 
     #[test]
-    fn english_keys_consistent_across_locales() {
-        // Every locale should translate back to the SAME English key set
-        // (catches a typo'd English key in one file).
-        let mut reference: Option<std::collections::BTreeSet<String>> = None;
+    fn english_keys_share_core_set_across_locales() {
+        // Locales may grow at different rates (e.g. Spanish reward-scan coverage).
+        // Every locale must still cover a core English key set so a typo'd key
+        // in the shared starter list fails loudly.
+        let core: std::collections::BTreeSet<&str> = [
+            "Orb of Transmutation",
+            "Orb of Augmentation",
+            "Orb of Alchemy",
+            "Orb of Annulment",
+            "Regal Orb",
+            "Exalted Orb",
+            "Divine Orb",
+            "Chaos Orb",
+            "Vaal Orb",
+            "Mirror of Kalandra",
+            "Vision Rune",
+            "Greater Vision Rune",
+            "Fracturing Orb",
+            "Hinekora's Lock",
+        ]
+        .into_iter()
+        .collect();
         for (code, _) in BUNDLED_LOCALES {
             let t = bundled_translator(code).unwrap();
             let targets: std::collections::BTreeSet<String> = t.exact.values().cloned().collect();
-            match &reference {
-                None => reference = Some(targets),
-                Some(r) => assert_eq!(
-                    &targets, r,
-                    "locale {code} English target set differs from the first locale"
-                ),
+            for key in &core {
+                assert!(
+                    targets.contains(*key),
+                    "locale {code} missing core English key {key}"
+                );
             }
         }
+        // Spanish reward-scan expansion includes uncut gems + greater orbs.
+        let sp = bundled_translator("sp").unwrap();
+        assert_eq!(
+            sp.translate("Gema de apoyo sin tallar").as_deref(),
+            Some("Uncut Support Gem")
+        );
+        assert_eq!(
+            sp.translate("Orbe de transmutación mayor").as_deref(),
+            Some("Greater Orb of Transmutation")
+        );
     }
 }

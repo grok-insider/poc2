@@ -26,6 +26,12 @@ import {
 } from "./tesseract";
 import type { ResolveMethod, SlotRead } from "./rowLock";
 import { priceRow, type PricedRow } from "./priceSource";
+import { expandUncutGemQuery } from "@/lib/prices/uncutGems";
+import {
+  applyResolvedUncutLevel,
+  normalizeLocaleLevelSuffix,
+  splitLevelParen,
+} from "./localePrep";
 
 /** Engine `resolveName` shape (mirrors lib/types ResolveView), injected so the
  * scan stays testable without the worker. */
@@ -70,14 +76,28 @@ const METHOD_RANK: Record<ResolveMethod, number> = {
 };
 
 function resolutionCandidates(name: string): string[] {
-  const candidates = [name];
-  let current = name;
+  const candidates: string[] = [];
+  const push = (q: string) => {
+    if (q && !candidates.includes(q)) candidates.push(q);
+  };
+  const leveled = normalizeLocaleLevelSuffix(name);
+  const { base, level } = splitLevelParen(leveled);
+  // Stripped base first — Spanish/localized clients translate bare names.
+  push(base);
+  push(leveled);
+  push(name);
+  // English uncut expand (no-op for pure Spanish bases until translated).
+  const forExpand =
+    level !== null ? `${base} (Level ${level})` : base || leveled || name;
+  for (const q of expandUncutGemQuery(forExpand)) push(q);
+  for (const q of expandUncutGemQuery(name)) push(q);
+  let current = base || name;
   for (let removed = 0; removed < 2; removed++) {
     const parts = current.trim().split(/\s+/);
     if (parts.length <= 1) break;
     parts.pop();
     current = parts.join(" ").replace(/[\p{P}\p{S}\d]+$/gu, "").trim();
-    if (current.length >= 4 && !candidates.includes(current)) candidates.push(current);
+    if (current.length >= 4) push(current);
   }
   return candidates;
 }
@@ -257,13 +277,15 @@ export async function resolveAndPriceBatch(
     const row = rows[i];
     const res = resolutions[i] ?? { key: null, score: 0, method: "none" };
     const method = coerceMethod(res.method);
-    const displayName = res.key !== null && method !== "currency" ? res.key : row.name;
+    // Re-apply OCR (Nivel/Level N) onto bare Uncut * Gem keys for pricing.
+    const key = applyResolvedUncutLevel(res.key, row.name);
+    const displayName = key !== null && method !== "currency" ? key : row.name;
     const slot = row.geometry
       ? spatialSlotKey(row.geometry.center.y)
       : String(i);
     reads.push({
       slot,
-      key: res.key,
+      key,
       name: displayName,
       quantity: row.quantity,
       method,
@@ -273,7 +295,7 @@ export async function resolveAndPriceBatch(
     });
     priced.push(
       priceRow({
-        key: res.key,
+        key,
         name: displayName,
         quantity: row.quantity,
         method: res.method,

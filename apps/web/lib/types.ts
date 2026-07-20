@@ -444,6 +444,15 @@ export interface NinjaExchangeSnapshot {
   fetched_at: string;
 }
 
+/**
+ * PoE2 client language for OCR / name resolve. `"en"` = no translation;
+ * other codes match `crates/market` bundled locale tables (`sp` = Spanish).
+ */
+export type ClientLocale = "en" | "de" | "fr" | "pt" | "ru" | "sp";
+
+/** Bundled non-English locales the WASM resolve path understands. */
+export type ResolveLocale = Exclude<ClientLocale, "en">;
+
 /// Arguments for the engine's `resolveName` fuzzy matcher.
 export interface ResolveNameArgs {
   /** The noisy / OCR-supplied name to resolve. */
@@ -458,7 +467,7 @@ export interface ResolveNameArgs {
    * localized client/OCR name is translated to its canonical English form
    * before fuzzy scoring. Omit for English clients.
    */
-  locale?: "de" | "fr" | "pt" | "ru" | "sp";
+  locale?: ResolveLocale;
 }
 
 /// Arguments for the engine's batched `resolveNames` fuzzy matcher.
@@ -471,7 +480,7 @@ export interface ResolveNamesArgs {
    */
   candidates?: string[];
   /** Optional bundled client locale applied to every name in the batch. */
-  locale?: "de" | "fr" | "pt" | "ru" | "sp";
+  locale?: ResolveLocale;
 }
 
 /// Result returned by the engine's `resolveName` / `resolveNames`.

@@ -24,6 +24,11 @@ export interface PersistedCraft {
   /** Engine League ruleset ("standard" | "challenge"); distinct from the
    * free-text price-API `league` above. */
   engineLeague?: string;
+  /**
+   * PoE2 client language for OCR / name resolve (`en` = no translation).
+   * Bundled codes: de | fr | pt | ru | sp.
+   */
+  clientLocale?: string;
   notes: string;
   /** Raw clipboard text of the last imported item (drives the price check). */
   lastItemText?: string | null;
