@@ -245,14 +245,33 @@ jobs:
             fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
           "
 
+      # Data bundle is gitignored; without it the packaged app boots to
+      # "ENGINE FAILED TO LOAD / bundle fetch failed: 404".
+      - name: Build data bundle into web public
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f scripts/ensure-web-bundle.mjs ]; then
+            bun scripts/ensure-web-bundle.mjs
+          else
+            cargo run --release -p poc2-pipeline -- build \
+              --out apps/web/public/poc2.bundle.json.gz \
+              --patch 0.5.0
+          fi
+          test -s apps/web/public/poc2.bundle.json.gz
+
       # The engine ships as WebAssembly; the web export imports lib/wasm/*, so this
       # must run before the web build. build-wasm.mjs warns-and-skips wasm-opt when
       # it's absent (the optimized artifact is covered by the Nix CI lane).
       - name: Build WASM + web export
+        shell: bash
         run: |
+          set -euo pipefail
           rustup target add wasm32-unknown-unknown
           bun run wasm
           bun run build
+          test -s apps/web/out/poc2.bundle.json.gz
+          test -d apps/web/out/wasm
 
       - name: Build Windows OCR helper
         if: runner.os == 'Windows'

@@ -173,6 +173,27 @@ jobs:
           bun run test:desktop
           bun run desktop:typecheck
 
+      # Bundle is required inside the NSIS package (served as /poc2.bundle.json.gz).
+      - name: Build data bundle into web public
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f scripts/ensure-web-bundle.mjs ]; then
+            bun scripts/ensure-web-bundle.mjs
+          else
+            cargo run --release -p poc2-pipeline -- build \
+              --out apps/web/public/poc2.bundle.json.gz \
+              --patch 0.5.0
+          fi
+          test -s apps/web/public/poc2.bundle.json.gz
+
+      - name: Rebuild web export with bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run build
+          test -s apps/web/out/poc2.bundle.json.gz
+
       - name: Package desktop (NSIS)
         working-directory: apps/desktop
         run: |
@@ -218,11 +239,27 @@ jobs:
       - name: Install web deps
         run: bun install --frozen-lockfile
 
-      - name: Build WASM + web export
+      - name: Build data bundle into web public
+        shell: bash
         run: |
+          set -euo pipefail
+          if [ -f scripts/ensure-web-bundle.mjs ]; then
+            bun scripts/ensure-web-bundle.mjs
+          else
+            cargo run --release -p poc2-pipeline -- build \
+              --out apps/web/public/poc2.bundle.json.gz \
+              --patch 0.5.0
+          fi
+          test -s apps/web/public/poc2.bundle.json.gz
+
+      - name: Build WASM + web export
+        shell: bash
+        run: |
+          set -euo pipefail
           rustup target add wasm32-unknown-unknown
           bun run wasm
           bun run build
+          test -s apps/web/out/poc2.bundle.json.gz
 
       - name: Package desktop (AppImage + deb)
         working-directory: apps/desktop

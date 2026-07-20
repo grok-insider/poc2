@@ -70,11 +70,33 @@ jobs:
             console.log('desktop version →', j.version);
           "
 
-      - name: Build WASM + web export
+      # Data bundle is gitignored; without it the packaged app boots to
+      # "ENGINE FAILED TO LOAD / bundle fetch failed: 404".
+      # Inline cargo so this works even when packaging an older tag that
+      # predates scripts/ensure-web-bundle.mjs (workflow YAML is from master).
+      - name: Build data bundle into web public
+        shell: bash
         run: |
+          set -euo pipefail
+          if [ -f scripts/ensure-web-bundle.mjs ]; then
+            bun scripts/ensure-web-bundle.mjs
+          else
+            cargo run --release -p poc2-pipeline -- build \
+              --out apps/web/public/poc2.bundle.json.gz \
+              --patch 0.5.0
+          fi
+          test -s apps/web/public/poc2.bundle.json.gz
+
+      - name: Build WASM + web export
+        shell: bash
+        run: |
+          set -euo pipefail
           rustup target add wasm32-unknown-unknown
           bun run wasm
           bun run build
+          # Fail the package if the export is missing required engine assets.
+          test -s apps/web/out/poc2.bundle.json.gz
+          test -d apps/web/out/wasm
 
       - name: Build Windows OCR helper
         if: runner.os == 'Windows'
