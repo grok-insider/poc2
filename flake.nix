@@ -10,6 +10,18 @@
     };
   };
 
+  # Cachix: after creating the public cache `poc2` on cachix.org, add:
+  #
+  #   nixConfig = {
+  #     extra-substituters = [ "https://poc2.cachix.org" ];
+  #     extra-trusted-public-keys = [
+  #       "poc2.cachix.org-1:<public-key-from-cachix-dashboard>"
+  #     ];
+  #   };
+  #
+  # CI already pushes via cachix-action when CACHIX_AUTH_TOKEN is set
+  # (see CONTRIBUTING.md). Local: `cachix use poc2` then `nix develop`.
+
   outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let

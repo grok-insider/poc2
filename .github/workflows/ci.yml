@@ -34,6 +34,19 @@ jobs:
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
 
+      # Shared long-lived cache (local + CI). Public cache `poc2` on cachix.org;
+      # needs repo secret CACHIX_AUTH_TOKEN to push. continue-on-error until the
+      # cache + secret exist (see CONTRIBUTING.md).
+      - name: Cachix
+        if: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
+        continue-on-error: true
+        uses: cachix/cachix-action@v16
+        with:
+          name: poc2
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # PRs pull only; pushes to dev/master also push store paths.
+          skipPush: ${{ github.event_name == 'pull_request' }}
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -65,6 +78,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+      - name: Cachix
+        if: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
+        continue-on-error: true
+        uses: cachix/cachix-action@v16
+        with:
+          name: poc2
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ github.event_name == 'pull_request' }}
       - name: Flake check
         run: nix flake check --no-build
 
@@ -79,6 +100,15 @@ jobs:
 
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cachix
+        if: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
+        continue-on-error: true
+        uses: cachix/cachix-action@v16
+        with:
+          name: poc2
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ github.event_name == 'pull_request' }}
 
       - name: Cache cargo (wasm build)
         uses: actions/cache@v4

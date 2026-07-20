@@ -12,6 +12,30 @@ Prefer the Nix flake devshell (`nix develop`) — it provides the Rust toolchain
 Windows devs without Nix use rustup (honors `rust-toolchain.toml`) + Bun; the
 same `bun run` scripts work.
 
+### Cachix (optional, faster `nix develop`)
+
+CI can push the flake devShell store paths to a public Cachix cache named
+**`poc2`**. Once the cache exists:
+
+```bash
+# one-time per machine
+cachix use poc2
+nix develop
+```
+
+**One-time setup (maintainers):**
+
+1. Create a public cache named `poc2` at [cachix.org](https://app.cachix.org).
+2. Add repo secret `CACHIX_AUTH_TOKEN` (write token) under Settings → Secrets.
+3. Paste the cache public key into `flake.nix` `nixConfig.extra-trusted-public-keys`
+   (template comment is at the top of the flake) and open a small docs PR.
+4. CI (`cachix/cachix-action`) pulls on every run and **pushes** on
+   non-PR events when the secret is present. `magic-nix-cache` stays for
+   ephemeral GHA hits.
+
+Without the secret, Cachix steps may no-op or fail soft depending on the
+action version — keep the secret set on the canonical repo.
+
 Common commands (full list in `AGENTS.md`):
 
 - `cargo test --workspace` — Rust tests
