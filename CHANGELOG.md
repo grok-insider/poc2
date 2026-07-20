@@ -5,6 +5,17 @@ All notable changes to Path of Crafting 2.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-07-20
+
+- chore: release v2.0.1
+- fix(web,market): expose Client language for reward-scan OCR
+- fix(ci): include data bundle in desktop packages
+- fix(ci): upload desktop installers even without latest*.yml feeds
+- ci: add Package release workflow for attaching installers to a tag
+- fix(ci): allow re-packaging a release tag via workflow_dispatch
+- docs(changelog): generate release notes for v2.0.0
+- chore: release v2.0.0
+
 ## [2.0.0] - 2026-07-19
 
 - chore: release v2.0.0
