@@ -122,6 +122,16 @@ this as `applyNinjaPrices` (browser fetches the snapshot; the engine has no
 network stack), mirroring `applyPrices` and returning the same
 `{ applied, unmatched }` view.
 
+### Client language (reward-scan OCR)
+
+Settings → **Client language** (`clientLocale` in the web store, persisted in
+IndexedDB) maps OCR’d localized item names to English catalogue keys via
+bundled tables in `crates/market/data/locales/` (`sp` = Spanish; also `de` /
+`fr` / `pt` / `ru`). The overlay passes that code to WASM
+`resolveNames({ …, locale })`. Prices stay on English poe2scout keys — there is
+no per-language price API. Changing locale tables requires a WASM rebuild
+(`bun run wasm`) because the JSON is `include_str!`’d into `poc2-market`.
+
 ## Crate Layout
 
 `crates/market/src/meta.rs` (new in Phase E.1):
