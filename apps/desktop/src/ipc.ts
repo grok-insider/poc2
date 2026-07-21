@@ -5,7 +5,12 @@
 import { BrowserWindow, app, clipboard, ipcMain, screen, shell } from "electron";
 import { captureItemText, status as captureStatus } from "./capture";
 import type { Capabilities } from "./capture/capabilities";
-import { captureRegion, coerceRect, type CaptureRect } from "./capture/screen";
+import {
+  captureRegion,
+  coerceCaptureQuality,
+  coerceRect,
+  type CaptureRect,
+} from "./capture/screen";
 import { captureRegionWithGrim } from "./capture/grim";
 import { isAllowlistedUrl } from "./fetchAllowlist";
 import { loadCaptureRegion } from "./windowState";
@@ -219,39 +224,53 @@ export function registerIpc(
     return true;
   });
 
-  ipcMain.handle(CHANNELS.captureRegion, async (_e, rect: unknown, preserveOverlay: unknown) => {
-    const parsedRect = coerceRect(rect);
-    if (!parsedRect) {
-      return { ok: false as const, reason: "invalid-rect" as const };
-    }
-    const caps = overlay?.capabilities();
-    const silent = caps?.silentRegionCapture ?? false;
-    // Full mode paints beside the capture region; still hide the window so a
-    // large strip or mis-docked panel cannot contaminate the OCR grab.
-    const wasVisible = overlay?.isOverlayVisible() ?? false;
-    if (wasVisible) overlay?.setOverlayVisible(false);
-    if (caps?.overlayMode === "hyprland-plugin" && preserveOverlay !== true) {
-      await hideHyprOverlay();
-    }
-    try {
-      const result = caps?.captureBackend === "grim"
-        ? await captureRegionWithGrim(parsedRect)
-        : await captureRegion(parsedRect, silent);
-      if (!result.ok) return result;
-      const bounds = screen.getDisplayMatching(parsedRect).bounds;
-      return {
-        ...result,
-        displayBounds: {
-          x: bounds.x,
-          y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
-        },
-      };
-    } finally {
-      if (wasVisible) overlay?.setOverlayVisible(true);
-    }
-  });
+  ipcMain.handle(
+    CHANNELS.captureRegion,
+    async (_e, rect: unknown, preserveOverlay: unknown, options: unknown) => {
+      const parsedRect = coerceRect(rect);
+      if (!parsedRect) {
+        return { ok: false as const, reason: "invalid-rect" as const };
+      }
+      const caps = overlay?.capabilities();
+      const silent = caps?.silentRegionCapture ?? false;
+      const quality = coerceCaptureQuality(
+        options && typeof options === "object"
+          ? (options as { quality?: unknown }).quality
+          : undefined,
+      );
+      // Presence thumbs are tiny and the marker strip sits beside the OCR
+      // region — skip hide/show churn (costly on Windows) for presence ticks.
+      const hideOverlay = quality === "ocr";
+      const wasVisible = hideOverlay && (overlay?.isOverlayVisible() ?? false);
+      if (wasVisible) overlay?.setOverlayVisible(false);
+      if (
+        quality === "ocr" &&
+        caps?.overlayMode === "hyprland-plugin" &&
+        preserveOverlay !== true
+      ) {
+        await hideHyprOverlay();
+      }
+      try {
+        const result =
+          caps?.captureBackend === "grim"
+            ? await captureRegionWithGrim(parsedRect)
+            : await captureRegion(parsedRect, silent, { quality });
+        if (!result.ok) return result;
+        const bounds = screen.getDisplayMatching(parsedRect).bounds;
+        return {
+          ...result,
+          displayBounds: {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+          },
+        };
+      } finally {
+        if (wasVisible) overlay?.setOverlayVisible(true);
+      }
+    },
+  );
 
   ipcMain.handle(CHANNELS.overlayShow, () => {
     overlay?.showOverlay();

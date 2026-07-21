@@ -87,8 +87,17 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   capabilities(): Promise<unknown> {
     return ipcRenderer.invoke(CHANNELS.capabilities);
   },
-  captureRegion(rect: CaptureRect, preserveCompositorOverlay = false): Promise<unknown> {
-    return ipcRenderer.invoke(CHANNELS.captureRegion, rect, preserveCompositorOverlay);
+  captureRegion(
+    rect: CaptureRect,
+    preserveCompositorOverlay = false,
+    options?: { quality?: "ocr" | "presence" },
+  ): Promise<unknown> {
+    return ipcRenderer.invoke(
+      CHANNELS.captureRegion,
+      rect,
+      preserveCompositorOverlay,
+      options ?? {},
+    );
   },
   scanRewards(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.scanRewards);

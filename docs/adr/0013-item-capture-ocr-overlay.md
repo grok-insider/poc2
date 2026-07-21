@@ -137,8 +137,11 @@ separates host-compositor detection from Electron's rendering backend:
   covers the virtual desktop with a transparent frameless window and hypr-aligned
   dim/selection chrome;
 - `Alt+V` remains a one-shot pass. `Alt+Shift+V` adds an opt-in watcher with
-  open/close hysteresis, 500 ms presence sampling independent from OCR,
-  latest-frame-wins two-second OCR admission, and stale-scan cancellation;
+  open/close hysteresis, ~750 ms **presence-tier** sampling (capped tiny
+  `desktopCapturer` thumbnail + JPEG; never full-native display every tick),
+  OCR only on open/fingerprint change at a separate mid-res tier, latest-frame
+  wins with a two-second OCR admission, and stale-scan cancellation. Presence
+  ticks skip while OCR is in flight; main serializes capturer work;
 - portable watcher OCR reuses one warm Tesseract worker. A native-canvas 1.25x
   text-column pass uses the fast model with sparse-text segmentation; fewer than
   four catalogue matches pay for the 2x and alternate-crop fallbacks. All OCR

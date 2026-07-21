@@ -44,6 +44,14 @@ export interface DesktopCapabilities {
   hyprOverlay?: HyprOverlayStatus | null;
 }
 
+/** Capture fidelity for desktopCapturer thumbnails (watcher presence vs OCR). */
+export type CaptureQuality = "ocr" | "presence";
+
+export interface CaptureRegionOptions {
+  /** Default `ocr`. Use `presence` for cheap open/close sampling. */
+  quality?: CaptureQuality;
+}
+
 /** Raw cropped frame from a region capture; preprocessing is renderer-side. */
 export type CaptureRegionResult =
   | {
@@ -52,6 +60,7 @@ export type CaptureRegionResult =
       width: number;
       height: number;
       displayBounds?: CaptureRect;
+      quality?: CaptureQuality;
     }
   | {
       ok: false;
@@ -313,8 +322,15 @@ export interface Poc2DesktopBridge {
 
   /** Compositor capability gate; null only if the shell predates ADR-0013. */
   capabilities(): Promise<DesktopCapabilities | null>;
-  /** Capture a screen rectangle; raw cropped frame (preprocess renderer-side). */
-  captureRegion(rect: CaptureRect, preserveCompositorOverlay?: boolean): Promise<CaptureRegionResult>;
+  /**
+   * Capture a screen rectangle; raw cropped frame (preprocess renderer-side).
+   * `options.quality: "presence"` uses a tiny display thumbnail (watcher loop).
+   */
+  captureRegion(
+    rect: CaptureRect,
+    preserveCompositorOverlay?: boolean,
+    options?: CaptureRegionOptions,
+  ): Promise<CaptureRegionResult>;
   /** Trigger one reward OCR scan. */
   scanRewards(): Promise<boolean>;
   /** Show the active overlay path; returns the active overlay mode. */

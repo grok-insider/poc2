@@ -12,8 +12,9 @@
 //     → warm tesseract session (3×/alternate-crop fallback when uncertain)
 //     → extractRows → engine.resolveName(name) → best-effort price
 //     → rowLock de-flicker → price plates
-//   watcher presence capture runs independently every 500 ms; OCR is serialized
-//   and latest-frame-wins with a two-second minimum start interval.
+//   watcher presence capture (~750 ms, quality:"presence" tiny thumb); OCR is
+//   serialized, only on open/fingerprint change, latest-frame-wins with a 2s
+//   minimum start interval (no re-OCR on a stable panel).
 //
 //   capability "full"     → click-through plates (pointer-events:none)
 //   capability "degraded" → same rows as an in-app panel
@@ -262,6 +263,8 @@ export default function OverlayPage() {
   const watcherGenerationRef = useRef(0);
   const panelGenerationRef = useRef(0);
   const pendingWatchFrameRef = useRef<CapturedWatchFrame | null>(null);
+  /** True when a watcher scan was requested while OCR was busy / rate-limited. */
+  const pendingWatchRescanRef = useRef(false);
   const lastOcrStartedAtRef = useRef(0);
   const regexRef = useRef<RegexOverlayState>(emptyRegexOverlayState());
   const regexDataRef = useRef<RegexOverlayData>({});
@@ -365,22 +368,32 @@ export default function OverlayPage() {
       }
       watcherOcrTimerRef.current = window.setTimeout(() => {
         watcherOcrTimerRef.current = null;
+        if (!watcherEnabledRef.current) return;
         const pending = pendingWatchFrameRef.current;
         pendingWatchFrameRef.current = null;
+        const wantRescan = pendingWatchRescanRef.current;
+        pendingWatchRescanRef.current = false;
         if (pending) {
           void executeScan(true, pending.watcherGeneration, pending);
+        } else if (wantRescan) {
+          // Presence-only path: re-grab at OCR quality (do not reuse a blurry thumb).
+          void executeScan(true, watcherGenerationRef.current);
         }
       }, delay);
     };
-    if (watching && captured) {
+    if (watching) {
       if (
         !watcherEnabledRef.current ||
         watchGeneration !== watcherGenerationRef.current ||
-        captured.panelGeneration !== panelGenerationRef.current
-      ) return;
+        (captured && captured.panelGeneration !== panelGenerationRef.current)
+      ) {
+        return;
+      }
+      // Latest-frame-wins admission: at most one OCR start every 2s while watching.
       const delay = Math.max(0, 2_000 - (performance.now() - lastOcrStartedAtRef.current));
       if (scanningRef.current || delay > 0) {
-        pendingWatchFrameRef.current = captured;
+        if (captured) pendingWatchFrameRef.current = captured;
+        else pendingWatchRescanRef.current = true;
         if (!scanningRef.current) schedulePendingWatchScan(delay);
         return;
       }
@@ -415,10 +428,12 @@ export default function OverlayPage() {
         frame = captured.frame;
       } else {
         // No calibrated region yet → captureRegion would reject as invalid-rect.
+        // Always OCR-tier (capped mid-res thumb) — never a presence sample.
         const captureStartedAt = performance.now();
         const result = await bridge.captureRegion(
           rect ?? { x: 0, y: 0, width: 0, height: 0 },
           watching,
+          { quality: "ocr" },
         );
         captureMs = performance.now() - captureStartedAt;
         if (!result.ok) {
@@ -680,10 +695,13 @@ export default function OverlayPage() {
     } finally {
       scanningRef.current = false;
       await transientSession?.terminate();
-      const pending = pendingWatchFrameRef.current;
-      if (pending && watcherEnabledRef.current) {
-        const delay = Math.max(0, 2_000 - (performance.now() - lastOcrStartedAtRef.current));
-        schedulePendingWatchScan(delay);
+      if (watcherEnabledRef.current) {
+        const pending = pendingWatchFrameRef.current;
+        const wantRescan = pendingWatchRescanRef.current;
+        if (pending || wantRescan) {
+          const delay = Math.max(0, 2_000 - (performance.now() - lastOcrStartedAtRef.current));
+          schedulePendingWatchScan(delay);
+        }
       }
     }
   }, [clipboardFallback, ensurePriceIcons]);
@@ -695,22 +713,29 @@ export default function OverlayPage() {
     const bridge = getDesktopBridge();
     if (!bridge) return;
     try {
+      // Never stack desktopCapturer under an in-flight OCR (Windows DWM thrash).
+      if (scanningRef.current) {
+        return;
+      }
+
       let rect = regionRef.current;
       if (!rect) {
         rect = (await bridge.getCaptureRegion?.().catch(() => null)) ?? null;
         if (rect) regionRef.current = rect;
       }
+      // Presence-only: tiny display thumbnail + JPEG. Open/close hysteresis only.
       const result = await bridge.captureRegion(
         rect ?? { x: 0, y: 0, width: 0, height: 0 },
         true,
+        { quality: "presence" },
       );
       if (!watcherEnabledRef.current || generation !== watcherGenerationRef.current) return;
+      if (scanningRef.current) return;
 
       const previous = watcherStateRef.current;
       let observed: ReturnType<typeof observePanel>;
-      let frame: RgbaFrame | null = null;
       if (result.ok) {
-        frame = await browserCanvasAdapter.toFrame(result.dataUrl);
+        const frame = await browserCanvasAdapter.toFrame(result.dataUrl);
         if (!watcherEnabledRef.current || generation !== watcherGenerationRef.current) return;
         observed = observePanel(previous, samplePanel(frame));
       } else {
@@ -725,6 +750,7 @@ export default function OverlayPage() {
       if (observed.action === "close") {
         panelGenerationRef.current += 1;
         pendingWatchFrameRef.current = null;
+        pendingWatchRescanRef.current = false;
         if (watcherOcrTimerRef.current !== null) {
           window.clearTimeout(watcherOcrTimerRef.current);
           watcherOcrTimerRef.current = null;
@@ -734,34 +760,25 @@ export default function OverlayPage() {
         setSurface(null);
         setStatus("idle");
         await hideRewardSurface(bridge, overlayModeRef.current, rect);
-      } else if (
-        (observed.action === "scan" ||
-          (observed.action === "skip" &&
-            performance.now() - lastOcrStartedAtRef.current >= 2_000)) &&
-        result.ok &&
-        frame &&
-        rect
-      ) {
+      } else if (observed.action === "scan" && rect) {
+        // Fingerprint/open changed — schedule OCR at OCR quality (separate capture).
+        // Do NOT re-OCR on stable `skip` (that was a major Windows load source).
         if (!previous.open || previous.fingerprint !== observed.state.fingerprint) {
           panelGenerationRef.current += 1;
           pendingWatchFrameRef.current = null;
         }
-        const captured: CapturedWatchFrame = {
-          cap: result,
-          frame,
-          rect,
-          watcherGeneration: generation,
-          panelGeneration: panelGenerationRef.current,
-        };
-        void runScan(true, generation, captured);
+        void runScan(true, generation);
       } else if (observed.action === "wait" || observed.action === "skip") {
-        setStatus(Object.keys(lockRef.current).length > 0 ? "ready" : "idle");
+        const next = Object.keys(lockRef.current).length > 0 ? "ready" : "idle";
+        setStatus((prev) => (prev === next ? prev : next));
       }
     } catch {
       // A transient capture/decode failure is retried on the next presence tick.
     } finally {
       if (watcherEnabledRef.current && generation === watcherGenerationRef.current) {
-        const delay = Math.max(0, 500 - (performance.now() - tickStartedAt));
+        // 750 ms is enough for 2-frame open / 3-frame close hysteresis and
+        // halves capturer pressure vs the old 500 ms full-display loop.
+        const delay = Math.max(0, 750 - (performance.now() - tickStartedAt));
         watcherTimerRef.current = window.setTimeout(tick, delay);
       }
     }
@@ -904,9 +921,10 @@ export default function OverlayPage() {
           if (watcherEnabledRef.current) return;
           watcherGenerationRef.current += 1;
           panelGenerationRef.current += 1;
+          pendingWatchFrameRef.current = null;
+          pendingWatchRescanRef.current = false;
           watcherEnabledRef.current = true;
           watcherStateRef.current = emptyPanelWatcherState();
-          pendingWatchFrameRef.current = null;
           lastOcrStartedAtRef.current = 0;
           const nativeStatus = bridge.nativeOcrStatus
             ? await bridge.nativeOcrStatus().catch(() => null)
@@ -925,6 +943,7 @@ export default function OverlayPage() {
           watcherGenerationRef.current += 1;
           panelGenerationRef.current += 1;
           pendingWatchFrameRef.current = null;
+          pendingWatchRescanRef.current = false;
           if (watcherTimerRef.current !== null) {
             window.clearTimeout(watcherTimerRef.current);
             watcherTimerRef.current = null;
@@ -1056,6 +1075,7 @@ export default function OverlayPage() {
       watcherGenerationRef.current += 1;
       panelGenerationRef.current += 1;
       pendingWatchFrameRef.current = null;
+      pendingWatchRescanRef.current = false;
       if (watcherTimerRef.current !== null) window.clearTimeout(watcherTimerRef.current);
       if (watcherOcrTimerRef.current !== null) window.clearTimeout(watcherOcrTimerRef.current);
       const session = ocrSessionRef.current;

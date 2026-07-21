@@ -2,11 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   type CaptureRect,
   type DisplayBounds,
+  CAPTURE_THUMB_MAX_EDGE,
+  coerceCaptureQuality,
   coerceRect,
   cropForDisplay,
+  encodeCaptureDataUrl,
   intersectionArea,
   isValidRect,
+  nativeDisplaySize,
   pickDisplay,
+  scaleCrop,
+  thumbnailSizeForDisplay,
 } from "../src/capture/screen";
 
 const rect = (x: number, y: number, width: number, height: number): CaptureRect => ({
@@ -94,5 +100,58 @@ describe("cropForDisplay", () => {
     const crop = cropForDisplay(rect(1820, 1000, 400, 400), display);
     // local origin 1820,1000 → max 100 wide, 80 tall.
     expect(crop).toEqual(rect(1820, 1000, 100, 80));
+  });
+});
+
+describe("thumbnail quality tiers", () => {
+  const uhd: DisplayBounds = { id: 1, bounds: rect(0, 0, 3840, 2160), scaleFactor: 1 };
+  const hidpi: DisplayBounds = { id: 2, bounds: rect(0, 0, 2560, 1440), scaleFactor: 2 };
+
+  test("nativeDisplaySize applies scale factor", () => {
+    expect(nativeDisplaySize(hidpi)).toEqual({ width: 5120, height: 2880 });
+  });
+
+  test("presence caps the long edge well below native", () => {
+    const thumb = thumbnailSizeForDisplay(uhd, "presence");
+    expect(Math.max(thumb.width, thumb.height)).toBe(CAPTURE_THUMB_MAX_EDGE.presence);
+    expect(thumb.scale).toBeCloseTo(480 / 3840, 5);
+  });
+
+  test("ocr caps 4K but stays far sharper than presence", () => {
+    const thumb = thumbnailSizeForDisplay(uhd, "ocr");
+    expect(Math.max(thumb.width, thumb.height)).toBe(CAPTURE_THUMB_MAX_EDGE.ocr);
+    expect(thumb.scale).toBeGreaterThan(thumbnailSizeForDisplay(uhd, "presence").scale);
+  });
+
+  test("small displays are not upscaled", () => {
+    const small: DisplayBounds = { id: 3, bounds: rect(0, 0, 800, 600), scaleFactor: 1 };
+    const thumb = thumbnailSizeForDisplay(small, "ocr");
+    expect(thumb).toEqual({ width: 800, height: 600, scale: 1 });
+  });
+
+  test("scaleCrop maps native crops into the thumbnail", () => {
+    const native = rect(200, 100, 400, 160);
+    expect(scaleCrop(native, 0.5)).toEqual(rect(100, 50, 200, 80));
+    expect(scaleCrop(native, 1)).toEqual(native);
+  });
+
+  test("coerceCaptureQuality defaults to ocr", () => {
+    expect(coerceCaptureQuality("presence")).toBe("presence");
+    expect(coerceCaptureQuality("ocr")).toBe("ocr");
+    expect(coerceCaptureQuality(undefined)).toBe("ocr");
+    expect(coerceCaptureQuality("nope")).toBe("ocr");
+  });
+
+  test("encodeCaptureDataUrl prefers JPEG", () => {
+    const jpeg = Buffer.from("fake-jpeg");
+    const url = encodeCaptureDataUrl(
+      {
+        isEmpty: () => false,
+        toJPEG: () => jpeg,
+        toDataURL: () => "data:image/png;base64,xx",
+      },
+      "presence",
+    );
+    expect(url.startsWith("data:image/jpeg;base64,")).toBe(true);
   });
 });
