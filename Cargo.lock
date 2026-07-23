@@ -1822,7 +1822,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-advisor"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ahash",
  "criterion",
@@ -1847,7 +1847,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-capture"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1862,7 +1862,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-data"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ahash",
  "flate2",
@@ -1881,7 +1881,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-engine"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ahash",
  "bitflags",
@@ -1902,7 +1902,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-market"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ahash",
  "futures",
@@ -1922,7 +1922,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-parser"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "insta",
  "poc2-engine",
@@ -1935,7 +1935,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-pipeline"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1967,7 +1967,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-plugin-host"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-plugin-sdk"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1995,7 +1995,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-probability"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "insta",
  "poc2-engine",
@@ -2010,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-rules"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ahash",
  "indexmap",
@@ -2028,7 +2028,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-strategies"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "ahash",
  "include_dir",
@@ -2047,7 +2047,7 @@ dependencies = [
 
 [[package]]
 name = "poc2-wasm"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.17",

@@ -5,6 +5,21 @@ All notable changes to Path of Crafting 2.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2](https://github.com/grok-insider/poc2/compare/v2.0.1...v2.0.2) - 2026-07-23
+
+### Added
+
+- *(desktop)* GitHub Releases auto-updater (`electron-updater`) for packaged NSIS/AppImage installs — Settings + tray, user-confirm install; CI attaches `latest.yml` / `latest-linux.yml` feeds
+
+### Fixed
+
+- *(web,market)* expose Client language for reward-scan OCR
+
+### Other
+
+- *(ci)* full guard allowlist and admin manual-version-bump
+- *(ci)* include data bundle in desktop packages
+
 ## [2.0.1] - 2026-07-20
 
 - chore: release v2.0.1
