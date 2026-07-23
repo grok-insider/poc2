@@ -13,7 +13,15 @@
 //     ADR-0009 stays deferred). On compositors that can't do click-through
 //     overlays (Hyprland/wlroots, probe-fail Wayland) we signal the renderer to
 //     show an in-app panel instead — "degraded" mode.
-import { app, BrowserWindow, globalShortcut, Menu, nativeImage, Tray } from "electron";
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  Menu,
+  nativeImage,
+  Tray,
+  type MenuItemConstructorOptions,
+} from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { captureItemText, status as captureStatus } from "./capture";
@@ -50,6 +58,13 @@ import {
 } from "./ocr/windowsNative";
 import { startPriceScheduler } from "./prices/scheduler";
 import { APP_ORIGIN, handleAppScheme, registerAppScheme } from "./serve";
+import {
+  getUpdateStatus,
+  installUpdate,
+  onUpdateStatus,
+  startDesktopUpdater,
+  updateStatusLabel,
+} from "./updater";
 import {
   loadCaptureRegion,
   loadWindowState,
@@ -201,6 +216,13 @@ if (!gotLock) {
     // chosen league via pricesSetLeague once the store hydrates.
     startPriceScheduler(app.getPath("userData"), "");
 
+    // GitHub Releases auto-updater (packaged only). Tray rebuilds on status.
+    onUpdateStatus(() => {
+      tray?.setToolTip(trayTooltip());
+      tray?.setContextMenu(buildTrayMenu());
+    });
+    void startDesktopUpdater({ getMainWindow: () => mainWindow });
+
     // Global hotkeys: native on Windows/X11; on Wayland these need the
     // GlobalShortcuts portal (run with --enable-features=GlobalShortcutsPortal
     // --ozone-platform=wayland) — otherwise users bind `--capture`/`--scan`.
@@ -276,8 +298,17 @@ function resolveTrayIconPath(): string {
   return candidates.find((candidate) => existsSync(candidate)) ?? fallback;
 }
 
+function trayTooltip(): string {
+  const update = getUpdateStatus();
+  if (update.enabled && update.phase === "downloaded") {
+    return `Path of Crafting 2 — ${updateStatusLabel(update)}`;
+  }
+  return "Path of Crafting 2";
+}
+
 function buildTrayMenu(): Menu {
-  return Menu.buildFromTemplate([
+  const update = getUpdateStatus();
+  const items: MenuItemConstructorOptions[] = [
     { label: "Show Path of Crafting 2", click: () => focusMainWindow() },
     { type: "separator" },
     { label: "Capture Item", click: () => void runCapture(ensureMainWindow(), false) },
@@ -289,6 +320,23 @@ function buildTrayMenu(): Menu {
     },
     { label: "Calibrate OCR Region", click: () => overlayController.openCalibration() },
     { label: "Hide Overlay", click: () => overlayController.hideOverlay() },
+  ];
+
+  if (update.enabled && update.phase === "downloaded") {
+    items.push(
+      { type: "separator" },
+      {
+        label: update.availableVersion
+          ? `Install update ${update.availableVersion} & restart…`
+          : "Install update & restart…",
+        click: () => {
+          void installUpdate();
+        },
+      },
+    );
+  }
+
+  items.push(
     { type: "separator" },
     {
       label: "Quit",
@@ -297,7 +345,9 @@ function buildTrayMenu(): Menu {
         app.quit();
       },
     },
-  ]);
+  );
+
+  return Menu.buildFromTemplate(items);
 }
 
 function createTray(): void {
@@ -305,7 +355,7 @@ function createTray(): void {
 
   const image = nativeImage.createFromPath(resolveTrayIconPath());
   tray = new Tray(image);
-  tray.setToolTip("Path of Crafting 2");
+  tray.setToolTip(trayTooltip());
   tray.setContextMenu(buildTrayMenu());
   tray.on("click", () => focusMainWindow());
 }
