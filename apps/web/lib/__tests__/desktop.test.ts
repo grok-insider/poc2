@@ -78,6 +78,26 @@ describe("getDesktopBridge", () => {
       }),
       pricesRefresh: async () => true,
       pricesSetLeague: async () => true,
+      updatesStatus: async () => ({
+        enabled: false,
+        phase: "idle",
+        currentVersion: "0.0.0",
+        availableVersion: null,
+        percent: null,
+        error: null,
+        checkedAt: null,
+      }),
+      updatesCheck: async () => ({
+        enabled: false,
+        phase: "idle",
+        currentVersion: "0.0.0",
+        availableVersion: null,
+        percent: null,
+        error: null,
+        checkedAt: null,
+      }),
+      updatesInstall: async () => false,
+      onUpdatesState: () => () => seen.push("off-updates"),
     };
     g.window = { poc2Desktop: bridge };
 

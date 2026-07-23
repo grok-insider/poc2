@@ -38,3 +38,12 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 npmRebuild: false
+# GitHub Releases feed for electron-updater (baked into app-update.yml at
+# package time). CI still uses `--publish never` so release-plz owns the
+# Release; artifacts + latest*.yml are uploaded with `gh release upload`.
+# Builds are intentionally unsigned (OSS — no paid code-signing certs).
+publish:
+  provider: github
+  owner: grok-insider
+  repo: poc2
+  releaseType: release

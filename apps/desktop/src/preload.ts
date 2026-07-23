@@ -39,6 +39,11 @@ const CHANNELS = {
   pricesStatus: "poc2:prices-status",
   pricesRefresh: "poc2:prices-refresh",
   pricesSetLeague: "poc2:prices-set-league",
+  // --- desktop auto-updater ---
+  updatesStatus: "poc2:updates-status",
+  updatesCheck: "poc2:updates-check",
+  updatesInstall: "poc2:updates-install",
+  updatesState: "poc2:updates-state",
 } as const;
 
 interface CaptureRect {
@@ -171,5 +176,21 @@ contextBridge.exposeInMainWorld("poc2Desktop", {
   /** Point the cache at a league (refreshes now; keeps the hourly cadence). */
   pricesSetLeague(league: string): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.pricesSetLeague, league);
+  },
+
+  // --- desktop auto-updater ---
+  updatesStatus(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.updatesStatus);
+  },
+  updatesCheck(): Promise<unknown> {
+    return ipcRenderer.invoke(CHANNELS.updatesCheck);
+  },
+  updatesInstall(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.updatesInstall);
+  },
+  onUpdatesState(cb: (state: unknown) => void): () => void {
+    const listener = (_e: unknown, state: unknown) => cb(state);
+    ipcRenderer.on(CHANNELS.updatesState, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.updatesState, listener);
   },
 });

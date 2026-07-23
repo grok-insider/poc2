@@ -26,6 +26,11 @@ import { prepareHyprOverlayPriceIcons } from "./capture/hyprOverlayIcons";
 import { addMarketHistory, listMarketHistory } from "./marketHistory";
 import { getScanDiagnostics, setScanDiagnostics } from "./scanDiagnostics";
 import type { NativeOcrController } from "./ocr/windowsNative";
+import {
+  checkForUpdates,
+  getUpdateStatus,
+  installUpdate,
+} from "./updater";
 
 // Re-export so callers/tests have one import site (impl is electron-free).
 export { isAllowlistedUrl } from "./fetchAllowlist";
@@ -67,6 +72,11 @@ export const CHANNELS = {
   pricesStatus: "poc2:prices-status", // renderer → main (invoke)
   pricesRefresh: "poc2:prices-refresh", // renderer → main (invoke)
   pricesSetLeague: "poc2:prices-set-league", // renderer → main (invoke)
+  // --- desktop auto-updater (GitHub Releases / electron-updater) ---
+  updatesStatus: "poc2:updates-status", // renderer → main (invoke)
+  updatesCheck: "poc2:updates-check", // renderer → main (invoke)
+  updatesInstall: "poc2:updates-install", // renderer → main (invoke)
+  updatesState: "poc2:updates-state", // main → renderer (push)
 } as const;
 
 /**
@@ -375,4 +385,9 @@ export function registerIpc(
     if (typeof league !== "string" || !league) throw new Error("pricesSetLeague: league required");
     return setPriceLeague(league);
   });
+
+  // --- desktop auto-updater ---
+  ipcMain.handle(CHANNELS.updatesStatus, () => getUpdateStatus());
+  ipcMain.handle(CHANNELS.updatesCheck, () => checkForUpdates());
+  ipcMain.handle(CHANNELS.updatesInstall, () => installUpdate());
 }
