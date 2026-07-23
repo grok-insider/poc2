@@ -1,13 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, RotateCcw, Trash2, Database, Cpu, Puzzle } from "lucide-react";
+import {
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+  Database,
+  Cpu,
+  Puzzle,
+  Download,
+} from "lucide-react";
 import { useCraft } from "@/lib/store";
 import { addStoredPlugin, removeStoredPlugin } from "@/lib/plugins/store";
 import {
   getDesktopBridge,
   type CaptureRect,
   type DesktopCapabilities,
+  type DesktopUpdateStatus,
   type PriceStatus as CacheStatus,
   type ScanDiagnostics,
 } from "@/lib/desktop";
@@ -123,6 +132,8 @@ export function SettingsPanel() {
   const [captureRegion, setCaptureRegion] = useState<CaptureRect | null>(null);
   const [scanDiagnostics, setScanDiagnostics] = useState<ScanDiagnostics | null>(null);
   const [watcherEnabled, setWatcherEnabled] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<DesktopUpdateStatus | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
 
   const loadCacheStatus = useCallback(async () => {
     const bridge = getDesktopBridge();
@@ -165,6 +176,25 @@ export function SettingsPanel() {
     };
   }, [league, loadOverlayDiagnostics]);
 
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+    if (!bridge?.updatesStatus) return;
+    let alive = true;
+    bridge
+      .updatesStatus()
+      .then((s) => {
+        if (alive) setUpdateStatus(s);
+      })
+      .catch(() => {});
+    const off = bridge.onUpdatesState?.((s) => {
+      if (alive) setUpdateStatus(s);
+    });
+    return () => {
+      alive = false;
+      off?.();
+    };
+  }, []);
+
   async function refreshCache() {
     const bridge = getDesktopBridge();
     if (!bridge?.pricesRefresh) return;
@@ -176,6 +206,65 @@ export function SettingsPanel() {
     } finally {
       await loadCacheStatus();
       setCacheBusy(false);
+    }
+  }
+
+  function updatePhaseLabel(s: DesktopUpdateStatus): string {
+    if (!s.enabled) return "Dev build — updates disabled";
+    switch (s.phase) {
+      case "idle":
+        return "No check yet";
+      case "checking":
+        return "Checking…";
+      case "available":
+        return s.availableVersion
+          ? `v${s.availableVersion} available`
+          : "Update available";
+      case "not-available":
+        return "Up to date";
+      case "downloading":
+        return s.percent != null ? `Downloading ${s.percent}%` : "Downloading…";
+      case "downloaded":
+        return s.availableVersion
+          ? `v${s.availableVersion} ready`
+          : "Update ready";
+      case "error":
+        return s.error ? `Error: ${s.error}` : "Update error";
+      default:
+        return s.phase;
+    }
+  }
+
+  async function checkForDesktopUpdate() {
+    const bridge = getDesktopBridge();
+    if (!bridge?.updatesCheck) return;
+    setUpdateBusy(true);
+    try {
+      setUpdateStatus(await bridge.updatesCheck());
+    } catch {
+      /* leave previous status */
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function installDesktopUpdate() {
+    const bridge = getDesktopBridge();
+    if (!bridge?.updatesInstall) return;
+    if (
+      !window.confirm(
+        "Install the downloaded update and restart Path of Crafting 2?",
+      )
+    ) {
+      return;
+    }
+    setUpdateBusy(true);
+    try {
+      await bridge.updatesInstall();
+    } catch {
+      /* status push surfaces error */
+    } finally {
+      setUpdateBusy(false);
     }
   }
 
@@ -569,6 +658,81 @@ export function SettingsPanel() {
               </div>
             ))}
           </section>
+
+          {/* ---- DESKTOP UPDATES (packaged Electron only) ---- */}
+          {updateStatus && (
+            <section className={`card ${styles.section}`}>
+              <div className={styles.sectionHead}>
+                <span className="eyebrow">Desktop updates</span>
+                <span
+                  className={`chip ${
+                    updateStatus.phase === "error"
+                      ? "danger"
+                      : updateStatus.phase === "downloaded" ||
+                          updateStatus.phase === "available"
+                        ? "success"
+                        : "faint"
+                  }`}
+                >
+                  {updatePhaseLabel(updateStatus)}
+                </span>
+              </div>
+              <div className={styles.dataGrid}>
+                <span className="faint">Installed</span>
+                <span className="num">v{updateStatus.currentVersion}</span>
+                {updateStatus.availableVersion && (
+                  <>
+                    <span className="faint">Available</span>
+                    <span className="num">v{updateStatus.availableVersion}</span>
+                  </>
+                )}
+                {updateStatus.checkedAt && (
+                  <>
+                    <span className="faint">Last check</span>
+                    <span className="num">
+                      {new Date(updateStatus.checkedAt).toLocaleString()}
+                    </span>
+                  </>
+                )}
+              </div>
+              <div className={styles.resetRow}>
+                <button
+                  className="btn"
+                  disabled={
+                    updateBusy ||
+                    !updateStatus.enabled ||
+                    updateStatus.phase === "checking" ||
+                    updateStatus.phase === "downloading"
+                  }
+                  onClick={() => void checkForDesktopUpdate()}
+                  title="Check GitHub Releases for a newer desktop build"
+                >
+                  <RefreshCw size={13} className="faint" />
+                  Check for updates
+                </button>
+                <button
+                  className="btn"
+                  disabled={
+                    updateBusy ||
+                    !updateStatus.enabled ||
+                    updateStatus.phase !== "downloaded"
+                  }
+                  onClick={() => void installDesktopUpdate()}
+                  title="Install the downloaded update and restart"
+                >
+                  <Download size={13} className="faint" />
+                  Install &amp; restart
+                </button>
+              </div>
+              <p className={`${styles.note} faint`}>
+                Updates come from public GitHub Releases (AppImage on Linux, NSIS
+                on Windows). Builds are unsigned open-source artifacts — Windows
+                may show SmartScreen (“Unknown publisher”); use More info → Run
+                anyway. Auto-update applies to installs from those packages, not
+                to <span className="num">.deb</span> or unpackaged dev runs.
+              </p>
+            </section>
+          )}
 
           {/* ---- NOTES ---- */}
           <section className={`card ${styles.section}`}>

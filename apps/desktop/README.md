@@ -66,6 +66,27 @@ What it adds over the browser app:
 Electron binary resolution (`scripts/run-electron.mjs`): `$POC2_ELECTRON` →
 npm-downloaded binary → `electron` on PATH (the Nix devshell provides it).
 
+## Auto-update (packaged installs only)
+
+Packaged builds use [`electron-updater`](https://www.electron.build/auto-update)
+against public **GitHub Releases** (`grok-insider/poc2`). Feed metadata is
+baked from `electron-builder.yml` `publish` into `app-update.yml` at package
+time; CI still uses `--publish never` and uploads installers + `latest*.yml`
+onto the release-plz-created Release. If electron-builder omits the feed
+files, `scripts/write-update-yml.mjs` synthesizes them before upload.
+
+| Install method | Auto-update |
+|---|---|
+| Linux **AppImage** | Yes |
+| Linux **`.deb`** | No (re-download from Releases) |
+| Windows **NSIS** | Yes |
+| `bun run desktop:dev` / unpackaged | No (updater no-op) |
+
+Behaviour: check a few seconds after launch (and via Settings → Desktop
+updates), download in the background, then **Settings / tray “Install &
+restart…”** after user confirm — never silent install. Windows SmartScreen
+warnings are expected for unsigned builds.
+
 ## Hotkeys
 
 | Action | Default | Env override | Second-instance flag |

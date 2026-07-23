@@ -270,6 +270,27 @@ export interface NativeOcrStatus {
   lastError: string | null;
 }
 
+/** Desktop auto-updater snapshot (GitHub Releases / electron-updater). */
+export type DesktopUpdatePhase =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+export interface DesktopUpdateStatus {
+  /** False in unpackaged/dev shells — updater is a no-op. */
+  enabled: boolean;
+  phase: DesktopUpdatePhase;
+  currentVersion: string;
+  availableVersion: string | null;
+  percent: number | null;
+  error: string | null;
+  checkedAt: string | null;
+}
+
 export interface Poc2DesktopBridge {
   /** Subscribe to item text captured by the shell. Returns an unsubscribe. */
   onItemText(cb: (text: string) => void): () => void;
@@ -350,6 +371,17 @@ export interface Poc2DesktopBridge {
   pricesRefresh(): Promise<boolean>;
   /** Point the cache at a league (refreshes now; keeps the hourly cadence). */
   pricesSetLeague(league: string): Promise<boolean>;
+
+  // --- desktop auto-updater (GitHub Releases; packaged installs only) ---
+
+  /** Current updater snapshot. */
+  updatesStatus(): Promise<DesktopUpdateStatus>;
+  /** Manual check against GitHub Releases. */
+  updatesCheck(): Promise<DesktopUpdateStatus>;
+  /** Install a downloaded update and restart. True if install was started. */
+  updatesInstall(): Promise<boolean>;
+  /** Subscribe to updater status pushes. Returns an unsubscribe. */
+  onUpdatesState(cb: (state: DesktopUpdateStatus) => void): () => void;
 }
 
 declare global {

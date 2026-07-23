@@ -283,6 +283,32 @@ jobs:
           bun run build
           bun x electron-builder ${{ matrix.builder }} --publish never
 
+      # electron-builder should emit latest*.yml when `publish` is configured;
+      # if it still skips under --publish never, synthesize the feed.
+      - name: Ensure electron-updater feed files
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          out=apps/desktop/dist-packages
+          version="${VERSION}"
+          if [ "${{ matrix.name }}" = "windows" ]; then
+            if [ ! -f "$out/latest.yml" ]; then
+              echo "latest.yml missing — generating fallback"
+              node apps/desktop/scripts/write-update-yml.mjs \
+                --dir "$out" --version "$version" --platform windows
+            fi
+            test -f "$out/latest.yml" || { echo "::error::still no latest.yml"; ls -la "$out"; exit 1; }
+          else
+            if [ ! -f "$out/latest-linux.yml" ]; then
+              echo "latest-linux.yml missing — generating fallback"
+              node apps/desktop/scripts/write-update-yml.mjs \
+                --dir "$out" --version "$version" --platform linux
+            fi
+            test -f "$out/latest-linux.yml" || { echo "::error::still no latest-linux.yml"; ls -la "$out"; exit 1; }
+          fi
+
       # `shell: bash` runs in Git Bash on the Windows runner too, keeping one
       # portable upload step across both targets.
       # electron-updater needs latest.yml (Windows) / latest-linux.yml (Linux)
@@ -315,14 +341,14 @@ jobs:
             ls -la "$out" || true
             exit 1
           fi
-          # Installers are required; updater feed files are best-effort
-          # (electron-builder 26 + --publish never often omits latest*.yml).
           if [ "$PLATFORM" = "windows" ] && [ ! -f "$out/latest.yml" ]; then
-            echo "::warning::missing latest.yml — uploading installers only"
+            echo "::error::missing latest.yml (electron-updater feed)"
             ls -la "$out" || true
+            exit 1
           fi
           if [ "$PLATFORM" = "linux" ] && [ ! -f "$out/latest-linux.yml" ]; then
-            echo "::warning::missing latest-linux.yml — uploading installers only"
+            echo "::error::missing latest-linux.yml (electron-updater feed)"
             ls -la "$out" || true
+            exit 1
           fi
           gh release upload "$TAG" "${existing[@]}" --clobber
