@@ -31,7 +31,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "2.0.1"
+version = "2.0.2"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
@@ -89,19 +89,19 @@ proptest = "1.5"
 insta = { version = "1.40", features = ["yaml", "json"] }
 
 # Internal crates
-poc2-engine      = { path = "crates/engine", version = "2.0.1" }
-poc2-data        = { path = "crates/data", version = "2.0.1" }
-poc2-strategies  = { path = "crates/strategies", version = "2.0.1" }
-poc2-rules       = { path = "crates/rules", version = "2.0.1" }
-poc2-probability = { path = "crates/probability", version = "2.0.1" }
+poc2-engine      = { path = "crates/engine", version = "2.0.2" }
+poc2-data        = { path = "crates/data", version = "2.0.2" }
+poc2-strategies  = { path = "crates/strategies", version = "2.0.2" }
+poc2-rules       = { path = "crates/rules", version = "2.0.2" }
+poc2-probability = { path = "crates/probability", version = "2.0.2" }
 # `net` (reqwest/tokio price pollers) is opt-in: off by default so the advisor
 # and the WASM build stay wasm-buildable. Net users (desktop) add features=["net"].
-poc2-market      = { path = "crates/market", version = "2.0.1", default-features = false }
-poc2-advisor     = { path = "crates/advisor", version = "2.0.1" }
-poc2-parser      = { path = "crates/parser", version = "2.0.1" }
-poc2-pipeline    = { path = "pipeline", version = "2.0.1" }
-poc2-plugin-host = { path = "crates/plugin-host", version = "2.0.1" }
-poc2-plugin-sdk  = { path = "crates/plugin-sdk",  version = "2.0.0" }
+poc2-market      = { path = "crates/market", version = "2.0.2", default-features = false }
+poc2-advisor     = { path = "crates/advisor", version = "2.0.2" }
+poc2-parser      = { path = "crates/parser", version = "2.0.2" }
+poc2-pipeline    = { path = "pipeline", version = "2.0.2" }
+poc2-plugin-host = { path = "crates/plugin-host", version = "2.0.2" }
+poc2-plugin-sdk  = { path = "crates/plugin-sdk",  version = "2.0.2" }
 
 # Wasm runtime (Phase F)
 wasmtime = { version = "26", default-features = false, features = ["cranelift", "runtime"] }
