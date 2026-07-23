@@ -238,9 +238,17 @@ Ordered by expected value; none are started unless noted.
 
 ## Deferred / out of scope (unchanged decisions)
 
-- Cachix binary cache; Hardcore/SSF support; macOS support; self-hosted
-  data pipeline; empirical weight derivation from trade samples; MCTS
-  advisor upgrade; real Wayland layer-shell overlay (ADR-0009); GGG
-  `/trade2` OAuth; plugin component-model migration + marketplace
-  (ADR-0008 future work); beam-search memoization (bench margins are
-  huge); Genesis birth simulation (explicit scope decision).
+- Hardcore/SSF support; macOS support; self-hosted data pipeline;
+  empirical weight derivation from trade samples; MCTS advisor upgrade;
+  real Wayland layer-shell overlay (ADR-0009); GGG `/trade2` OAuth;
+  plugin component-model migration + marketplace (ADR-0008 future work);
+  beam-search memoization (bench margins are huge); Genesis birth
+  simulation (explicit scope decision).
+
+### Cachix binary cache (wiring shipped; enable with ops)
+
+CI uses `cachix/cachix-action` for the public **`poc2`** cache (pull always,
+push on non-PR when `CACHIX_AUTH_TOKEN` is set). Maintainers still need to
+create the cache on cachix.org and commit the public key into `flake.nix`
+`nixConfig` (see `CONTRIBUTING.md`). Until then, local/CI still rely on
+`magic-nix-cache` + cold builds.
